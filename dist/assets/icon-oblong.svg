@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <path d="
+    M2,16
+    a10,10 0 0 1 10,-10
+    h8
+    a10,10 0 0 1 0,20
+    h-8
+    a10,10 0 0 1 -10,-10
+    z" fill="none" stroke="black" stroke-width="2"/>
+  <!-- Point au centre du demi-cercle gauche -->
+  <circle cx="11" cy="16" r="2" fill="red"/>
+  <!-- Point au centre du demi-cercle droit -->
+  <circle cx="22" cy="16" r="2" fill="red"/>
+</svg>
+
