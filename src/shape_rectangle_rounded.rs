@@ -1,9 +1,9 @@
 // A macro to provide `println!(..)`-style syntax for `console.log` logging.
-macro_rules! log {
-    ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
-    }
-}
+// macro_rules! log {
+//     ( $( $t:tt )* ) => {
+//         web_sys::console::log_1(&format!( $( $t )* ).into());
+//     }
+// }
 
 use crate::{
     closed_shapes::{COperation, CShape, CShapes, ClosedShapeId, Handle, HandleKind},
@@ -214,10 +214,10 @@ impl CShapes for CShapeRectRounded {
         let h6 = self.handles.5.get_saved_pos();
         let last_h1 = self.handles.0.get_last_pos();
         let last_h2 = self.handles.1.get_last_pos();
-        let last_h3 = self.handles.2.get_last_pos();
-        let last_h4 = self.handles.3.get_last_pos();
-        let last_h5 = self.handles.4.get_last_pos();
-        let last_h6 = self.handles.5.get_last_pos();
+        // let last_h3 = self.handles.2.get_last_pos();
+        // let last_h4 = self.handles.3.get_last_pos();
+        // let last_h5 = self.handles.4.get_last_pos();
+        // let last_h6 = self.handles.5.get_last_pos();
         let (tl, tr, bl, br) = (
             self.radii.top_left,
             self.radii.top_right,

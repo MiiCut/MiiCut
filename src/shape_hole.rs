@@ -97,7 +97,7 @@ impl CShapes for CShapeHole {
         ()
     }
     fn is_near_cursor(&self, pos: Vec2, precision: f64) -> bool {
-        for seg in self.get_shape_path().segments() {
+        for seg in self.to_path(CShapeHole::TOLERANCE).segments() {
             let nearest = seg.nearest(pos.to_point(), precision);
             if nearest.distance_sq < precision {
                 return true;

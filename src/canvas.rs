@@ -36,8 +36,10 @@ pub struct PlayingArea {
     pub window: Window,
     pub document: Document,
     pub body: HtmlElement,
-    pub canvas: HtmlCanvasElement,
-    pub ctx: CanvasRenderingContext2d,
+    pub back_canvas: HtmlCanvasElement,
+    pub back_canvas_ctx: CanvasRenderingContext2d,
+    pub main_canvas: HtmlCanvasElement,
+    pub main_canvas_ctx: CanvasRenderingContext2d,
 
     // DOM
     cm_shape: HtmlElement,
@@ -65,8 +67,8 @@ pub struct PlayingArea {
     mouse: Mouse,
 
     working_area: Vec2,
-    pub global_scale: f64,
-    pub canvas_offset: Vec2,
+    global_scale: f64,
+    main_canvas_offset: Vec2,
     canvas_offset_ms_dwn: Vec2,
     working_area_visual_grid: f64,
     working_area_snap_grid: f64,
@@ -78,15 +80,22 @@ pub fn create_playing_area(window: Window) -> Result<(), JsValue> {
     log!("Creating playing area");
     let document = window.document().expect("should have a document on window");
     let body = document.body().expect("should have a body on document");
-    let canvas = document
-        .get_element_by_id("myCanvas")
-        .expect("should have myCanvas on the page")
+    let back_canvas = document
+        .get_element_by_id("backCanvas")
+        .expect("should have backCanvas on the page")
         .dyn_into::<HtmlCanvasElement>()?;
-    let ctx = canvas
+    let back_canvas_ctx = back_canvas
         .get_context("2d")?
         .unwrap()
         .dyn_into::<CanvasRenderingContext2d>()?;
-    // ctx.scale(1., -1.)?;
+    let main_canvas = document
+        .get_element_by_id("mainCanvas")
+        .expect("should have myCanvas on the page")
+        .dyn_into::<HtmlCanvasElement>()?;
+    let main_canvas_ctx = main_canvas
+        .get_context("2d")?
+        .unwrap()
+        .dyn_into::<CanvasRenderingContext2d>()?;
     let cm_shape = document
         .get_element_by_id("cm-shape")
         .expect("should have cm-shape id on the page")
@@ -136,12 +145,7 @@ pub fn create_playing_area(window: Window) -> Result<(), JsValue> {
     user_icons.insert(Rectangle.as_str(), None);
     user_icons.insert(RectangleRounded.as_str(), None);
     user_icons.insert(Circle.as_str(), None);
-    user_icons.insert(QuarterCircle.as_str(), None);
     user_icons.insert(Oblong.as_str(), None);
-    user_icons.insert(QuarterEllipse.as_str(), None);
-    user_icons.insert(Line.as_str(), None);
-    user_icons.insert(QuadBezier.as_str(), None);
-    user_icons.insert(CubicBezier.as_str(), None);
 
     let document_element = document
         .document_element()
@@ -152,7 +156,10 @@ pub fn create_playing_area(window: Window) -> Result<(), JsValue> {
         .unwrap();
 
     // Calculation starting parameters
-    let (canvas_width, canvas_height) = { (canvas.width() as f64, canvas.height() as f64) };
+    let (main_canvas_width, main_canvas_height) =
+        { (main_canvas.width() as f64, main_canvas.height() as f64) };
+    let (back_canvas_width, back_canvas_height) =
+        { (back_canvas.width() as f64, back_canvas.height() as f64) };
     // let head_position = WXY { wx: 10., wy: 10. };
     let working_area = Vec2::new(500., 500.);
     settings_width_input.set_value(&working_area.x.to_string());
@@ -161,9 +168,9 @@ pub fn create_playing_area(window: Window) -> Result<(), JsValue> {
     let working_area_visual_grid = 10.;
     let working_area_snap_grid = 1.;
 
-    let canvas_offset = Vec2 {
-        x: (canvas_width - working_area.x) / 2.,
-        y: (canvas_height - working_area.y) / 2.,
+    let main_canvas_offset = Vec2 {
+        x: (main_canvas_width - working_area.x) / 2.,
+        y: (main_canvas_height - working_area.y) / 2.,
     };
     let global_scale = 1.0;
 
@@ -172,8 +179,10 @@ pub fn create_playing_area(window: Window) -> Result<(), JsValue> {
         window,
         document,
         body,
-        canvas,
-        ctx,
+        back_canvas,
+        back_canvas_ctx,
+        main_canvas,
+        main_canvas_ctx,
         //
         cm_shape,
         user_icons,
@@ -203,7 +212,7 @@ pub fn create_playing_area(window: Window) -> Result<(), JsValue> {
 
         // Zoom
         global_scale,
-        canvas_offset,
+        main_canvas_offset,
         canvas_offset_ms_dwn: Vec2::default(),
         working_area_visual_grid,
         working_area_snap_grid,
@@ -337,7 +346,7 @@ fn init_context_menu(pa: RefPA) -> Result<(), JsValue> {
     Ok(())
 }
 fn init_canvas(pa: RefPA) -> Result<(), JsValue> {
-    let mut element = &pa.borrow_mut().canvas;
+    let mut element = &pa.borrow_mut().main_canvas;
     set_callback(
         pa.clone(),
         "mousedown".into(),
@@ -496,271 +505,7 @@ fn set_callback(
 
     Ok(())
 }
-fn convert_svg_to_shapes(_pa: RefPA, _svg_data: String) {
-    // let mut pam = pa.borrow_mut();
-    // let grp_id = pam.data_pools.create_group_id();
-    // for event in svg::parser::Parser::new(&svg_data).into_iter() {
-    //     match event {
-    //         svg::parser::Event::Tag(svg::node::element::tag::Path, _, attributes) => {
-    //             let data = attributes.get("d").unwrap();
-    //             let data = svg::node::element::path::Data::parse(data).unwrap();
-    //             let mut current_position = Point::default();
-    //             let mut start_position = Point::default();
-    //             let mut last_quad_control_point: Option<Point> = None;
-    //             let mut last_cubic_control_point: Option<Point> = None;
-    //             for command in data.iter() {
-    //                 let command_clone = command.clone();
-    //                 use svg::node::element::path::*;
-    //                 match command_clone {
-    //                     Command::Move(postype, params) => {
-    //                         if params.len() == 2 {
-    //                             current_position = match postype {
-    //                                 Position::Absolute => Point {
-    //                                     x: params[0] as f64,
-    //                                     y: params[1] as f64,
-    //                                 },
-    //                                 Position::Relative => Point {
-    //                                     x: params[0] as f64 + current_position.x,
-    //                                     y: params[1] as f64 + current_position.y,
-    //                                 },
-    //                             };
-    //                             start_position = current_position;
-    //                             last_quad_control_point = None;
-    //                             last_cubic_control_point = None;
-    //                         }
-    //                     }
-    //                     _ => (), // Command::Line(postype, params) => {
-    //                              //     if params.len() % 2 == 0 {
-    //                              //         let nb_curves = params.len() / 2;
-    //                              //         for curve in 0..nb_curves {
-    //                              //             let end_point = Point {
-    //                              //                 wx: params[2 * curve] as f64,
-    //                              //                 wy: params[2 * curve + 1] as f64,
-    //                              //             };
-    //                              //             let new_position = match postype {
-    //                              //                 Position::Absolute => end_point,
-    //                              //                 Position::Relative => current_position + end_point,
-    //                              //             };
-    //                              //             if let Some(shape) = Line::new(&current_position, &new_position)
-    //                              //             {
-    //                              //                 let sh_id = pam.data_pools.insert_shape(Box::new(shape));
-    //                              //                 pam.data_pools.set_shape_selected(&sh_id, true);
-    //                              //                 pam.data_pools.set_shape_group(&grp_id, &sh_id);
-    //                              //             }
-    //                              //             current_position = new_position;
-    //                              //             last_quad_control_point = None;
-    //                              //             last_cubic_control_point = None;
-    //                              //         }
-    //                              //     }
-    //                              // }
-    //                              // Command::HorizontalLine(postype, params) => {
-    //                              //     for curve in 0..params.len() {
-    //                              //         let end_point = Point {
-    //                              //             wx: params[curve] as f64,
-    //                              //             wy: current_position.y,
-    //                              //         };
-    //                              //         let new_position = match postype {
-    //                              //             Position::Absolute => end_point,
-    //                              //             Position::Relative => current_position + end_point,
-    //                              //         };
-    //                              //         if let Some(shape) = Line::new(&current_position, &new_position) {
-    //                              //             let sh_id = pam.data_pools.insert_shape(Box::new(shape));
-    //                              //             pam.data_pools.set_shape_selected(&sh_id, true);
-    //                              //             pam.data_pools.set_shape_group(&grp_id, &sh_id);
-    //                              //         }
-    //                              //         current_position = new_position;
-    //                              //         last_quad_control_point = None;
-    //                              //         last_cubic_control_point = None;
-    //                              //     }
-    //                              // }
-    //                              // Command::VerticalLine(postype, params) => {
-    //                              //     for curve in 0..params.len() {
-    //                              //         let end_point = Point {
-    //                              //             wx: current_position.x,
-    //                              //             wy: params[curve] as f64,
-    //                              //         };
-    //                              //         let new_position = match postype {
-    //                              //             Position::Absolute => end_point,
-    //                              //             Position::Relative => current_position + end_point,
-    //                              //         };
-    //                              //         if let Some(shape) = Line::new(&current_position, &new_position) {
-    //                              //             let sh_id = pam.data_pools.insert_shape(Box::new(shape));
-    //                              //             pam.data_pools.set_shape_selected(&sh_id, true);
-    //                              //             pam.data_pools.set_shape_group(&grp_id, &sh_id);
-    //                              //         }
-    //                              //         current_position = new_position;
-    //                              //         last_quad_control_point = None;
-    //                              //         last_cubic_control_point = None;
-    //                              //     }
-    //                              // }
-    //                              // Command::QuadraticCurve(postype, params) => {
-    //                              //     if params.len() % 4 == 0 {
-    //                              //         let nb_curves = params.len() / 4;
-    //                              //         for curve in 0..nb_curves {
-    //                              //             let mut control_point = Point {
-    //                              //                 wx: params[4 * curve] as f64,
-    //                              //                 wy: params[4 * curve + 1] as f64,
-    //                              //             };
-    //                              //             let end_point = Point {
-    //                              //                 wx: params[4 * curve + 2] as f64,
-    //                              //                 wy: params[4 * curve + 3] as f64,
-    //                              //             };
-    //                              //             let new_position = match postype {
-    //                              //                 Position::Absolute => end_point,
-    //                              //                 Position::Relative => {
-    //                              //                     control_point += current_position;
-    //                              //                     current_position + end_point
-    //                              //                 }
-    //                              //             };
-    //                              //             if let Some(shape) = QuadBezier::new(
-    //                              //                 &current_position,
-    //                              //                 &control_point,
-    //                              //                 &new_position,
-    //                              //             ) {
-    //                              //                 let sh_id = pam.data_pools.insert_shape(Box::new(shape));
-    //                              //                 pam.data_pools.set_shape_selected(&sh_id, true);
-    //                              //                 pam.data_pools.set_shape_group(&grp_id, &sh_id);
-    //                              //             }
-    //                              //             current_position = new_position;
-    //                              //             last_quad_control_point = Some(control_point);
-    //                              //             last_cubic_control_point = None;
-    //                              //         }
-    //                              //     }
-    //                              // }
-    //                              // Command::SmoothQuadraticCurve(postype, params) => {
-    //                              //     if params.len() % 2 == 0 {
-    //                              //         let nb_curves = params.len() / 2;
-    //                              //         for curve in 0..nb_curves {
-    //                              //             let control_point =
-    //                              //                 if let Some(last_ctrl_pt) = last_quad_control_point {
-    //                              //                     current_position + (current_position - last_ctrl_pt)
-    //                              //                 } else {
-    //                              //                     current_position
-    //                              //                 };
-    //                              //             let end_point = Point {
-    //                              //                 wx: params[2 * curve] as f64,
-    //                              //                 wy: params[2 * curve + 1] as f64,
-    //                              //             };
-    //                              //             let new_position = match postype {
-    //                              //                 Position::Absolute => end_point,
-    //                              //                 Position::Relative => current_position + end_point,
-    //                              //             };
-    //                              //             if let Some(shape) = QuadBezier::new(
-    //                              //                 &current_position,
-    //                              //                 &control_point,
-    //                              //                 &new_position,
-    //                              //             ) {
-    //                              //                 let sh_id = pam.data_pools.insert_shape(Box::new(shape));
-    //                              //                 pam.data_pools.set_shape_selected(&sh_id, true);
-    //                              //                 pam.data_pools.set_shape_group(&grp_id, &sh_id);
-    //                              //             }
-    //                              //             current_position = new_position;
-    //                              //             last_quad_control_point = Some(control_point);
-    //                              //             last_cubic_control_point = None;
-    //                              //         }
-    //                              //     }
-    //                              // }
-    //                              // Command::CubicCurve(postype, params) => {
-    //                              //     if params.len() % 6 == 0 {
-    //                              //         let nb_curves = params.len() / 6;
-    //                              //         for curve in 0..nb_curves {
-    //                              //             let mut control_point1 = Point {
-    //                              //                 wx: params[6 * curve] as f64,
-    //                              //                 wy: params[6 * curve + 1] as f64,
-    //                              //             };
-    //                              //             let mut control_point2 = Point {
-    //                              //                 wx: params[6 * curve + 2] as f64,
-    //                              //                 wy: params[6 * curve + 3] as f64,
-    //                              //             };
-    //                              //             let end_point = Point {
-    //                              //                 wx: params[6 * curve + 4] as f64,
-    //                              //                 wy: params[6 * curve + 5] as f64,
-    //                              //             };
-    //                              //             let new_position = match postype {
-    //                              //                 Position::Absolute => end_point,
-    //                              //                 Position::Relative => {
-    //                              //                     control_point1 += current_position;
-    //                              //                     control_point2 += current_position;
-    //                              //                     current_position + end_point
-    //                              //                 }
-    //                              //             };
-    //                              //             if let Some(shape) = CubicBezier::new(
-    //                              //                 &current_position,
-    //                              //                 &control_point1,
-    //                              //                 &control_point2,
-    //                              //                 &new_position,
-    //                              //             ) {
-    //                              //                 let sh_id = pam.data_pools.insert_shape(Box::new(shape));
-    //                              //                 pam.data_pools.set_shape_selected(&sh_id, true);
-    //                              //                 pam.data_pools.set_shape_selected(&sh_id, true);
-    //                              //                 pam.data_pools.set_shape_group(&grp_id, &sh_id);
-    //                              //             }
-    //                              //             current_position = new_position;
-    //                              //             last_quad_control_point = None;
-    //                              //             last_cubic_control_point = Some(control_point2);
-    //                              //         }
-    //                              //     }
-    //                              // }
-    //                              // Command::SmoothCubicCurve(postype, params) => {
-    //                              //     if params.len() % 4 == 0 {
-    //                              //         let nb_curves = params.len() / 4;
-    //                              //         for curve in 0..nb_curves {
-    //                              //             let control_point1 =
-    //                              //                 if let Some(last_ctrl_pt) = last_cubic_control_point {
-    //                              //                     current_position + (current_position - last_ctrl_pt)
-    //                              //                 } else {
-    //                              //                     current_position
-    //                              //                 };
-    //                              //             let mut control_point2 = Point {
-    //                              //                 wx: params[4 * curve] as f64,
-    //                              //                 wy: params[4 * curve + 1] as f64,
-    //                              //             };
-    //                              //             let end_point = Point {
-    //                              //                 wx: params[4 * curve + 2] as f64,
-    //                              //                 wy: params[4 * curve + 3] as f64,
-    //                              //             };
-    //                              //             let new_position = match postype {
-    //                              //                 Position::Absolute => end_point,
-    //                              //                 Position::Relative => {
-    //                              //                     control_point2 += current_position;
-    //                              //                     current_position + end_point
-    //                              //                 }
-    //                              //             };
-    //                              //             if let Some(shape) = CubicBezier::new(
-    //                              //                 &current_position,
-    //                              //                 &control_point1,
-    //                              //                 &control_point2,
-    //                              //                 &new_position,
-    //                              //             ) {
-    //                              //                 let sh_id = pam.data_pools.insert_shape(Box::new(shape));
-    //                              //                 pam.data_pools.set_shape_selected(&sh_id, true);
-    //                              //                 pam.data_pools.set_shape_selected(&sh_id, true);
-    //                              //                 pam.data_pools.set_shape_group(&grp_id, &sh_id);
-    //                              //             }
-    //                              //             current_position = new_position;
-    //                              //             last_quad_control_point = None;
-    //                              //             last_cubic_control_point = Some(control_point2);
-    //                              //         }
-    //                              //     }
-    //                              // }
-    //                              // Command::EllipticalArc(_postype, _params) => {}
-    //                              // Command::Close => {
-    //                              //     if let Some(shape) = Line::new(&current_position, &start_position) {
-    //                              //         let sh_id = pam.data_pools.insert_shape(Box::new(shape));
-    //                              //         pam.data_pools.set_shape_selected(&sh_id, true);
-    //                              //         pam.data_pools.set_shape_group(&grp_id, &sh_id);
-    //                              //     }
-    //                              //     current_position = start_position;
-    //                              //     last_quad_control_point = None;
-    //                              //     last_cubic_control_point = None;
-    //                              // }
-    //                 }
-    //             }
-    //         }
-    //         _ => {}
-    //     }
-    // }
-}
+fn convert_svg_to_shapes(_pa: RefPA, _svg_data: String) {}
 
 fn update(pam: &mut RefMut<'_, PlayingArea>) -> Result<(), MyError> {
     let grab_precision = pam.grab_distance / pam.global_scale;
@@ -798,8 +543,8 @@ fn update(pam: &mut RefMut<'_, PlayingArea>) -> Result<(), MyError> {
                 pam.csp.highlight_object(cursor_pos, grab_precision);
                 Ok(())
             }
-            MouseState::RightDown(_) => Ok(pam.canvas_offset_ms_dwn = pam.canvas_offset),
-            MouseState::RightDownMove(_, _) => Ok(pam.canvas_offset =
+            MouseState::RightDown(_) => Ok(pam.canvas_offset_ms_dwn = pam.main_canvas_offset),
+            MouseState::RightDownMove(_, _) => Ok(pam.main_canvas_offset =
                 (pam.mouse.get_canvas_mouse_pos() - pam.mouse.get_canvas_mouse_pos_ms_dwn())
                     + pam.canvas_offset_ms_dwn),
             _ => Ok(()),
@@ -856,72 +601,17 @@ fn update(pam: &mut RefMut<'_, PlayingArea>) -> Result<(), MyError> {
                 _ => Ok(()),
             }
         }
-        Icons::Line
-        | Icons::QuadBezier
-        | Icons::CubicBezier
-        | Icons::QuarterCircle
-        | Icons::QuarterEllipse => {
-            // let shape_kind = ShapeKind::Custom(ShapeCustom);
-            match pam.mouse.get_mouse_state() {
-                // MouseState::LeftDown(cursor_pos) => match pam.dp.get_selection() {
-                //     DrawObject::None | DrawObject::Shape(_) => {
-                //         // pam.dp.set_selection(&cursor_pos, grab_precision, None)?;
-                //         // Ok(pam
-                //         //     .dp
-                //         //     .create_bundle(&cursor_pos, shape_kind, Constraint::F)?)
-                //         Ok(())
-                //     }
-                //     DrawObject::Vertex(vid_sel_old) => {
-                //         // pam.dp
-                //         //     .set_selection(&cursor_pos, grab_precision, Some(vid_sel_old))?;
-                //         // match pam.dp.get_selection() {
-                //         //     DrawObject::Vertex(vid_sel_new)
-                //         //         if pam.dp.vertices.get(&vid_sel_new)?.can_add_shape() =>
-                //         //     {
-                //         //         pam.dp.merge_vertices(&vid_sel_old, &vid_sel_new)?;
-                //         //         pam.dp.clear_selection();
-                //         //         go_to_arrow_tool(pam);
-                //         //     }
-                //         //     _ => {
-                //         //         pam.dp.force_selection_to_vertex(&vid_sel_old);
-                //         //         pam.dp
-                //         //             .create_bundle(&cursor_pos, shape_kind, Constraint::F)?;
-                //         //     }
-                //         // }
-                //         Ok(())
-                //     }
-                // },
-                // MouseState::LeftDownMove(pos_dwn, cursor_pos)
-                // | MouseState::LeftUpMove(pos_dwn, cursor_pos) => {
-                //     pam.draw_cursor = cursor_pos;
-                //     pam.dp.highlight_object(cursor_pos, grab_precision);
-
-                //     // if let DrawObject::Vertex(v_sel) = pam.dp.get_selection() {
-                //     //     pam.dp.move_new_vertex(&v_sel, &cursor_pos)?;
-                //     // }
-                //     pam.dp.move_object_selected(pos_dwn, cursor_pos)?;
-                //     Ok(())
-                // }
-                // MouseState::RightDown(_) => {
-                //     if let DrawObject::Vertex(vid_sel) = pam.dp.get_selection() {
-                //         pam.dp.delete_vertex(vid_sel)?;
-                //     }
-                //     Ok(())
-                // }
-                _ => Ok(()),
-            }
-        }
     }
 }
 
 fn on_mouse_move(pa: RefPA, event: Event) {
     let mut pam = pa.borrow_mut();
-    let rect = pam.canvas.get_bounding_client_rect();
+    let rect = pam.main_canvas.get_bounding_client_rect();
     let scale = pam.global_scale;
-    let canvas_offset = pam.canvas_offset;
+    let main_canvas_offset = pam.main_canvas_offset;
 
     pam.mouse
-        .update_mouse(&rect, scale, &canvas_offset, &event, SystemMouse::Move);
+        .update_mouse(&rect, scale, &main_canvas_offset, &event, SystemMouse::Move);
 
     if let Some(e) = update(&mut pam).err() {
         log!("ERROR: {}", e);
@@ -932,11 +622,11 @@ fn on_mouse_move(pa: RefPA, event: Event) {
 }
 fn on_mouse_down(pa: RefPA, event: Event) {
     let mut pam = pa.borrow_mut();
-    let rect = pam.canvas.get_bounding_client_rect();
+    let rect = pam.main_canvas.get_bounding_client_rect();
     let scale = pam.global_scale;
-    let canvas_offset = pam.canvas_offset;
+    let main_canvas_offset = pam.main_canvas_offset;
     pam.mouse
-        .update_mouse(&rect, scale, &canvas_offset, &event, SystemMouse::Down);
+        .update_mouse(&rect, scale, &main_canvas_offset, &event, SystemMouse::Down);
 
     // Hide the context menu when clicking elsewhere
     hide_cm_shape(&mut pam);
@@ -950,12 +640,12 @@ fn on_mouse_down(pa: RefPA, event: Event) {
 }
 fn on_mouse_up(pa: RefPA, event: Event) {
     let mut pam = pa.borrow_mut();
-    let rect = pam.canvas.get_bounding_client_rect();
+    let rect = pam.main_canvas.get_bounding_client_rect();
     let scale = pam.global_scale;
-    let canvas_offset = pam.canvas_offset;
+    let main_canvas_offset = pam.main_canvas_offset;
 
     pam.mouse
-        .update_mouse(&rect, scale, &canvas_offset, &event, SystemMouse::Up);
+        .update_mouse(&rect, scale, &main_canvas_offset, &event, SystemMouse::Up);
 
     if let Some(e) = update(&mut pam).err() {
         log!("ERROR: {}", e);
@@ -1012,7 +702,7 @@ fn on_mouse_wheel(pa: RefPA, event: Event) {
         let old_scale = pam.global_scale;
 
         // Get mouse position relative to the canvas
-        let rect = pam.canvas.get_bounding_client_rect();
+        let rect = pam.main_canvas.get_bounding_client_rect();
         let canvas_mouse_pos = Point {
             x: wheel_event.client_x() as f64 - rect.left(),
             y: wheel_event.client_y() as f64 - rect.top(),
@@ -1027,12 +717,12 @@ fn on_mouse_wheel(pa: RefPA, event: Event) {
             (old_scale / (1.0 + zoom_factor)).max(0.2)
         };
 
-        let new_canvas_offset_x = pam.canvas_offset.x
-            - (new_scale - old_scale) * (canvas_mouse_pos.x - pam.canvas_offset.x) / old_scale;
-        let new_canvas_offset_y = pam.canvas_offset.y
-            - (new_scale - old_scale) * (canvas_mouse_pos.y - pam.canvas_offset.y) / old_scale;
+        let new_canvas_offset_x = pam.main_canvas_offset.x
+            - (new_scale - old_scale) * (canvas_mouse_pos.x - pam.main_canvas_offset.x) / old_scale;
+        let new_canvas_offset_y = pam.main_canvas_offset.y
+            - (new_scale - old_scale) * (canvas_mouse_pos.y - pam.main_canvas_offset.y) / old_scale;
 
-        pam.canvas_offset = Vec2 {
+        pam.main_canvas_offset = Vec2 {
             x: new_canvas_offset_x,
             y: new_canvas_offset_y,
         };
@@ -1142,55 +832,8 @@ fn on_context_menu(pa: RefPA, event: Event) {
     let mut pam = pa.borrow_mut();
     show_context_menu(&mut pam);
 }
-fn show_context_menu(pam: &mut RefMut<'_, PlayingArea>) {
-    match pam.icon_selected {
-        Icons::Line
-        | Icons::QuadBezier
-        | Icons::CubicBezier
-        | Icons::QuarterCircle
-        | Icons::QuarterEllipse => {
-            // User simply want to end the drawing mode, no context menu
-            pam.csp.on_creation = None;
-            go_to_arrow_tool(pam);
-        }
-        _ => match pam.csp.on_creation {
-            None => (),
-            Some(_) => {
-                // if let Some(horizontal) = pam.dp.is_horizontal(&shid).ok() {
-                //     if horizontal {
-                //         if let Some(shape) = pam.dp.shapes.get(&shid).ok() {
-                //             match shape.get_cstr() {
-                //                 Constraint::F => {
-                //                     show_cm_shape(pam, "cm-shape-force-horizontal");
-                //                     return;
-                //                 }
-                //                 Constraint::H => {
-                //                     show_cm_shape(pam, "cm-shape-unforce-horizontal");
-                //                     return;
-                //                 }
-                //                 Constraint::V => return,
-                //             }
-                //         }
-                //     }
-                // }
-                // if let Some(vertical) = pam.dp.is_vertical(&shid).ok() {
-                //     if vertical {
-                //         if let Some(shape) = pam.dp.shapes.get(&shid).ok() {
-                //             match shape.get_cstr() {
-                //                 Constraint::F => {
-                //                     show_cm_shape(pam, "cm-shape-force-vertical");
-                //                 }
-                //                 Constraint::V => {
-                //                     show_cm_shape(pam, "cm-shape-unforce-vertical");
-                //                 }
-                //                 Constraint::H => return,
-                //             }
-                //         }
-                //     }
-                // }
-            }
-        },
-    }
+fn show_context_menu(_pam: &mut RefMut<'_, PlayingArea>) {
+    // show_cm_shape(pam, "cm-shape-force-horizontal");
 }
 fn _show_cm_shape(pam: &mut RefMut<'_, PlayingArea>, action_to_show: &str) {
     // Display the context menu container
@@ -1367,26 +1010,26 @@ fn resize_area(pa: RefPA) {
     let canvas_width = window_width - left_panel_width;
     let canvas_height = window_height - top_menu_height - status_bar_height;
 
-    pam.canvas
+    pam.main_canvas
         .style()
         .set_property("margin-top", &format!("{}px", top_menu_height))
         .unwrap();
-    pam.canvas
+    pam.main_canvas
         .style()
         .set_property("margin-left", &format!("{}px", left_panel_width))
         .unwrap();
-    pam.canvas.set_width(canvas_width);
-    pam.canvas.set_height(canvas_height);
+    pam.main_canvas.set_width(canvas_width);
+    pam.main_canvas.set_height(canvas_height);
 
     // Calculation starting parameters
     let working_area = pam.working_area;
-    let canvas_offset = Vec2 {
+    let main_canvas_offset = Vec2 {
         x: (canvas_width as f64 - working_area.x).abs() / 4.,
         y: (canvas_height as f64 - working_area.y).abs() / 3.,
     };
     let dx = canvas_width as f64 / working_area.x / 0.3;
     let dy = canvas_height as f64 / working_area.y / 0.3;
-    pam.canvas_offset = canvas_offset;
+    pam.main_canvas_offset = main_canvas_offset;
     pam.global_scale = dx.min(dy);
 }
 fn on_window_resize(pa: RefPA, _event: Event) {
@@ -1532,7 +1175,7 @@ fn render(pa: RefPA) {
     let pam = pa.borrow_mut();
 
     // Clear the canvas
-    raw_draw_clear_canvas(&pam);
+    clear_main_canvas(&pam);
     drop(pam);
 
     // Then draw all
@@ -1541,42 +1184,52 @@ fn render(pa: RefPA) {
     }
 }
 fn draw_all(pa: RefPA) -> Result<(), MyError> {
+    // draw_background(pa.clone());
     draw_grid(pa.clone());
-    draw_working_area(pa.clone());
+    // draw_working_area(pa.clone());
     draw_content(pa.clone())?;
-    draw_selection_area(pa.clone());
+    // draw_selection_area(pa.clone());
     Ok(())
 }
-fn draw_working_area(pa: RefPA) {
-    let pam = pa.borrow_mut();
-    // Draw working area
-
-    let _wa = pam.working_area;
-    // Title
-    // cst.push(CTText(Point::new(wa.x / 3., -20.), "Working sheet".into()));
-
-    // let mut shape = ShapeType::new_line(Line::new(pick_pos, pick_pos + (snap_grid, snap_grid)));
-
-    // // Arrows
-    // let mut pos = Point::new(0., -10.);
-    // prefab::arrow_right(pos, 100., &mut cst);
-    // cst.push(CTText(Point::new(40., -20.), "X".into()));
-
-    // pos = Point::new(-10., 0.);
-    // prefab::arrow_down(pos, 100., &mut cst);
-    // cst.push(CTText(Point::new(-30., 50.), "Y".into()));
-
-    // // Border
-    // use ConstructionPattern::*;
-    // pos = Point::ZERO;
-    // cst.push(CTSegment(NoSelection, pos, pos + (0., wa.y)));
-    // cst.push(CTSegment(NoSelection, pos, pos + (wa.x, 0.)));
-    // pos = Point::new(wa.x, wa.y);
-    // cst.push(CTSegment(NoSelection, pos, pos + (-wa.x, 0.)));
-    // cst.push(CTSegment(NoSelection, pos, pos + (0., -wa.y)));
-
-    // draw_shape(&pam, &cst);
-}
+// fn draw_working_area(pa: RefPA) {
+//     let pam = pa.borrow_mut();
+//     // Draw working area
+//     let _wa = pam.working_area;
+//     // Title
+//     // cst.push(CTText(Point::new(wa.x / 3., -20.), "Working sheet".into()));
+//     // let mut shape = ShapeType::new_line(Line::new(pick_pos, pick_pos + (snap_grid, snap_grid)));
+//     // // Arrows
+//     // let mut pos = Point::new(0., -10.);
+//     // prefab::arrow_right(pos, 100., &mut cst);
+//     // cst.push(CTText(Point::new(40., -20.), "X".into()));
+//     // pos = Point::new(-10., 0.);
+//     // prefab::arrow_down(pos, 100., &mut cst);
+//     // cst.push(CTText(Point::new(-30., 50.), "Y".into()));
+//     // // Border
+//     // use ConstructionPattern::*;
+//     // pos = Point::ZERO;
+//     // cst.push(CTSegment(NoSelection, pos, pos + (0., wa.y)));
+//     // cst.push(CTSegment(NoSelection, pos, pos + (wa.x, 0.)));
+//     // pos = Point::new(wa.x, wa.y);
+//     // cst.push(CTSegment(NoSelection, pos, pos + (-wa.x, 0.)));
+//     // cst.push(CTSegment(NoSelection, pos, pos + (0., -wa.y)));
+//     // draw_shape(&pam, &cst);
+// }
+// fn draw_background(pa: RefPA) {
+//     let pam = pa.borrow_mut();
+//     pam.back_canvas_ctx.set_stroke_style_str(&"#F00");
+//     pam.back_canvas_ctx
+//         .set_fill_style_str(&pam.draw_styles.get_background_color().to_string());
+//     pam.back_canvas_ctx.fill();
+//     let (canvas_width, canvas_height) = {
+//         (
+//             pam.back_canvas.width() as f64,
+//             pam.back_canvas.height() as f64,
+//         )
+//     };
+//     pam.back_canvas_ctx
+//         .fill_rect(0., 0., canvas_width as f64, canvas_height as f64);
+// }
 fn draw_grid(pa: RefPA) {
     let pam = pa.borrow_mut();
     let wa = pam.working_area;
@@ -1644,25 +1297,25 @@ fn draw_content(pa: RefPA) -> Result<(), MyError> {
 
     Ok(())
 }
-fn draw_selection_area(_pa: RefPA) {
-    // use ConstructionPattern::*;
-    // let pam = pa.borrow_mut();
-    // if let Some(sa) = pam.selection_area {
-    //     let bl = sa[0];
-    //     let tr = sa[1];
-    //     if bl.x != tr.x && bl.y != tr.y {
-    //         let tl = Point::new(bl.x, tr.y);
-    //         let br = Point::new(tr.x, bl.y);
-    //         let mut cst = Vec::new();
-    //         // cst.push(Move(bl));
-    //         cst.push(CTSegment(NoSelection, bl, tl));
-    //         cst.push(CTSegment(NoSelection, tl, tr));
-    //         cst.push(CTSegment(NoSelection, tr, br));
-    //         cst.push(CTSegment(NoSelection, br, bl));
-    //         raw_draw(&pam, &cst, ConstructionLayer::SelectionTool);
-    //     }
-    // }
-}
+// fn draw_selection_area(_pa: RefPA) {
+//     // use ConstructionPattern::*;
+//     // let pam = pa.borrow_mut();
+//     // if let Some(sa) = pam.selection_area {
+//     //     let bl = sa[0];
+//     //     let tr = sa[1];
+//     //     if bl.x != tr.x && bl.y != tr.y {
+//     //         let tl = Point::new(bl.x, tr.y);
+//     //         let br = Point::new(tr.x, bl.y);
+//     //         let mut cst = Vec::new();
+//     //         // cst.push(Move(bl));
+//     //         cst.push(CTSegment(NoSelection, bl, tl));
+//     //         cst.push(CTSegment(NoSelection, tl, tr));
+//     //         cst.push(CTSegment(NoSelection, tr, br));
+//     //         cst.push(CTSegment(NoSelection, br, bl));
+//     //         raw_draw(&pam, &cst, ConstructionLayer::SelectionTool);
+//     //     }
+//     // }
+// }
 fn draw_path(
     pam: &RefMut<'_, PlayingArea>,
     path: BezPath,
@@ -1671,17 +1324,17 @@ fn draw_path(
     fill: bool,
 ) {
     let scale = pam.global_scale;
-    let offset = pam.canvas_offset;
+    let offset = pam.main_canvas_offset;
 
     let (stroke_style, stroke_width) = pam.draw_styles.get_styles(pattern);
     let (fill_color, stroke_color) = pam.draw_styles.get_colors(pattern);
-    pam.ctx.set_font("20px sans-serif");
-    pam.ctx.set_line_dash(stroke_style).unwrap();
-    pam.ctx.set_line_width(stroke_width);
-    pam.ctx.set_stroke_style(&stroke_color.into());
-    pam.ctx.set_fill_style(&fill_color.into());
+    pam.main_canvas_ctx.set_font("20px sans-serif");
+    pam.main_canvas_ctx.set_line_dash(stroke_style).unwrap();
+    pam.main_canvas_ctx.set_line_width(stroke_width);
+    pam.main_canvas_ctx.set_stroke_style_str(&stroke_color);
+    pam.main_canvas_ctx.set_fill_style_str(&fill_color);
 
-    pam.ctx.begin_path();
+    pam.main_canvas_ctx.begin_path();
 
     // if let Some(PathEl::MoveTo(pt)) = path.iter().next() {
     //     let cpt = to_canvas(&pt.to_vec2(), scale, &offset);
@@ -1691,39 +1344,40 @@ fn draw_path(
         match cst {
             PathEl::MoveTo(pt) => {
                 let cpt = to_canvas(&pt.to_vec2(), scale, &offset);
-                pam.ctx.move_to(cpt.x, cpt.y);
+                pam.main_canvas_ctx.move_to(cpt.x, cpt.y);
             }
             PathEl::LineTo(pt) => {
                 let cpt = to_canvas(&pt.to_vec2(), scale, &offset);
-                pam.ctx.line_to(cpt.x, cpt.y);
+                pam.main_canvas_ctx.line_to(cpt.x, cpt.y);
             }
             PathEl::QuadTo(pt1, pt2) => {
                 let cpt1 = to_canvas(&pt1.to_vec2(), scale, &offset);
                 let cpt2 = to_canvas(&pt2.to_vec2(), scale, &offset);
-                pam.ctx.quadratic_curve_to(cpt1.x, cpt1.y, cpt2.x, cpt2.y);
+                pam.main_canvas_ctx
+                    .quadratic_curve_to(cpt1.x, cpt1.y, cpt2.x, cpt2.y);
             }
             PathEl::CurveTo(pt1, pt2, pt3) => {
                 let cpt1 = to_canvas(&pt1.to_vec2(), scale, &offset);
                 let cpt2 = to_canvas(&pt2.to_vec2(), scale, &offset);
                 let cpt3 = to_canvas(&pt3.to_vec2(), scale, &offset);
-                pam.ctx
+                pam.main_canvas_ctx
                     .bezier_curve_to(cpt1.x, cpt1.y, cpt2.x, cpt2.y, cpt3.x, cpt3.y);
             }
-            PathEl::ClosePath => pam.ctx.close_path(),
+            PathEl::ClosePath => pam.main_canvas_ctx.close_path(),
         }
     }
     if fill {
-        pam.ctx.fill();
+        pam.main_canvas_ctx.fill();
     }
-    pam.ctx.stroke();
+    pam.main_canvas_ctx.stroke();
 }
-fn raw_draw_clear_canvas(pam: &RefMut<'_, PlayingArea>) {
-    pam.ctx.set_stroke_style(&"#F00".into());
-    let background_color = pam.draw_styles.get_background_color();
-    pam.ctx.set_fill_style(&background_color.to_string().into());
-
-    pam.ctx.fill();
-    let (canvas_width, canvas_height) = { (pam.canvas.width() as f64, pam.canvas.height() as f64) };
-    pam.ctx
-        .fill_rect(0., 0., canvas_width as f64, canvas_height as f64);
+fn clear_main_canvas(pam: &RefMut<'_, PlayingArea>) {
+    let (canvas_width, canvas_height) = {
+        (
+            pam.main_canvas.width() as f64,
+            pam.main_canvas.height() as f64,
+        )
+    };
+    pam.main_canvas_ctx
+        .clear_rect(0., 0., canvas_width as f64, canvas_height as f64);
 }

@@ -13,11 +13,6 @@ pub enum Icons {
     RectangleRounded,
     Circle,
     Oblong,
-    Line,
-    QuadBezier,
-    CubicBezier,
-    QuarterCircle,
-    QuarterEllipse,
 }
 impl Icons {
     pub fn as_str(&self) -> &'static str {
@@ -30,11 +25,6 @@ impl Icons {
             RectangleRounded => "icon-rectangle-rounded",
             Circle => "icon-circle",
             Oblong => "icon-oblong",
-            Line => "icon-line",
-            QuadBezier => "icon-quadbezier",
-            CubicBezier => "icon-cubicbezier",
-            QuarterCircle => "icon-quarter-circle",
-            QuarterEllipse => "icon-quarter-ellipse",
         }
     }
     pub fn from_str(input: &str) -> Option<Icons> {
@@ -47,11 +37,6 @@ impl Icons {
             "icon-rectangle-rounded" => Some(RectangleRounded),
             "icon-circle" => Some(Circle),
             "icon-oblong" => Some(Oblong),
-            "icon-line" => Some(Line),
-            "icon-quadbezier" => Some(QuadBezier),
-            "icon-cubicbezier" => Some(CubicBezier),
-            "icon-quarter-circle" => Some(QuarterCircle),
-            "icon-quarter-ellipse" => Some(QuarterEllipse),
             _ => None,
         }
     }
@@ -255,7 +240,7 @@ pub struct DrawStyles {
     bold_color: String,
     light_color: String,
     normal_color: String,
-    binding_requested_color: String,
+    transparent_color: String,
     // line patterns
     pattern_dashed: JsValue,
     pattern_solid: JsValue,
@@ -277,8 +262,7 @@ impl DrawStyles {
         let bold_color = style.get_property_value("--canvas-bold-color")?;
         let light_color = style.get_property_value("--canvas-light-color")?;
         let normal_color = style.get_property_value("--canvas-normal-color")?;
-        let binding_requested_color =
-            style.get_property_value("--canvas-binding-requested-color")?;
+        let transparent_color = style.get_property_value("--canvas-transparent-color")?;
         let dash_pattern = Array::new();
         dash_pattern.push(&JsValue::from_f64(3.0));
         dash_pattern.push(&JsValue::from_f64(3.0));
@@ -298,7 +282,7 @@ impl DrawStyles {
             bold_color,
             light_color,
             normal_color,
-            binding_requested_color,
+            transparent_color,
             pattern_dashed: JsValue::from(dash_pattern),
             pattern_solid: JsValue::from(solid_pattern),
         })
@@ -321,7 +305,7 @@ impl DrawStyles {
         let (fill_color, color) = match pattern {
             Selected => (&self.selected_color, &self.selected_color),
             Highlighted => (&self.bold_color, &self.bold_color),
-            Normal => (&self.normal_color, &self.normal_color),
+            Normal => (&self.light_color, &self.normal_color),
             Light => (&self.light_color, &self.light_color),
             Bold => (&self.worksheet_color, &self.worksheet_color),
             Grid => (&self.grid_color, &self.grid_color),
@@ -330,6 +314,9 @@ impl DrawStyles {
     }
     pub fn get_background_color(&self) -> &str {
         &self.background_color
+    }
+    pub fn get_transparent_color(&self) -> &str {
+        &self.transparent_color
     }
     pub fn get_selected_color(&self) -> &str {
         &self.selected_color

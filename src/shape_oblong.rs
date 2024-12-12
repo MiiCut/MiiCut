@@ -90,15 +90,14 @@ impl Shape for CShapeOblong {
             self.get_arc(false).append_iter(tolerance),
         ];
         let lines_iter = [
-            self.get_line(true).path_elements(tolerance),
             self.get_line(false).path_elements(tolerance),
+            self.get_line(true).path_elements(tolerance),
         ];
 
         CShapeOblongIter {
             idx: 0,
             lines_iter,
             arcs_iter,
-            emitted_first_move_to: false,
         }
     }
     #[inline]
@@ -172,11 +171,7 @@ impl CShapes for CShapeOblong {
         false
     }
     fn get_shape_path(&self) -> BezPath {
-        let mut full_path = self.get_arc(true).to_path(Self::TOLERANCE);
-        full_path.extend(self.get_line(true).to_path(Self::TOLERANCE));
-        full_path.extend(self.get_arc(false).to_path(Self::TOLERANCE));
-        full_path.extend(self.get_line(false).to_path(Self::TOLERANCE));
-        full_path
+        self.path_elements(CShapeOblong::TOLERANCE).collect()
     }
     fn highlight_object(&mut self, pos: Vec2, precision: f64) {
         self.handles
@@ -312,67 +307,33 @@ pub struct CShapeOblongIter {
     idx: usize,
     arcs_iter: [ArcAppendIter; 2],
     lines_iter: [LinePathIter; 2],
-    emitted_first_move_to: bool,
     // i:
-    // 0: arcs_iter[0]
-    // 1: lines_iter[0]
+    // 0: lines_iter[0]
+    // 1: arcs_iter[0]/lines_iter[1]
     // 2: arcs_iter[1]
-    // 3: lines_iter[1]
-}
-impl CShapeOblongIter {
-    fn raw_next(&mut self) -> Option<PathEl> {
-        match self.idx {
-            0 => {
-                log!("next");
-                self.idx += 1;
-                self.arcs_iter[0].next()
-            }
-            1 => match self.arcs_iter[0].next() {
-                Some(elem) => Some(elem),
-                None => {
-                    self.idx += 1;
-                    self.lines_iter[0].next()
-                }
-            },
-            2 => match self.lines_iter[0].next() {
-                Some(elem) => Some(elem),
-                None => {
-                    self.idx += 1;
-                    self.arcs_iter[1].next()
-                }
-            },
-            3 => match self.arcs_iter[1].next() {
-                Some(elem) => Some(elem),
-                None => {
-                    self.idx += 1;
-                    self.lines_iter[1].next()
-                }
-            },
-            4 => self.lines_iter[1].next(),
-            _ => None,
-        }
-    }
-
-    fn filter_move_to(&mut self, element: PathEl) -> Option<PathEl> {
-        match element {
-            PathEl::MoveTo(_) if self.emitted_first_move_to => None, // Skip additional MoveTo
-            PathEl::MoveTo(_) => {
-                self.emitted_first_move_to = true;
-                Some(element)
-            }
-            _ => Some(element), // Pass through other elements unchanged
-        }
-    }
 }
 impl Iterator for CShapeOblongIter {
     type Item = PathEl;
 
     fn next(&mut self) -> Option<PathEl> {
-        while let Some(element) = self.raw_next() {
-            if let Some(filtered_element) = self.filter_move_to(element) {
-                return Some(filtered_element);
-            }
+        match self.idx {
+            0 => match self.lines_iter[0].next() {
+                Some(elem) => Some(elem),
+                None => {
+                    self.idx += 1;
+                    self.arcs_iter[0].next()
+                }
+            },
+            1 => match self.arcs_iter[0].next() {
+                Some(elem) => Some(elem),
+                None => {
+                    self.idx += 1;
+                    self.lines_iter[1].next(); // Skip MoveTo
+                    self.lines_iter[1].next()
+                }
+            },
+            2 => self.arcs_iter[1].next(),
+            _ => None,
         }
-        None
     }
 }

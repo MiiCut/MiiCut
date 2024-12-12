@@ -1,1 +1,13 @@
-/target
+# Ignore Trunk build directory
+/dist/
+/index.html
+
+# Ignore other common Rust build artifacts
+/target/
+/**/*.wasm.d
+
+# Ignore editor-specific files (optional)
+.idea/
+.vscode/
+*.swp
+*.swo

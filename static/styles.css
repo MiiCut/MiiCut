@@ -12,9 +12,10 @@
     --canvas-selected-color:  #ff0000;
     --canvas-bold-color:  #ffb700;
     --canvas-light-color:  #02ae0b;
-    --canvas-normal-color:  #222222;
+    --canvas-normal-color: #4d4d4d;
     --canvas-binding-requested-color:  #00e235;
     --canvas-fill-color: rgba(0, 0, 0, 0.119);
+    --canvas-transparent-color: rgba(255, 255, 255, 0);
 }
 
 body, html {
@@ -142,11 +143,23 @@ canvas {
     border: none;
     margin: 0;
     padding: 0;
-    /* background-color: #ff0; */
     position: absolute;
-    z-index: 1;
-    background-color: #dddddd; /* Fond jaune semi-transparent pour le débogage */
+    z-index: 1; /* Default z-index for the first canvas */
+    background-color: transparent; /* Ensure transparency unless needed */
+}
+#backCanvas {
+    z-index: 1; /* Bottom layer */
+    background-color: #dddddd; /* Background color for debugging */
+}
 
+#mainCanvas {
+    z-index: 2; /* Middle layer */
+    background-color: rgba(0, 255, 0, 0.5); /* Green with transparency */
+}
+
+#canvas3 {
+    z-index: 3; /* Top layer */
+    background-color: rgba(255, 0, 0, 0.5); /* Red with transparency */
 }
 
 /* Style the custom context menu */
