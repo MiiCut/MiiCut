@@ -5,17 +5,16 @@
 //     }
 // }
 
-use kurbo::{BezPath, Circle, CirclePathIter, ParamCurveNearest, Point, Rect, Shape, Vec2};
+use kurbo::{BezPath, Circle, CirclePathIter, Point, Rect, Shape, Vec2};
 use std::fmt::Display;
 
 use crate::{
-    closed_shapes::{COperation, CShape, CShapes, ClosedShapeId, Handle, HandleKind},
-    math::is_near_position,
+    math::*,
+    shapes::{CShapes, Handle, HandleKind},
+    shapes_pool::CShapeKind,
 };
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CShapeHole {
-    id: ClosedShapeId,
-    op: COperation,
     handles: (Handle, Handle),
     saved_handles: (Handle, Handle),
     highlighted: bool,
@@ -68,26 +67,18 @@ impl Shape for CShapeHole {
 impl CShapes for CShapeHole {
     const TOLERANCE: f64 = 0.01;
 
-    fn new(cshid: ClosedShapeId, pos1: Vec2, pos2: Vec2) -> CShape {
+    fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind {
         use HandleKind::*;
         let handles = (
             Handle::new(Vec2::new(pos1.x, pos1.y), Grab, false),
             Handle::new(Vec2::new(pos2.x, pos2.y), Modify, true),
         );
-        CShape::CHole(CShapeHole {
-            id: cshid,
-            op: COperation::Add,
+        CShapeKind::CHole(CShapeHole {
             handles,
             saved_handles: handles,
-            selected: false,
             highlighted: false,
+            selected: false,
         })
-    }
-    fn get_id(&self) -> ClosedShapeId {
-        self.id
-    }
-    fn get_op(&self) -> COperation {
-        self.op
     }
     fn save_pos(&mut self) {
         self.saved_handles.0.set_pos(self.handles.0.get_pos());
@@ -95,15 +86,6 @@ impl CShapes for CShapeHole {
     }
     fn toggle_prop(&mut self) {
         ()
-    }
-    fn is_near_cursor(&self, pos: Vec2, precision: f64) -> bool {
-        for seg in self.to_path(CShapeHole::TOLERANCE).segments() {
-            let nearest = seg.nearest(pos.to_point(), precision);
-            if nearest.distance_sq < precision {
-                return true;
-            }
-        }
-        false
     }
     fn get_shape_path(&self) -> BezPath {
         self.get_circle().to_path(Self::TOLERANCE)
@@ -116,7 +98,7 @@ impl CShapes for CShapeHole {
             .1
             .set_highlighted(is_near_position(pos, self.handles.1.get_pos(), precision));
         if self.get_handle_highlighted().is_none() {
-            self.highlighted = self.is_near_cursor(pos, precision)
+            self.highlighted = self.contains(pos.to_point());
         } else {
             self.highlighted = false;
         }
@@ -129,13 +111,16 @@ impl CShapes for CShapeHole {
             .1
             .set_selection(is_near_position(pos, self.handles.1.get_pos(), precision));
         if self.get_handle_selected().is_none() {
-            self.selected = self.is_near_cursor(pos, precision)
+            self.selected = self.contains(pos.to_point());
         } else {
             self.selected = false;
         }
     }
     fn is_selected(&self) -> bool {
-        self.selected == true
+        self.selected
+    }
+    fn is_highlighted(&self) -> bool {
+        self.highlighted
     }
     fn clear_selection(&mut self) {
         self.selected = false;
@@ -144,6 +129,9 @@ impl CShapes for CShapeHole {
         self.clear_selection();
         self.handles.0.set_selection(false);
         self.handles.1.set_selection(false);
+    }
+    fn get_position(&self) -> Vec2 {
+        self.handles.0.get_pos()
     }
     fn move_position(&mut self, pos_init: Vec2, pos: Vec2) {
         let dpos = pos - pos_init;

@@ -6,18 +6,16 @@
 // }
 
 use crate::{
-    closed_shapes::{COperation, CShape, CShapes, ClosedShapeId, Handle, HandleKind},
     math::*,
+    shapes::{CShapes, Handle, HandleKind},
+    shapes_pool::CShapeKind,
 };
 use kurbo::{
-    BezPath, ParamCurveNearest, Point, Rect, RoundedRect, RoundedRectPathIter, RoundedRectRadii,
-    Shape, Vec2,
+    BezPath, Point, Rect, RoundedRect, RoundedRectPathIter, RoundedRectRadii, Shape, Vec2,
 };
 use std::fmt::Display;
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CShapeRectRounded {
-    id: ClosedShapeId,
-    op: COperation,
     radii: RoundedRectRadii,
     handles: (Handle, Handle, Handle, Handle, Handle, Handle),
     highlighted: bool,
@@ -84,7 +82,7 @@ impl Shape for CShapeRectRounded {
 impl CShapes for CShapeRectRounded {
     const TOLERANCE: f64 = 0.01;
 
-    fn new(cshid: ClosedShapeId, pos1: Vec2, pos2: Vec2) -> CShape {
+    fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind {
         // let pos2 = pos2 + Vec2::new(20., 20.);
         let radii = RoundedRectRadii::new(2., 8., 3., 5.);
         let (tl, tr, br, bl) = (
@@ -102,20 +100,12 @@ impl CShapes for CShapeRectRounded {
             Handle::new(Vec2::new(pos2.x - br, pos2.y - br), Modify, false),
             Handle::new(Vec2::new(pos1.x + bl, pos2.y - bl), Modify, false),
         );
-        CShape::CRectangleRounded(CShapeRectRounded {
-            id: cshid,
-            op: COperation::Add,
+        CShapeKind::CRectangleRounded(CShapeRectRounded {
             radii,
             handles,
             highlighted: false,
             selected: false,
         })
-    }
-    fn get_id(&self) -> ClosedShapeId {
-        self.id
-    }
-    fn get_op(&self) -> COperation {
-        self.op
     }
     fn save_pos(&mut self) {
         self.handles.0.save_pos();
@@ -127,15 +117,6 @@ impl CShapes for CShapeRectRounded {
     }
     fn toggle_prop(&mut self) {
         ()
-    }
-    fn is_near_cursor(&self, pos: Vec2, precision: f64) -> bool {
-        for seg in self.get_shape_path().segments() {
-            let nearest = seg.nearest(pos.to_point(), precision);
-            if nearest.distance_sq < precision {
-                return true;
-            }
-        }
-        false
     }
     fn get_shape_path(&self) -> BezPath {
         self.get_rectangle_rounded().to_path(Self::TOLERANCE)
@@ -160,7 +141,7 @@ impl CShapes for CShapeRectRounded {
             .5
             .set_highlighted(is_near_position(pos, self.handles.5.get_pos(), precision));
         if self.get_handle_highlighted().is_none() {
-            self.highlighted = self.is_near_cursor(pos, precision)
+            self.highlighted = self.contains(pos.to_point());
         } else {
             self.highlighted = false;
         }
@@ -185,13 +166,16 @@ impl CShapes for CShapeRectRounded {
             .5
             .set_selection(is_near_position(pos, self.handles.5.get_pos(), precision));
         if self.get_handle_selected().is_none() {
-            self.selected = self.is_near_cursor(pos, precision)
+            self.selected = self.contains(pos.to_point());
         } else {
             self.selected = false;
         }
     }
     fn is_selected(&self) -> bool {
-        self.selected == true
+        self.selected
+    }
+    fn is_highlighted(&self) -> bool {
+        self.highlighted
     }
     fn clear_selection(&mut self) {
         self.selected = false;
@@ -204,6 +188,9 @@ impl CShapes for CShapeRectRounded {
         self.handles.3.set_selection(false);
         self.handles.4.set_selection(false);
         self.handles.5.set_selection(false);
+    }
+    fn get_position(&self) -> Vec2 {
+        (self.handles.0.get_pos() + self.handles.1.get_pos()) / 2.
     }
     fn move_position(&mut self, pos_init: Vec2, pos: Vec2) {
         let h1 = self.handles.0.get_saved_pos();

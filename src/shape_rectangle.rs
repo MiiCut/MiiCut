@@ -5,14 +5,13 @@
 //     }
 // }
 
-use crate::closed_shapes::{COperation, CShape, CShapes, ClosedShapeId, Handle, HandleKind};
 use crate::math::*;
-use kurbo::{BezPath, ParamCurveNearest, Point, Rect, RectPathIter, Shape, Vec2};
+use crate::shapes::{CShapes, Handle, HandleKind};
+use crate::shapes_pool::CShapeKind;
+use kurbo::{BezPath, Point, Rect, RectPathIter, Shape, Vec2};
 use std::fmt::Display;
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CShapeRectangle {
-    id: ClosedShapeId,
-    op: COperation,
     handles: (Handle, Handle),
     highlighted: bool,
     selected: bool,
@@ -83,25 +82,17 @@ impl Shape for CShapeRectangle {
 impl CShapes for CShapeRectangle {
     const TOLERANCE: f64 = 0.01;
 
-    fn new(cshid: ClosedShapeId, pos1: Vec2, pos2: Vec2) -> CShape {
+    fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind {
         use HandleKind::*;
         let handles = (
             Handle::new(Vec2::new(pos1.x, pos1.y), Grab, false),
             Handle::new(Vec2::new(pos2.x, pos2.y), Grab, true),
         );
-        CShape::CRectangle(CShapeRectangle {
-            id: cshid,
-            op: COperation::Add,
+        CShapeKind::CRectangle(CShapeRectangle {
             handles,
             highlighted: false,
             selected: false,
         })
-    }
-    fn get_id(&self) -> ClosedShapeId {
-        self.id
-    }
-    fn get_op(&self) -> COperation {
-        self.op
     }
     fn save_pos(&mut self) {
         self.handles.0.save_pos();
@@ -109,15 +100,6 @@ impl CShapes for CShapeRectangle {
     }
     fn toggle_prop(&mut self) {
         ()
-    }
-    fn is_near_cursor(&self, pos: Vec2, precision: f64) -> bool {
-        for seg in self.get_shape_path().segments() {
-            let nearest = seg.nearest(pos.to_point(), precision);
-            if nearest.distance_sq < precision {
-                return true;
-            }
-        }
-        false
     }
     fn get_shape_path(&self) -> BezPath {
         self.get_rectangle().to_path(Self::TOLERANCE)
@@ -130,7 +112,7 @@ impl CShapes for CShapeRectangle {
             .1
             .set_highlighted(is_near_position(pos, self.handles.1.get_pos(), precision));
         if self.get_handle_highlighted().is_none() {
-            self.highlighted = self.is_near_cursor(pos, precision)
+            self.highlighted = self.contains(pos.to_point());
         } else {
             self.highlighted = false;
         }
@@ -142,14 +124,18 @@ impl CShapes for CShapeRectangle {
         self.handles
             .1
             .set_selection(is_near_position(pos, self.handles.1.get_pos(), precision));
+
         if self.get_handle_selected().is_none() {
-            self.selected = self.is_near_cursor(pos, precision)
+            self.selected = self.contains(pos.to_point());
         } else {
             self.selected = false;
         }
     }
     fn is_selected(&self) -> bool {
-        self.selected == true
+        self.selected
+    }
+    fn is_highlighted(&self) -> bool {
+        self.highlighted
     }
     fn clear_selection(&mut self) {
         self.selected = false;
@@ -158,6 +144,9 @@ impl CShapes for CShapeRectangle {
         self.clear_selection();
         self.handles.0.set_selection(false);
         self.handles.1.set_selection(false);
+    }
+    fn get_position(&self) -> Vec2 {
+        (self.handles.0.get_pos() + self.handles.1.get_pos()) / 2.
     }
     fn move_position(&mut self, pos_init: Vec2, pos: Vec2) {
         let h1 = self.handles.0.get_saved_pos();
@@ -183,7 +172,7 @@ impl CShapes for CShapeRectangle {
                 }
                 _ => unreachable!(),
             },
-        }
+        };
         self.update_handles_pos();
     }
     fn get_handles(&self) -> Vec<Handle> {

@@ -1,26 +1,22 @@
 // A macro to provide `println!(..)`-style syntax for `console.log` logging.
-macro_rules! log {
-    ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
-    }
-}
+// macro_rules! log {
+//     ( $( $t:tt )* ) => {
+//         web_sys::console::log_1(&format!( $( $t )* ).into());
+//     }
+// }
 
 use crate::{
-    closed_shapes::{COperation, CShape, CShapes, ClosedShapeId, Handle, HandleKind},
     math::*,
+    shapes::{CShapes, Handle, HandleKind},
+    shapes_pool::CShapeKind,
 };
-use kurbo::{
-    Arc, ArcAppendIter, BezPath, Line, LinePathIter, ParamCurveNearest, PathEl, Point, Rect, Shape,
-    Vec2,
-};
+use kurbo::{Arc, ArcAppendIter, BezPath, Line, LinePathIter, PathEl, Point, Rect, Shape, Vec2};
 use std::{
     f64::consts::{FRAC_PI_2, PI},
     fmt::Display,
 };
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CShapeOblong {
-    id: ClosedShapeId,
-    op: COperation,
     radius: f64,
     handles: (Handle, Handle, Handle),
     highlighted: bool,
@@ -53,27 +49,64 @@ impl CShapeOblong {
             )
         }
     }
-    fn get_line(&self, upper_line: bool) -> Line {
+    fn get_rectangle_vertices(&self) -> [Vec2; 4] {
         let (pos1, pos2, r_vec) = (
             self.handles.0.get_pos(),
             self.handles.1.get_pos(),
             self.handles.2.get_pos(),
         );
-        let pos1_offset = get_intersection(pos1, pos2, r_vec);
-        let pos2_offset = get_intersection(pos2, pos1, r_vec);
+        let v0 = get_intersection(pos1, pos2, r_vec);
+        let v1 = get_intersection(pos2, pos1, r_vec);
         let r_vec_sym = symmetric_point(pos2, pos1, r_vec);
-        let pos1_offset_sym = get_intersection(pos1, pos2, r_vec_sym);
-        let pos2_offset_sym = get_intersection(pos2, pos1, r_vec_sym);
+        let v3 = get_intersection(pos1, pos2, r_vec_sym);
+        let v2 = get_intersection(pos2, pos1, r_vec_sym);
+        [v0, v1, v2, v3]
+    }
+    fn get_line(&self, upper_line: bool) -> Line {
+        let [v0, v1, v2, v3] = self.get_rectangle_vertices();
         if upper_line {
-            Line::new(pos1_offset.to_point(), pos2_offset.to_point())
+            Line::new(v0.to_point(), v1.to_point())
         } else {
-            Line::new(pos2_offset_sym.to_point(), pos1_offset_sym.to_point())
+            Line::new(v2.to_point(), v3.to_point())
         }
     }
-    fn get_radius(&self, pos: Vec2) -> f64 {
-        log!("ddd");
+
+    fn get_radius_from_point(&self, pos: Vec2) -> f64 {
         let (pos1, pos2) = (self.handles.0.get_pos(), self.handles.1.get_pos());
         get_dist_to_line(pos1, pos2, pos)
+    }
+    fn is_point_in_rectangle(&self, pos: Vec2) -> bool {
+        let rect_vertices = self.get_rectangle_vertices();
+
+        let mut signs = vec![];
+
+        // Compute signed distances to each edge of the rectangle
+        for i in 0..4 {
+            let a = rect_vertices[i];
+            let b = rect_vertices[(i + 1) % 4];
+            let distance = signed_distance(pos, a, b);
+            signs.push(distance);
+        }
+
+        // Check if all distances have the same sign
+        let all_positive = signs.iter().all(|&d| d > 0.0);
+        let all_negative = signs.iter().all(|&d| d < 0.0);
+
+        all_positive || all_negative
+    }
+
+    fn is_point_in_circle(&self, point: Point, start_arc: bool) -> bool {
+        let vertices = self.get_rectangle_vertices(); // Call once
+        let (center, radius_squared) = if start_arc {
+            let center = self.handles.0.get_pos();
+            (center, (vertices[0] - center).hypot2())
+        } else {
+            let center = self.handles.1.get_pos();
+            (center, (vertices[2] - center).hypot2())
+        };
+
+        let dist_squared = (point.x - center.x).powi(2) + (point.y - center.y).powi(2);
+        dist_squared <= radius_squared
     }
 }
 impl Display for CShapeOblong {
@@ -111,9 +144,15 @@ impl Shape for CShapeOblong {
         0.
     }
     #[inline]
-    fn winding(&self, _pt: Point) -> i32 {
-        //TODO
-        0
+    fn winding(&self, pt: Point) -> i32 {
+        if self.is_point_in_rectangle(pt.to_vec2())
+            || self.is_point_in_circle(pt, true)
+            || self.is_point_in_circle(pt, false)
+        {
+            1
+        } else {
+            0
+        }
     }
     #[inline]
     fn bounding_box(&self) -> Rect {
@@ -121,15 +160,14 @@ impl Shape for CShapeOblong {
         Rect::ZERO
     }
     #[inline]
-    fn contains(&self, _pt: Point) -> bool {
-        //TODO
-        false
+    fn contains(&self, pt: Point) -> bool {
+        self.winding(pt) != 0
     }
 }
 impl CShapes for CShapeOblong {
     const TOLERANCE: f64 = 0.01;
 
-    fn new(cshid: ClosedShapeId, pos1: Vec2, pos2: Vec2) -> CShape {
+    fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind {
         let radius = 5.;
         let pos3 = point_at_distance(pos1, pos2, radius);
         use HandleKind::*;
@@ -138,20 +176,12 @@ impl CShapes for CShapeOblong {
             Handle::new(Vec2::new(pos2.x, pos2.y), Grab, true),
             Handle::new(pos3, Modify, false),
         );
-        CShape::COblong(CShapeOblong {
-            id: cshid,
-            op: COperation::Add,
+        CShapeKind::COblong(CShapeOblong {
             radius,
             handles,
-            selected: false,
             highlighted: false,
+            selected: false,
         })
-    }
-    fn get_id(&self) -> ClosedShapeId {
-        self.id
-    }
-    fn get_op(&self) -> COperation {
-        self.op
     }
     fn save_pos(&mut self) {
         self.handles.0.save_pos();
@@ -160,15 +190,6 @@ impl CShapes for CShapeOblong {
     }
     fn toggle_prop(&mut self) {
         ()
-    }
-    fn is_near_cursor(&self, pos: Vec2, precision: f64) -> bool {
-        for seg in self.get_shape_path().segments() {
-            let nearest = seg.nearest(pos.to_point(), precision);
-            if nearest.distance_sq < precision {
-                return true;
-            }
-        }
-        false
     }
     fn get_shape_path(&self) -> BezPath {
         self.path_elements(CShapeOblong::TOLERANCE).collect()
@@ -184,7 +205,7 @@ impl CShapes for CShapeOblong {
             .2
             .set_highlighted(is_near_position(pos, self.handles.2.get_pos(), precision));
         if self.get_handle_highlighted().is_none() {
-            self.highlighted = self.is_near_cursor(pos, precision)
+            self.highlighted = self.contains(pos.to_point());
         } else {
             self.highlighted = false;
         }
@@ -200,13 +221,16 @@ impl CShapes for CShapeOblong {
             .2
             .set_selection(is_near_position(pos, self.handles.2.get_pos(), precision));
         if self.get_handle_selected().is_none() {
-            self.selected = self.is_near_cursor(pos, precision)
+            self.selected = self.contains(pos.to_point());
         } else {
             self.selected = false;
         }
     }
     fn is_selected(&self) -> bool {
-        self.selected == true
+        self.selected
+    }
+    fn is_highlighted(&self) -> bool {
+        self.highlighted
     }
     fn clear_selection(&mut self) {
         self.selected = false;
@@ -216,6 +240,9 @@ impl CShapes for CShapeOblong {
         self.handles.0.set_selection(false);
         self.handles.1.set_selection(false);
         self.handles.2.set_selection(false);
+    }
+    fn get_position(&self) -> Vec2 {
+        (self.handles.0.get_pos() + self.handles.1.get_pos()) / 2.
     }
     fn move_position(&mut self, pos_init: Vec2, pos: Vec2) {
         let dpos = pos - pos_init;
@@ -255,7 +282,7 @@ impl CShapes for CShapeOblong {
                 }
                 2 => {
                     let pos3 = projection_to_perpendicular(h1, h2, h3 + dpos);
-                    let mut radius = self.get_radius(pos3);
+                    let mut radius = self.get_radius_from_point(pos3);
                     if radius < 1. {
                         radius = 1.
                     }

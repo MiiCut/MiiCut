@@ -10,9 +10,9 @@
     --canvas-grid-color: #c1c0c0;
     --canvas-selection-color: rgb(255, 255, 0);
     --canvas-selected-color:  #ff0000;
-    --canvas-bold-color:  #ffb700;
+    --canvas-highlight-color:  #ffb700;
     --canvas-light-color:  #02ae0b;
-    --canvas-normal-color: #4d4d4d;
+    --canvas-normal-color: #ffffff00;
     --canvas-binding-requested-color:  #00e235;
     --canvas-fill-color: rgba(0, 0, 0, 0.119);
     --canvas-transparent-color: rgba(255, 255, 255, 0);
@@ -22,6 +22,9 @@ body, html {
     margin: 0;
     padding: 0;
     font-family: 'Orbitron';
+    height: 100%; /* Ensures the body fills the viewport */
+    display: flex;
+    flex-direction: column;
 }
 
 #settingsPanel {
@@ -133,7 +136,12 @@ body, html {
 }
 
 #canvas-container {
-    position: relative; /* Assurez-vous qu'il a un contexte de positionnement */
+    position: absolute;
+    top: 50px; /* Below the top menu */
+    left: 60px; /* Right of the sidebar */
+    bottom: 50px; /* Above the status bar */
+    right: 0; /* Extend to the right edge */
+    background-color: #eee;
     z-index: 1; /* Position du canvas en arrière-plan */
 }
 canvas {
@@ -147,19 +155,19 @@ canvas {
     z-index: 1; /* Default z-index for the first canvas */
     background-color: transparent; /* Ensure transparency unless needed */
 }
-#backCanvas {
+#backgroundCanvas {
     z-index: 1; /* Bottom layer */
-    background-color: #dddddd; /* Background color for debugging */
+    background-color: #000000; /* Background color for debugging */
 }
 
-#mainCanvas {
+#gridCanvas {
     z-index: 2; /* Middle layer */
     background-color: rgba(0, 255, 0, 0.5); /* Green with transparency */
 }
 
-#canvas3 {
+#mainCanvas {
     z-index: 3; /* Top layer */
-    background-color: rgba(255, 0, 0, 0.5); /* Red with transparency */
+    background-color: rgba(255, 0, 0, 0.299); /* Red with transparency */
 }
 
 /* Style the custom context menu */

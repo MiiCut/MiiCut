@@ -6,7 +6,6 @@ macro_rules! log {
     }
 }
 
-use crate::closed_shapes::ClosedShapeId;
 use approx::*;
 use kurbo::{BezPath, Line, ParamCurveNearest, PathEl, Rect, RoundedRectRadii, Vec2};
 use std::f64::consts::PI;
@@ -16,10 +15,12 @@ use std::{
     fmt::{self},
 };
 
+use crate::shapes_pool::CShid;
+
 #[derive(Debug)]
 pub enum MyError {
     NoShapeSelected,
-    NoClosedShapeForCShid(ClosedShapeId),
+    NoClosedShapeForCShid(CShid),
     Inconsistent,
     Impossible,
     ShapesFull,
@@ -249,6 +250,10 @@ pub fn get_unit_vector_perpendicular(pt1: &Vec2, pt2: &Vec2, pos: &Vec2) -> Opti
     let dot_product = v1.dot(pv2) * pv2;
 
     Some(dot_product)
+}
+// Helper to calculate signed distance to a line
+pub fn signed_distance(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    (p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x)
 }
 
 pub fn get_dist_to_line(pt1: Vec2, pt2: Vec2, pos: Vec2) -> f64 {
@@ -697,7 +702,7 @@ pub fn to_canvas(pt: &Vec2, scale: f64, offset: &Vec2) -> Vec2 {
         y: (pt.y * scale) + offset.y,
     }
 }
-pub fn to_world(pt: &Vec2, scale: f64, offset: &Vec2) -> Vec2 {
+pub fn to_draw(pt: &Vec2, scale: f64, offset: &Vec2) -> Vec2 {
     Vec2 {
         x: (pt.x - offset.x) / scale,
         y: (pt.y - offset.y) / scale,
