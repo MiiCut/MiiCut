@@ -9,8 +9,9 @@ use kurbo::{BezPath, Circle, CirclePathIter, Point, Rect, Shape, Vec2};
 use std::fmt::Display;
 
 use crate::{
+    handles::{Handle, HandleKind},
     math::*,
-    shapes::{CShapes, Handle, HandleKind},
+    shapes::CShapes,
     shapes_pool::CShapeKind,
 };
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -90,6 +91,7 @@ impl CShapes for CShapeHole {
     fn get_shape_path(&self) -> BezPath {
         self.get_circle().to_path(Self::TOLERANCE)
     }
+
     fn highlight_object(&mut self, pos: Vec2, precision: f64) {
         self.handles
             .0
@@ -103,6 +105,13 @@ impl CShapes for CShapeHole {
             self.highlighted = false;
         }
     }
+    fn set_highlight(&mut self, value: bool) {
+        self.highlighted = value;
+    }
+    fn is_highlighted(&self) -> bool {
+        self.highlighted
+    }
+
     fn select_object(&mut self, pos: Vec2, precision: f64) {
         self.handles
             .0
@@ -116,11 +125,11 @@ impl CShapes for CShapeHole {
             self.selected = false;
         }
     }
+    fn set_selection(&mut self, value: bool) {
+        self.selected = value;
+    }
     fn is_selected(&self) -> bool {
         self.selected
-    }
-    fn is_highlighted(&self) -> bool {
-        self.highlighted
     }
     fn clear_selection(&mut self) {
         self.selected = false;
@@ -130,6 +139,7 @@ impl CShapes for CShapeHole {
         self.handles.0.set_selection(false);
         self.handles.1.set_selection(false);
     }
+
     fn get_position(&self) -> Vec2 {
         self.handles.0.get_pos()
     }
@@ -160,9 +170,6 @@ impl CShapes for CShapeHole {
     }
     fn get_handles(&self) -> Vec<Handle> {
         vec![self.handles.0, self.handles.1]
-    }
-    fn update_handles_pos(&mut self) {
-        ()
     }
     fn get_handle_selected(&self) -> Option<(Handle, usize)> {
         if self.handles.0.get_selection() {

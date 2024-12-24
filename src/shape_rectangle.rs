@@ -5,9 +5,12 @@
 //     }
 // }
 
-use crate::math::*;
-use crate::shapes::{CShapes, Handle, HandleKind};
-use crate::shapes_pool::CShapeKind;
+use crate::{
+    handles::{Handle, HandleKind},
+    math::*,
+    shapes::CShapes,
+    shapes_pool::CShapeKind,
+};
 use kurbo::{BezPath, Point, Rect, RectPathIter, Shape, Vec2};
 use std::fmt::Display;
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -104,6 +107,7 @@ impl CShapes for CShapeRectangle {
     fn get_shape_path(&self) -> BezPath {
         self.get_rectangle().to_path(Self::TOLERANCE)
     }
+
     fn highlight_object(&mut self, pos: Vec2, precision: f64) {
         self.handles
             .0
@@ -111,12 +115,20 @@ impl CShapes for CShapeRectangle {
         self.handles
             .1
             .set_highlighted(is_near_position(pos, self.handles.1.get_pos(), precision));
+
         if self.get_handle_highlighted().is_none() {
             self.highlighted = self.contains(pos.to_point());
         } else {
             self.highlighted = false;
         }
     }
+    fn set_highlight(&mut self, value: bool) {
+        self.highlighted = value;
+    }
+    fn is_highlighted(&self) -> bool {
+        self.highlighted
+    }
+
     fn select_object(&mut self, pos: Vec2, precision: f64) {
         self.handles
             .0
@@ -131,11 +143,11 @@ impl CShapes for CShapeRectangle {
             self.selected = false;
         }
     }
+    fn set_selection(&mut self, value: bool) {
+        self.selected = value;
+    }
     fn is_selected(&self) -> bool {
         self.selected
-    }
-    fn is_highlighted(&self) -> bool {
-        self.highlighted
     }
     fn clear_selection(&mut self) {
         self.selected = false;
@@ -173,13 +185,9 @@ impl CShapes for CShapeRectangle {
                 _ => unreachable!(),
             },
         };
-        self.update_handles_pos();
     }
     fn get_handles(&self) -> Vec<Handle> {
         vec![self.handles.0, self.handles.1]
-    }
-    fn update_handles_pos(&mut self) {
-        ()
     }
     fn get_handle_selected(&self) -> Option<(Handle, usize)> {
         if self.handles.0.get_selection() {

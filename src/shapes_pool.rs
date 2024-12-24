@@ -1,6 +1,5 @@
 use crate::{
     canvas_core::Layer,
-    math::*,
     shape_hole::CShapeHole,
     shape_oblong::CShapeOblong,
     shape_rectangle::CShapeRectangle,
@@ -96,20 +95,44 @@ impl CSPool {
             cshapes: HashMap::new(),
         }
     }
-    pub fn add_shape(&mut self, cshape: CShape) -> CShid {
+    pub fn add_shape(&mut self, cshape: CShape) {
         let cshid = cshape.get_id();
         self.cshapes.insert(cshid, cshape);
-        cshid
     }
     pub fn delete_shape(&mut self, cshid: CShid) -> Option<CShape> {
-        self.cshapes.remove(&cshid)
+        if let Some(cshape) = self.cshapes.remove(&cshid) {
+            Some(cshape)
+        } else {
+            for (cshid, shapes) in self.cshapes.iter_mut() {
+                return shapes.get_children_mut().delete_shape(*cshid);
+            }
+            None
+        }
     }
-    pub fn get_shape(&self, cshid: CShid) -> Option<&CShape> {
-        self.cshapes.get(&cshid)
+    pub fn get_shape(&self, target_cshid: CShid) -> Option<&CShape> {
+        if let Some(cshape) = self.cshapes.get(&target_cshid) {
+            return Some(cshape);
+        }
+        for (_key, shape) in self.cshapes.iter() {
+            if let Some(child_shape) = shape.get_children().get_shape(target_cshid) {
+                return Some(child_shape);
+            }
+        }
+        None
     }
-    pub fn get_shape_mut(&mut self, cshid: CShid) -> Option<&mut CShape> {
-        self.cshapes.get_mut(&cshid)
+    pub fn get_shape_mut(&mut self, target_cshid: CShid) -> Option<&mut CShape> {
+        // Check if the target shape exists directly
+        if self.cshapes.contains_key(&target_cshid) {
+            return self.cshapes.get_mut(&target_cshid);
+        }
+        for (_key, shape) in self.cshapes.iter_mut() {
+            if let Some(child_shape) = shape.get_children_mut().get_shape_mut(target_cshid) {
+                return Some(child_shape);
+            }
+        }
+        None
     }
+
     pub fn iter(&self) -> impl Iterator<Item = (&CShid, &CShape)> {
         self.cshapes.iter()
     }
@@ -123,62 +146,116 @@ impl CSPool {
         self.cshapes.values_mut()
     }
 
-    pub fn set_selection(&mut self, pos: Vec2, precision: f64) {
-        for cshape in self.cshapes.values_mut() {
-            cshape.set_selection(pos, precision);
-        }
+    pub fn save_positions(&mut self) {
+        self.cshapes.values_mut().for_each(|cs| {
+            cs.save_pos();
+            cs.get_children_mut()
+                .values_mut()
+                .for_each(|csc| csc.save_pos());
+        });
     }
-    pub fn clear_selection_all(&mut self, cshid: CShid) -> Result<(), MyError> {
-        self.cshapes
-            .get_mut(&cshid)
-            .ok_or(MyError::NoClosedShapeForCShid(cshid))?
-            .clear_selection_all();
-        Ok(())
+
+    // Selections
+    pub fn select_object(&mut self, pos: Vec2, precision: f64) {
+        self.cshapes.values_mut().for_each(|cs| {
+            cs.select_object(pos, precision);
+            let selected = cs.is_selected();
+            cs.get_children_mut().values_mut().for_each(|csc| {
+                csc.set_selection(selected);
+                if !selected {
+                    csc.select_object(pos, precision);
+                }
+            });
+        });
     }
     pub fn clear_selections(&mut self) {
-        for cshape in self.cshapes.values_mut() {
-            cshape.clear_selection();
-        }
+        self.cshapes.values_mut().for_each(|cs| {
+            cs.clear_selection();
+            cs.get_children_mut().values_mut().for_each(|csc| {
+                csc.clear_selection();
+            });
+        });
     }
     pub fn clear_selections_all(&mut self) {
-        for cshape in self.cshapes.values_mut() {
-            cshape.clear_selection_all();
+        self.cshapes.values_mut().for_each(|cs| {
+            cs.clear_selection_all();
+            cs.get_children_mut().values_mut().for_each(|csc| {
+                csc.clear_selection_all();
+            });
+        });
+    }
+    pub fn move_selection(&mut self, pos_dwn: Vec2, cursor_pos: Vec2) {
+        self.cshapes.values_mut().for_each(|cs| {
+            cs.move_selection(pos_dwn, cursor_pos);
+            cs.get_children_mut()
+                .values_mut()
+                .for_each(|csc| csc.move_selection(pos_dwn, cursor_pos));
+        });
+    }
+    pub fn move_cshid_selection(&mut self, cshid: CShid, pos_dwn: Vec2, cursor_pos: Vec2) {
+        if let Some(cshape) = self.get_shape_mut(cshid) {
+            cshape.move_selection(pos_dwn, cursor_pos);
         }
     }
-    pub fn save_positions(&mut self) {
-        for cshape in self.cshapes.values_mut() {
-            cshape.save_pos();
+    pub fn toggle_op(&mut self, cshid: CShid) {
+        if let Some(cshape) = self.get_shape_mut(cshid) {
+            if cshape.get_parent().is_some() {
+                log!("toggle_op: {:?}", cshid);
+                cshape.toggle_op();
+            }
         }
     }
+    pub fn get_selection(&self) -> Vec<CShid> {
+        let mut selection = vec![];
+        self.cshapes.values().for_each(|cs| {
+            if cs.is_selected() {
+                selection.push(cs.get_id());
+            }
+        });
+        selection
+    }
+    pub fn delete_objects_selected(&mut self) {
+        self.cshapes.retain(|_, v| !v.is_selected());
+        self.cshapes.values_mut().for_each(|cs| {
+            cs.get_children_mut()
+                .cshapes
+                .retain(|_, v| !v.is_selected());
+        });
+    }
+    // Highlighting
     pub fn highlight_object(&mut self, pos: Vec2, precision: f64) {
         for cshape in self.cshapes.values_mut() {
             cshape.highlight_object(pos, precision);
-        }
-    }
-    pub fn move_selection(&mut self, pos_dwn: Vec2, cursor_pos: Vec2) -> Result<(), MyError> {
-        for cshape in self.cshapes.values_mut() {
-            cshape.move_selection(pos_dwn, cursor_pos);
-        }
-        Ok(())
-    }
-    pub fn get_selected(&self) -> Option<&CShape> {
-        for cshape in self.cshapes.values() {
-            if cshape.is_selected() {
-                return Some(cshape);
+            let highlight = cshape.is_highlighted();
+            for cshape_child in cshape.get_children_mut().values_mut() {
+                cshape_child.set_highlight(highlight);
+                if !highlight {
+                    cshape_child.highlight_object(pos, precision);
+                }
             }
         }
-        None
     }
-    pub fn get_highlighted(&self) -> Option<CShid> {
+    pub fn get_first_highlighted(&self) -> Option<CShid> {
         for cshape in self.cshapes.values() {
             if cshape.is_highlighted() {
                 return Some(cshape.get_id());
             }
+            for cshape_child in cshape.get_children().values() {
+                if cshape_child.is_highlighted() {
+                    return Some(cshape_child.get_id());
+                }
+            }
         }
         None
     }
-    pub fn delete_object_selected(&mut self) {
-        self.cshapes.retain(|_, v| !v.is_selected());
+    pub fn get_highlighted(&self) -> Vec<CShid> {
+        let mut highlight = vec![];
+        for cshape in self.cshapes.values() {
+            if cshape.is_highlighted() {
+                highlight.push(cshape.get_id());
+            }
+        }
+        highlight
     }
 }
 

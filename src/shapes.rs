@@ -7,16 +7,10 @@
 
 use crate::{
     canvas_core::{Layer, Pattern},
-    prefab,
+    handles::Handle,
     shapes_pool::{CSPool, CShapeKind, CShid},
 };
 use kurbo::{BezPath, Vec2};
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-    ops::{Deref, DerefMut},
-    sync::atomic::{AtomicUsize, Ordering},
-};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum GlobalCompositeOperation {
@@ -158,86 +152,6 @@ impl GlobalCompositeOperation {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum HandleKind {
-    Grab,
-    Modify,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Handle {
-    saved_pos: Vec2,
-    old_pos: Vec2,
-    pos: Vec2,
-    kind: HandleKind,
-    highlighted: bool,
-    selected: bool,
-}
-impl Handle {
-    pub fn new(pos: Vec2, kind: HandleKind, selected: bool) -> Handle {
-        Handle {
-            saved_pos: pos,
-            old_pos: pos,
-            pos,
-            kind,
-            highlighted: false,
-            selected,
-        }
-    }
-    pub fn is_highlighted(&self) -> bool {
-        self.highlighted
-    }
-    pub fn set_highlighted(&mut self, highlighted: bool) {
-        self.highlighted = highlighted;
-    }
-    pub fn get_selection(&self) -> bool {
-        self.selected
-    }
-    pub fn set_selection(&mut self, selected: bool) {
-        self.selected = selected;
-    }
-    pub fn get_pos(&self) -> Vec2 {
-        self.pos
-    }
-    pub fn get_last_pos(&self) -> Vec2 {
-        self.old_pos
-    }
-    pub fn get_saved_pos(&self) -> Vec2 {
-        self.saved_pos
-    }
-    pub fn set_pos(&mut self, pos: Vec2) {
-        self.old_pos = self.pos;
-        self.pos = pos;
-    }
-    pub fn save_pos(&mut self) {
-        self.saved_pos = self.pos;
-        self.old_pos = self.pos;
-    }
-    pub fn get_kind(&self) -> HandleKind {
-        self.kind
-    }
-    pub fn get_path(&self, scale: f64) -> (Pattern, BezPath) {
-        let grab_path = prefab::handle_grab_path(self.pos, scale);
-        let modify_path = prefab::handle_modify_path(self.pos, scale);
-
-        match self.kind {
-            HandleKind::Grab => match (self.selected, self.highlighted) {
-                (false, false) => (Pattern::Normal, grab_path),
-                (false, true) => (Pattern::Highlighted, grab_path),
-                (true, false) => (Pattern::Selected, grab_path),
-                (true, true) => (Pattern::Highlighted, grab_path),
-            },
-            HandleKind::Modify => {
-                if self.highlighted {
-                    (Pattern::Highlighted, modify_path)
-                } else {
-                    (Pattern::Light, modify_path)
-                }
-            }
-        }
-    }
-}
-
 pub trait CShapes {
     const TOLERANCE: f64;
 
@@ -245,17 +159,20 @@ pub trait CShapes {
     fn save_pos(&mut self);
     fn toggle_prop(&mut self);
     fn get_shape_path(&self) -> BezPath;
+
     fn highlight_object(&mut self, pos: Vec2, precision: f64);
-    fn select_object(&mut self, pos: Vec2, precision: f64);
-    fn is_selected(&self) -> bool;
+    fn set_highlight(&mut self, value: bool);
     fn is_highlighted(&self) -> bool;
+
+    fn select_object(&mut self, pos: Vec2, precision: f64);
+    fn set_selection(&mut self, value: bool);
+    fn is_selected(&self) -> bool;
     fn clear_selection(&mut self);
     fn clear_selection_all(&mut self);
+
     fn get_position(&self) -> Vec2;
     fn move_position(&mut self, pos_init: Vec2, pos: Vec2);
     fn get_handles(&self) -> Vec<Handle>;
-    // Trait implementation must call this function after each move
-    fn update_handles_pos(&mut self);
     // Return the first handle selected found or None
     fn get_handle_selected(&self) -> Option<(Handle, usize)>;
     // Return the first handle highlighted found or None
@@ -294,11 +211,17 @@ impl CShape {
     pub fn get_parent(&self) -> Option<CShid> {
         self.parent
     }
-    pub fn get_layer(&self) -> Layer {
-        self.layer
-    }
     pub fn get_op(&self) -> GlobalCompositeOperation {
         self.op
+    }
+    pub fn get_children(&self) -> &CSPool {
+        &self.children
+    }
+    pub fn get_children_mut(&mut self) -> &mut CSPool {
+        &mut self.children
+    }
+    pub fn add_child(&mut self, cshape: CShape) {
+        self.children.add_shape(cshape)
     }
     pub fn save_pos(&mut self) {
         use CShapeKind::*;
@@ -312,15 +235,14 @@ impl CShape {
     pub fn toggle_prop(&mut self) {
         ()
     }
-    pub fn get_shape_path(&self) -> BezPath {
-        use CShapeKind::*;
-        match self.cshape_kind {
-            CRectangle(sh) => sh.get_shape_path(),
-            CRectangleRounded(sh) => sh.get_shape_path(),
-            CHole(sh) => sh.get_shape_path(),
-            COblong(sh) => sh.get_shape_path(),
+    pub fn toggle_op(&mut self) {
+        if self.op == GlobalCompositeOperation::new_source_over() {
+            self.op = GlobalCompositeOperation::new_destination_out();
+        } else {
+            self.op = GlobalCompositeOperation::new_source_over();
         }
     }
+
     pub fn highlight_object(&mut self, pos: Vec2, precision: f64) {
         use CShapeKind::*;
         match &mut self.cshape_kind {
@@ -330,13 +252,13 @@ impl CShape {
             COblong(sh) => sh.highlight_object(pos, precision),
         }
     }
-    pub fn set_selection(&mut self, pos: Vec2, precision: f64) {
+    pub fn set_highlight(&mut self, value: bool) {
         use CShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.select_object(pos, precision),
-            CRectangleRounded(sh) => sh.select_object(pos, precision),
-            CHole(sh) => sh.select_object(pos, precision),
-            COblong(sh) => sh.select_object(pos, precision),
+            CRectangle(sh) => sh.set_highlight(value),
+            CRectangleRounded(sh) => sh.set_highlight(value),
+            CHole(sh) => sh.set_highlight(value),
+            COblong(sh) => sh.set_highlight(value),
         }
     }
     pub fn is_highlighted(&self) -> bool {
@@ -346,6 +268,25 @@ impl CShape {
             CRectangleRounded(sh) => sh.is_highlighted(),
             CHole(sh) => sh.is_highlighted(),
             COblong(sh) => sh.is_highlighted(),
+        }
+    }
+
+    pub fn select_object(&mut self, pos: Vec2, precision: f64) {
+        use CShapeKind::*;
+        match &mut self.cshape_kind {
+            CRectangle(sh) => sh.select_object(pos, precision),
+            CRectangleRounded(sh) => sh.select_object(pos, precision),
+            CHole(sh) => sh.select_object(pos, precision),
+            COblong(sh) => sh.select_object(pos, precision),
+        }
+    }
+    pub fn set_selection(&mut self, value: bool) {
+        use CShapeKind::*;
+        match &mut self.cshape_kind {
+            CRectangle(sh) => sh.set_selection(value),
+            CRectangleRounded(sh) => sh.set_selection(value),
+            CHole(sh) => sh.set_selection(value),
+            COblong(sh) => sh.set_selection(value),
         }
     }
     pub fn is_selected(&self) -> bool {
@@ -384,6 +325,7 @@ impl CShape {
             COblong(sh) => sh.move_position(pos_init, pos),
         }
     }
+
     pub fn get_handles(&self) -> Vec<Handle> {
         use CShapeKind::*;
         match self.cshape_kind {
@@ -391,6 +333,26 @@ impl CShape {
             CRectangleRounded(sh) => sh.get_handles(),
             CHole(sh) => sh.get_handles(),
             COblong(sh) => sh.get_handles(),
+        }
+    }
+    pub fn get_layer(&self) -> Layer {
+        self.layer
+    }
+    pub fn get_path(&self) -> BezPath {
+        use CShapeKind::*;
+        match self.cshape_kind {
+            CRectangle(sh) => sh.get_shape_path(),
+            CRectangleRounded(sh) => sh.get_shape_path(),
+            CHole(sh) => sh.get_shape_path(),
+            COblong(sh) => sh.get_shape_path(),
+        }
+    }
+    pub fn get_pattern(&self) -> Pattern {
+        match (self.is_selected(), self.is_highlighted()) {
+            (false, false) => Pattern::Normal(true),
+            (false, true) => Pattern::Highlighted(true),
+            (true, false) => Pattern::Selected(true),
+            (true, true) => Pattern::Selected(true),
         }
     }
 }

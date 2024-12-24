@@ -6,8 +6,9 @@
 // }
 
 use crate::{
+    handles::{Handle, HandleKind},
     math::*,
-    shapes::{CShapes, Handle, HandleKind},
+    shapes::CShapes,
     shapes_pool::CShapeKind,
 };
 use kurbo::{
@@ -121,6 +122,7 @@ impl CShapes for CShapeRectRounded {
     fn get_shape_path(&self) -> BezPath {
         self.get_rectangle_rounded().to_path(Self::TOLERANCE)
     }
+
     fn highlight_object(&mut self, pos: Vec2, precision: f64) {
         self.handles
             .0
@@ -146,6 +148,13 @@ impl CShapes for CShapeRectRounded {
             self.highlighted = false;
         }
     }
+    fn set_highlight(&mut self, value: bool) {
+        self.highlighted = value;
+    }
+    fn is_highlighted(&self) -> bool {
+        self.highlighted
+    }
+
     fn select_object(&mut self, pos: Vec2, precision: f64) {
         self.handles
             .0
@@ -171,11 +180,11 @@ impl CShapes for CShapeRectRounded {
             self.selected = false;
         }
     }
+    fn set_selection(&mut self, value: bool) {
+        self.selected = value;
+    }
     fn is_selected(&self) -> bool {
         self.selected
-    }
-    fn is_highlighted(&self) -> bool {
-        self.highlighted
     }
     fn clear_selection(&mut self) {
         self.selected = false;
@@ -189,6 +198,7 @@ impl CShapes for CShapeRectRounded {
         self.handles.4.set_selection(false);
         self.handles.5.set_selection(false);
     }
+
     fn get_position(&self) -> Vec2 {
         (self.handles.0.get_pos() + self.handles.1.get_pos()) / 2.
     }
@@ -312,7 +322,6 @@ impl CShapes for CShapeRectRounded {
                 }
             }
         }
-        self.update_handles_pos();
     }
     fn get_handles(&self) -> Vec<Handle> {
         vec![
@@ -323,9 +332,6 @@ impl CShapes for CShapeRectRounded {
             self.handles.4,
             self.handles.5,
         ]
-    }
-    fn update_handles_pos(&mut self) {
-        ()
     }
     fn get_handle_selected(&self) -> Option<(Handle, usize)> {
         if self.handles.0.get_selection() {

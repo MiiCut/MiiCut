@@ -38,7 +38,6 @@ pub struct Canvases {
     grid_size: f64,
     grid_snap: f64,
 }
-
 impl Canvases {
     pub fn new(
         c_back: HtmlCanvasElement,
@@ -88,7 +87,6 @@ impl Canvases {
             grid_snap: 1.,
         }
     }
-
     pub fn clear_background_canvas(&mut self) {
         self.c_back_ctx.clear_rect(
             0.,
@@ -113,7 +111,6 @@ impl Canvases {
             self.c_main.height() as f64,
         );
     }
-
     pub fn get_main_canvas(&self) -> &HtmlCanvasElement {
         &self.c_main
     }
@@ -131,11 +128,9 @@ impl Canvases {
     pub fn get_main_canvas_context(&self) -> &CanvasRenderingContext2d {
         &self.c_main_ctx
     }
-
     pub fn get_size(&self) -> Size {
         Size::new(self.c_main.width() as f64, self.c_main.height() as f64)
     }
-
     pub fn resize_canvases(&mut self, width: u32, height: u32) {
         self.c_back.set_width(width);
         self.c_back.set_height(height);
@@ -145,7 +140,6 @@ impl Canvases {
         self.c_main.set_height(height);
         // Update the drawing area
     }
-
     pub fn get_drawing_scale(&self) -> f64 {
         self.drawing_scale
     }
@@ -276,28 +270,27 @@ impl DrawStyles {
             pattern_solid: JsValue::from(solid_pattern),
         })
     }
-    pub fn get_styles(&self, pattern: Pattern) -> (&JsValue, f64) {
+    pub fn get_styles(&self, pattern: Pattern) -> (&JsValue, f64, bool) {
         use Pattern::*;
-        let (line_dash, line_width) = match pattern {
-            Selected => (&self.pattern_solid, 2.),
-            Highlighted => (&self.pattern_solid, 3.),
-            Normal => (&self.pattern_solid, 1.),
-            Light => (&self.pattern_solid, 1.),
-            Bold => (&self.pattern_solid, 2.),
-            Grid => (&self.pattern_solid, 1.),
+        let (line_dash, line_width, filled) = match pattern {
+            Selected(filled) => (&self.pattern_solid, 2., filled),
+            Highlighted(filled) => (&self.pattern_solid, 3., filled),
+            Normal(filled) => (&self.pattern_solid, 1., filled),
+            Light(filled) => (&self.pattern_solid, 1., filled),
+            Bold(filled) => (&self.pattern_solid, 2., filled),
+            Grid(filled) => (&self.pattern_solid, 1., filled),
         };
-
-        (line_dash, line_width)
+        (line_dash, line_width, filled)
     }
     pub fn get_colors(&self, pattern: Pattern) -> (&str, &str) {
         use Pattern::*;
         let (fill_color, color) = match pattern {
-            Selected => (&self.selected_color, &self.selected_color),
-            Highlighted => (&self.bold_color, &self.bold_color),
-            Normal => (&self.light_color, &self.normal_color),
-            Light => (&self.light_color, &self.light_color),
-            Bold => (&self.worksheet_color, &self.worksheet_color),
-            Grid => (&self.grid_color, &self.grid_color),
+            Selected(_) => (&self.selected_color, &self.selected_color),
+            Highlighted(_) => (&self.bold_color, &self.bold_color),
+            Normal(_) => (&self.light_color, &self.normal_color),
+            Light(_) => (&self.light_color, &self.light_color),
+            Bold(_) => (&self.worksheet_color, &self.worksheet_color),
+            Grid(_) => (&self.grid_color, &self.grid_color),
         };
         (fill_color, color)
     }
@@ -312,20 +305,12 @@ impl DrawStyles {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Copy, Clone)]
-pub enum InnerPattern {
-    Filled,
-    None,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Pattern {
-    Normal,
-    Light,
-    Bold,
-    Grid,
-    Highlighted,
-    Selected,
+    Normal(bool),
+    Light(bool),
+    Bold(bool),
+    Grid(bool),
+    Highlighted(bool),
+    Selected(bool),
 }

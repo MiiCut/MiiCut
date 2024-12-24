@@ -171,29 +171,15 @@ canvas {
 }
 
 /* Style the custom context menu */
-#contextMenu {
-    width: 150px;
-    box-shadow: 3px 3px 5px rgba(0, 0, 0, 0.2);
-}
 
-#contextMenu a {
-    display: block;
-    padding: 8px 16px;
-    color: black;
-    text-decoration: none;
-}
-
-#contextMenu a:hover {
-    background-color: #f1f1f1;
-}
 
 .context-menu .separator {
     border-top: 1px solid #ccc;  /* Change #ccc to whatever color you like */
     margin: 8px 0;  /* Add some vertical spacing around the separator */
 }
 /* 
-
-
+    The following styles are for the left panel and the icons.
+    You can customize these styles as per your requirements.
 */
 /* Left panel styles */
 .left-panel {

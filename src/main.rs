@@ -7,6 +7,7 @@ macro_rules! log {
 }
 pub mod canvas_core;
 pub mod dom;
+pub mod handles;
 pub mod math;
 pub mod prefab;
 pub mod shape_hole;
@@ -25,16 +26,15 @@ use shapes::GlobalCompositeOperation;
 use shapes_pool::CSPool;
 use shapes_pool::CShapeBuilder;
 use shapes_pool::CShid;
+use std::collections::HashSet;
 use std::{
     cell::{RefCell, RefMut},
-    collections::HashMap,
     rc::Rc,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::{
-    window, CanvasRenderingContext2d, Document, Element, Event, FileList, FileReader,
-    HtmlCanvasElement, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent, WheelEvent,
-    Window,
+    window, Document, Element, Event, FileList, FileReader, HtmlCanvasElement, HtmlElement,
+    HtmlInputElement, KeyboardEvent, MouseEvent, WheelEvent, Window,
 };
 
 pub type RefAV = Rc<RefCell<AppVars>>;
@@ -65,8 +65,7 @@ pub struct AppVars {
     left_panel: HtmlElement,
     status_bar: HtmlElement,
     canvases: Canvases,
-    cm_shape: HtmlElement,
-    user_icons: HashMap<&'static str, Option<Element>>,
+    user_icons: HashSet<Icons>,
     tooltip: HtmlElement,
     settings_panel: HtmlElement,
     modal_backdrop: HtmlElement,
@@ -116,10 +115,7 @@ pub fn create_app_vars(window: Window) -> Result<(), JsValue> {
         .get_element_by_id("backgroundCanvas")
         .expect("should have backgroundCanvas on the page")
         .dyn_into::<HtmlCanvasElement>()?;
-    let cm_shape = document
-        .get_element_by_id("cm-shape")
-        .expect("should have cm-shape id on the page")
-        .dyn_into::<HtmlElement>()?;
+
     let tooltip = document
         .get_element_by_id("tooltip")
         .expect("should have tooltip on the page")
@@ -163,16 +159,16 @@ pub fn create_app_vars(window: Window) -> Result<(), JsValue> {
     settings_width_input.set_value(&wa_size.width.to_string());
     settings_height_input.set_value(&wa_size.height.to_string());
 
-    let mut user_icons: HashMap<&'static str, Option<Element>> = HashMap::new();
+    let mut user_icons: HashSet<Icons> = HashSet::new();
     use Icons::*;
     use IconsShapes::*;
-    user_icons.insert(Arrow.as_str(), None);
-    user_icons.insert(Selection.as_str(), None);
-    user_icons.insert(Scissors.as_str(), None);
-    user_icons.insert(Rectangle.as_str(), None);
-    user_icons.insert(RectangleRounded.as_str(), None);
-    user_icons.insert(Circle.as_str(), None);
-    user_icons.insert(Oblong.as_str(), None);
+    user_icons.insert(Arrow);
+    user_icons.insert(Selection);
+    user_icons.insert(Scissors);
+    user_icons.insert(IShapes(Rectangle));
+    user_icons.insert(IShapes(RectangleRounded));
+    user_icons.insert(IShapes(Circle));
+    user_icons.insert(IShapes(Oblong));
 
     let left_panel = document
         .get_element_by_id("left-panel")
@@ -197,7 +193,6 @@ pub fn create_app_vars(window: Window) -> Result<(), JsValue> {
         status_bar,
         canvases,
         //
-        cm_shape,
         user_icons,
         tooltip,
         settings_panel,
@@ -223,7 +218,7 @@ pub fn create_app_vars(window: Window) -> Result<(), JsValue> {
 
     init_window(app_vars.clone())?;
     init_menu(app_vars.clone())?;
-    init_context_menu(app_vars.clone())?;
+    // init_context_menu(app_vars.clone())?;
     init_icons(app_vars.clone())?;
     init_settings_panel(app_vars.clone())?;
     init_status(app_vars.clone())?;
@@ -300,76 +295,73 @@ fn init_settings_panel(av: RefAV) -> Result<(), JsValue> {
     Ok(())
 }
 fn init_icons(av: RefAV) -> Result<(), JsValue> {
-    let mut pam = av.borrow_mut();
-    let document = pam.document.clone();
-    for (element_name, element_to_set) in pam.user_icons.iter_mut() {
-        if let Some(element) = get_element(&document, element_name).ok() {
-            *element_to_set = Some(element);
-            set_callback(
-                av.clone(),
-                "click".into(),
-                &element_to_set.as_ref().unwrap(),
-                Box::new(on_icon_click),
-            )?;
-            set_callback(
-                av.clone(),
-                "mouseover".into(),
-                &element_to_set.as_ref().unwrap(),
-                Box::new(on_icon_mouseover),
-            )?;
-            set_callback(
-                av.clone(),
-                "mouseout".into(),
-                &element_to_set.as_ref().unwrap(),
-                Box::new(on_icon_mouseout),
-            )?;
-        }
+    let avb = av.borrow_mut();
+    for icon in avb.user_icons.iter() {
+        let element_to_set = icon.get_element();
+        set_callback(
+            av.clone(),
+            "click".into(),
+            &element_to_set.as_ref().unwrap(),
+            Box::new(on_icon_click),
+        )?;
+        set_callback(
+            av.clone(),
+            "mouseover".into(),
+            &element_to_set.as_ref().unwrap(),
+            Box::new(on_icon_mouseover),
+        )?;
+        set_callback(
+            av.clone(),
+            "mouseout".into(),
+            &element_to_set.as_ref().unwrap(),
+            Box::new(on_icon_mouseout),
+        )?;
     }
 
     Ok(())
 }
-fn init_context_menu(av: RefAV) -> Result<(), JsValue> {
-    let pam = av.borrow_mut();
-    let document = pam.document.clone();
-    //
-    let cm_shape_force_horizontal = document
-        .get_element_by_id("cm-shape-force-horizontal")
-        .unwrap();
-    set_callback(
-        av.clone(),
-        "click".into(),
-        &cm_shape_force_horizontal,
-        Box::new(on_cm_shape_force_horizontal),
-    )?;
-    let cm_shape_force_vertical = document
-        .get_element_by_id("cm-shape-force-vertical")
-        .unwrap();
-    set_callback(
-        av.clone(),
-        "click".into(),
-        &cm_shape_force_vertical,
-        Box::new(on_cm_shape_force_vertical),
-    )?;
-    let cm_shape_unforce_horizontal = document
-        .get_element_by_id("cm-shape-unforce-horizontal")
-        .unwrap();
-    set_callback(
-        av.clone(),
-        "click".into(),
-        &cm_shape_unforce_horizontal,
-        Box::new(on_cm_shape_unforce_horizontal),
-    )?;
-    let cm_shape_unforce_vertical = document
-        .get_element_by_id("cm-shape-unforce-vertical")
-        .unwrap();
-    set_callback(
-        av.clone(),
-        "click".into(),
-        &cm_shape_unforce_vertical,
-        Box::new(on_cm_shape_unforce_vertical),
-    )?;
-    Ok(())
-}
+// fn init_context_menu(av: RefAV) -> Result<(), JsValue> {
+//     let pam = av.borrow_mut();
+//     let document = pam.document.clone();
+//     //
+//     let cm_shape_force_horizontal = document
+//         .get_element_by_id("cm-shape-force-horizontal")
+//         .unwrap();
+//     set_callback(
+//         av.clone(),
+//         "click".into(),
+//         &cm_shape_force_horizontal,
+//         Box::new(on_cm_shape_force_horizontal),
+//     )?;
+//     let cm_shape_force_vertical = document
+//         .get_element_by_id("cm-shape-force-vertical")
+//         .unwrap();
+//     set_callback(
+//         av.clone(),
+//         "click".into(),
+//         &cm_shape_force_vertical,
+//         Box::new(on_cm_shape_force_vertical),
+//     )?;
+//     let cm_shape_unforce_horizontal = document
+//         .get_element_by_id("cm-shape-unforce-horizontal")
+//         .unwrap();
+//     set_callback(
+//         av.clone(),
+//         "click".into(),
+//         &cm_shape_unforce_horizontal,
+//         Box::new(on_cm_shape_unforce_horizontal),
+//     )?;
+//     let cm_shape_unforce_vertical = document
+//         .get_element_by_id("cm-shape-unforce-vertical")
+//         .unwrap();
+//     set_callback(
+//         av.clone(),
+//         "click".into(),
+//         &cm_shape_unforce_vertical,
+//         Box::new(on_cm_shape_unforce_vertical),
+//     )?;
+//     Ok(())
+// }
 fn init_canvas(av: RefAV) -> Result<(), JsValue> {
     log!("init_canvas");
     let pam = av.borrow_mut();
@@ -529,13 +521,13 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
     match icon_selected {
         Icons::Arrow => match avb.mouse.get_mouse_state() {
             MouseState::LeftDown(cursor_pos) => {
-                avb.root_pool.set_selection(cursor_pos, grab_precision);
+                avb.root_pool.select_object(cursor_pos, grab_precision);
                 avb.root_pool.save_positions();
                 Ok(())
             }
             MouseState::LeftDownMove(pos_dwn, cursor_pos) => {
                 avb.root_pool.highlight_object(cursor_pos, grab_precision);
-                avb.root_pool.move_selection(pos_dwn, cursor_pos)?;
+                avb.root_pool.move_selection(pos_dwn, cursor_pos);
                 Ok(())
             }
             MouseState::LeftUp(_cursor_pos) => {
@@ -574,7 +566,9 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 MouseState::LeftDown(pos) => {
                     if let Some(cshid) = avb.on_creation {
                         // A. We were drawing a new shape, finish all
-                        avb.root_pool.clear_selection_all(cshid)?;
+                        if let Some(shape) = avb.root_pool.get_shape_mut(cshid) {
+                            shape.clear_selection_all();
+                        }
                         avb.on_creation = None;
                         go_to_arrow_tool(avb);
                         Ok(())
@@ -584,7 +578,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                         let layer = Layer::Worksheet;
                         let op = GlobalCompositeOperation::new_source_over();
                         // Determine if we have clicked inside a existing shape and if so, select it as parent
-                        let ocshid_highlighted = avb.root_pool.get_highlighted();
+                        let ocshid_highlighted = avb.root_pool.get_first_highlighted();
                         let cshape = match ishape {
                             IconsShapes::Rectangle => CShapeBuilder::new_rectangle(
                                 pos,
@@ -608,21 +602,31 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                             }
                         };
                         avb.on_creation = Some(cshape.get_id());
-                        // avb.root_pool
-                        //     .add_child(ocshid_highlighted, cshape.get_id())?;
+                        if let Some(cshid_highlighted) = ocshid_highlighted {
+                            if let Some(cshape_highlighted) =
+                                avb.root_pool.get_shape_mut(cshid_highlighted)
+                            {
+                                cshape_highlighted.add_child(cshape);
+                            } else {
+                                unreachable!("Could not get the highlighted shape");
+                            }
+                        } else {
+                            avb.root_pool.add_shape(cshape);
+                        }
                         Ok(())
                     }
                 }
                 MouseState::LeftDownMove(pos_dwn, cursor_pos)
                 | MouseState::LeftUpMove(pos_dwn, cursor_pos) => {
-                    if avb.on_creation.is_none() {
+                    if let Some(cshid) = avb.on_creation {
+                        avb.root_pool
+                            .move_cshid_selection(cshid, pos_dwn, cursor_pos);
+                    } else {
                         avb.root_pool.highlight_object(cursor_pos, grab_precision);
                     }
                     avb.draw_cursor = cursor_pos;
-                    avb.root_pool.move_selection(pos_dwn, cursor_pos)?;
                     Ok(())
                 }
-
                 MouseState::RightDown(_) => {
                     if let Some(cshid) = avb.on_creation {
                         avb.root_pool.delete_shape(cshid);
@@ -685,7 +689,7 @@ fn on_mouse_down(av: RefAV, event: Event) {
         SystemMouse::Down,
     );
     // Hide the context menu when clicking elsewhere
-    hide_cm_shape(&mut pam);
+    display_html_element(DOMElements::ContextMenuShape, false);
 
     if let Some(e) = update(&mut pam).err() {
         log!("ERROR: {}", e);
@@ -767,107 +771,40 @@ fn on_context_menu(av: RefAV, event: Event) {
     let mut pam = av.borrow_mut();
     show_context_menu(&mut pam);
 }
-fn show_context_menu(_avb: &mut RefMut<'_, AppVars>) {
-    // show_cm_shape(pam, "cm-shape-force-horizontal");
-}
-fn _show_cm_shape(avb: &mut RefMut<'_, AppVars>, action_to_show: &str) {
-    // Display the context menu container
-    avb.cm_shape
-        .style()
-        .set_property("display", "block")
-        .unwrap();
-
-    // Position the context menu
-    let mouse_client = avb.mouse.get_mouse_client();
-    avb.cm_shape
-        .style()
-        .set_property("top", &format!("{}px", mouse_client.y))
-        .unwrap();
-    avb.cm_shape
-        .style()
-        .set_property("left", &format!("{}px", mouse_client.x))
-        .unwrap();
-
-    // List of all action IDs
-    let actions = [
-        "cm-shape-force-horizontal",
-        "cm-shape-force-vertical",
-        "cm-shape-unforce-horizontal",
-        "cm-shape-unforce-vertical",
-    ];
-
-    // Show only the specified action, hide others
-    for action in actions.iter() {
-        if let Some(element) = avb
-            .cm_shape
-            .query_selector(&format!("#{}", action))
-            .ok()
-            .flatten()
-        {
-            if let Some(html_element) = element.dyn_ref::<HtmlElement>() {
-                if action == &action_to_show {
-                    html_element
-                        .style()
-                        .set_property("display", "inline")
-                        .unwrap();
-                } else {
-                    html_element
-                        .style()
-                        .set_property("display", "none")
-                        .unwrap();
-                }
-            } else {
-                log!("Failed to cast action {} to HtmlElement", action);
-            }
-        }
+fn show_context_menu(avb: &mut RefMut<'_, AppVars>) {
+    if let Some(_) = avb.root_pool.get_first_highlighted() {
+        show_contex_menu_shape(avb.mouse.get_mouse_client());
     }
 }
-fn hide_cm_shape(avb: &mut RefMut<'_, AppVars>) {
-    avb.cm_shape
-        .style()
-        .set_property("display", "none")
-        .unwrap();
-}
-fn on_cm_shape_force_horizontal(av: RefAV, _event: Event) {
-    let mut pam = av.borrow_mut();
+fn show_contex_menu_shape(pos: Vec2) {
+    // Display the context menu container
+    display_html_element(DOMElements::ContextMenuShape, true);
+    set_pos_html_element(DOMElements::ContextMenuShape, pos);
 
-    // if let DrawObject::Shape(shid) = pam.dp.get_selection() {
-    //     log!("shape before: {:?}", shid);
-    //     // if let Some(shape) = pam.dp.shapes.get_mut(&shid).ok() {
-    //     //     shape.set_cstr(Constraint::H);
-    //     // }
-    // }
-    hide_cm_shape(&mut pam);
+    if let Some(cm_shape) = DOMElements::ContextMenuShape.get_html_element() {
+        // Add a new context menu item
+        add_menu_item_with_listener(&cm_shape, "cm-shape-new-item", "New Menu Item", || {
+            log!("New Menu Item clicked");
+        });
+    }
 }
-fn on_cm_shape_force_vertical(av: RefAV, _event: Event) {
-    let mut pam = av.borrow_mut();
-    // if let DrawObject::Shape(shid) = pam.dp.get_selection() {
-    //     log!("shape before: {:?}", shid);
-    //     // if let Some(shape) = pam.dp.shapes.get_mut(&shid).ok() {
-    //     //     shape.set_cstr(Constraint::V);
-    //     // }
-    // }
-    hide_cm_shape(&mut pam);
-}
-fn on_cm_shape_unforce_horizontal(av: RefAV, _event: Event) {
-    let mut pam = av.borrow_mut();
-    // if let DrawObject::Shape(shid) = pam.dp.get_selection() {
-    //     log!("shape before: {:?}", shid);
-    //     // if let Some(shape) = pam.dp.shapes.get_mut(&shid).ok() {
-    //     //     shape.set_cstr(Constraint::F);
-    //     // }
-    // }
-    hide_cm_shape(&mut pam);
-}
-fn on_cm_shape_unforce_vertical(av: RefAV, _event: Event) {
-    let mut pam = av.borrow_mut();
-    // if let DrawObject::Shape(shid) = pam.dp.get_selection() {
-    //     log!("shape before: {:?}", shid);
-    //     // if let Some(shape) = pam.dp.shapes.get_mut(&shid).ok() {
-    //     //     shape.set_cstr(Constraint::F);
-    //     // }
-    // }
-    hide_cm_shape(&mut pam);
+/// Adds a new menu item to the context menu and attaches a click event listener
+fn add_menu_item_with_listener<F>(menu: &web_sys::Element, id: &str, text: &str, callback: F)
+where
+    F: Fn() + 'static,
+{
+    let document = document();
+    // Create a new anchor element
+    let new_item = document.create_element("a").unwrap();
+    new_item.set_attribute("href", "#").unwrap();
+    new_item.set_id(id);
+    new_item.set_inner_html(text);
+
+    // Append the new item to the menu
+    menu.append_child(&new_item).unwrap();
+
+    // Add a click listener to the new item
+    add_click_listener(&new_item, callback);
 }
 
 ///////////////
@@ -940,101 +877,38 @@ fn on_window_resize(av: RefAV, _event: Event) {
     render_drawing(&mut pam);
     drop(pam);
 }
-fn on_window_click(_pa: RefAV, _event: Event) {
-    // let pam = av.borrow_mut();
-    // if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
-    //     // Not a right-click
-    //     if mouse_event.buttons() == 1 {
-    //         let target = event.target().unwrap();
-    //         let target = target.dyn_into::<web_sys::Node>().unwrap();
-    //         if !pam.settings_panel.contains(Some(&target)) {
-    //             pam
-    //                 .settings_panel
-    //                 .style()
-    //                 .set_property("display", "none")
-    //                 .unwrap();
-    //             pam
-    //                 .modal_backdrop
-    //                 .style()
-    //                 .set_property("display", "none")
-    //                 .unwrap();
-    //         }
-    //     }
-    // }
-}
+fn on_window_click(_pa: RefAV, _event: Event) {}
 fn on_window_keydown(av: RefAV, event: Event) {
     log!("on_keydown");
     event.prevent_default();
     if let Ok(keyboard_event) = event.dyn_into::<KeyboardEvent>() {
-        let mut pam = av.borrow_mut();
-        if keyboard_event.key() == " " {
-            // match pam.dp.get_selection() {
-            //     // DrawObject::Shape(shid) => {
-            //     //     if let Some(shape) = pam.dp.shapes.get_mut(&shid).ok() {
-            //     //         shape.toggle_prop();
-            //     //     }
-            //     // }
-            //     _ => (),
-            // }
-        }
+        let mut avb = av.borrow_mut();
+        if keyboard_event.key() == " " {}
         if keyboard_event.key() == "d" {
-            log!("creation: {:?}", pam.on_creation);
+            log!("creation: {:?}", avb.on_creation);
         }
         if keyboard_event.key() == "Delete" || keyboard_event.key() == "Backspace" {
-            pam.root_pool.delete_object_selected();
+            avb.root_pool.delete_objects_selected();
         }
         if keyboard_event.key() == "Escape" {
-            // if let DrawObject::Vertex(vid) = pam.dp.get_selection() {
-            //     if let Err(e) = pam.dp.delete_vertex(vid) {
-            //         log!("Error deleting vertex: {}", e);
-            //     }
-            // }
-            pam.on_creation = None;
-            go_to_arrow_tool(&mut pam);
+            avb.on_creation = None;
+            go_to_arrow_tool(&mut avb);
         }
         if keyboard_event.key() == "Control" || keyboard_event.key() == "Meta" {
-            pam.keys_states.crtl_pressed = true;
+            avb.keys_states.crtl_pressed = true;
         }
         if keyboard_event.key() == "Shift" {
-            pam.keys_states.shift_pressed = true;
+            avb.keys_states.shift_pressed = true;
         }
-        if keyboard_event.key() == "Tab" {
-            // let icon_selected_new = match pam.icon_selected {
-            //     Icons::Line => Icons::QuadBezier,
-            //     Icons::QuadBezier => Icons::CubicBezier,
-            //     Icons::CubicBezier => Icons::QuarterCircle,
-            //     Icons::QuarterCircle => Icons::QuarterEllipse,
-            //     Icons::QuarterEllipse => Icons::Line,
-            //     _ => pam.icon_selected,
-            // };
-            // if let DrawObject::Vertex(v_sel) = pam.dp.get_selection() {
-            //     if let Some(vertex) = pam.dp.vertices.get(&v_sel).ok() {
-            //         if let Some(shid) = vertex.get_shid().ok() {
-            //             if let Some(shape) = pam.dp.shapes.get(&shid).ok() {
-            //                 //
-            //             }
-            //         }
-            //     }
-            // }
+        if keyboard_event.key() == "t" {
+            if let Some(cshid) = avb.root_pool.get_first_highlighted() {
+                log!("get_first_highlighted: {}", cshid);
+                avb.root_pool.toggle_op(cshid);
+            }
+        }
 
-            // if pam.icon_selected != icon_selected_new {
-            //     html_deselect_icons(&pam);
-            //     html_select_icon(&pam, pam.icon_selected.as_str());
-            // }
-        }
-        // if keyboard_event.key() == "c" {
-        //     if pam.ctrl_or_meta_pressed {
-        //         let copy = pam
-        //             .shapes
-        //             .iter()
-        //             .filter(|shape| shape.get_handle_selected() < -1)
-        //             .cloned()
-        //             .collect();
-        //         pam.shape_buffer_copy_paste = copy;
-        //     }
-        // }
-        render_drawing(&mut pam);
-        drop(pam);
+        render_drawing(&mut avb);
+        drop(avb);
     }
 }
 
@@ -1042,40 +916,25 @@ fn on_window_keydown(av: RefAV, event: Event) {
 // Icons events
 fn on_icon_click(av: RefAV, event: Event) {
     log!("icon click");
-    let mut pam = av.borrow_mut();
+    let mut avb = av.borrow_mut();
     if let Some(target) = event.target() {
         if let Some(element) = wasm_bindgen::JsCast::dyn_ref::<Element>(&target) {
             if let Some(id) = element.get_attribute("id") {
-                if let Some(key) = pam.user_icons.keys().find(|&&k| k == id) {
-                    if let Some(icon) = Icons::from_str(key) {
-                        pam.icon_selected = icon;
-                        pam.on_creation = None;
-                        pam.root_pool.clear_selections_all();
-                    }
+                if let Some(icon) = avb.user_icons.iter().find(|&&k| k.id() == id).cloned() {
+                    avb.icon_selected = icon;
+                    avb.on_creation = None;
+                    avb.root_pool.clear_selections_all();
 
-                    match pam.icon_selected {
-                        // Icons::COG => {
-                        //     pam.settings_panel
-                        //         .style()
-                        //         .set_property("display", "block")
-                        //         .unwrap();
-                        //     pam.modal_backdrop
-                        //         .style()
-                        //         .set_property("display", "block")
-                        //         .unwrap();
-                        //     pam.icon_selected = Icons::COG;
-                        // }
-                        _ => {
-                            html_deselect_icons(&pam);
-                            html_select_icon(&pam, &id);
-                        }
-                    }
+                    avb.user_icons
+                        .iter()
+                        .for_each(|icon| html_deselect_icons(*icon));
+                    html_select_icon(icon);
                 }
             }
         }
     }
-    render_drawing(&mut pam);
-    drop(pam);
+    render_drawing(&mut avb);
+    drop(avb);
 }
 fn on_icon_mouseover(av: RefAV, event: Event) {
     let pam = av.borrow_mut();
@@ -1116,111 +975,29 @@ fn on_icon_mouseout(av: RefAV, _event: Event) {
 // Helpers
 fn go_to_arrow_tool(avb: &mut RefMut<'_, AppVars>) {
     avb.icon_selected = Icons::Arrow;
-    html_deselect_icons(&avb);
-    html_select_icon(&avb, &Icons::Arrow.as_str());
+    avb.user_icons
+        .iter()
+        .for_each(|icon| html_deselect_icons(*icon));
+    html_select_icon(Icons::Arrow);
 }
-fn html_select_icon(avb: &RefMut<'_, AppVars>, name: &str) {
-    if let Some(element) = avb.user_icons.get(name).unwrap().clone() {
-        if let Ok(html_element) = element.dyn_into::<HtmlElement>() {
-            html_element
-                .set_attribute("class", "icon icon-selected")
-                .expect("Failed to set class attribute");
-        }
+fn html_select_icon(icon: Icons) {
+    if let Some(html_element) = icon.get_html_element() {
+        html_element
+            .set_attribute("class", "icon icon-selected")
+            .expect("Failed to set class attribute");
     }
 }
-fn html_deselect_icons(avb: &RefMut<'_, AppVars>) {
-    for (key, oelement) in avb.user_icons.iter() {
-        if key != &"icon-cog" {
-            if let Some(element) = oelement {
-                // let element_cloned = element.clone();
-                element
-                    .set_attribute("class", "icon")
-                    .expect("Failed to set class attribute");
-            }
-        }
+fn html_deselect_icons(icon: Icons) {
+    if let Some(html_element) = icon.get_html_element() {
+        html_element
+            .set_attribute("class", "icon")
+            .expect("Failed to set class attribute");
     }
 }
-fn get_element(document: &Document, element_id: &str) -> Result<Element, JsValue> {
-    let element = document
-        .get_element_by_id(element_id)
-        .ok_or_else(|| JsValue::from_str("should have element on the page"))?
-        .dyn_into()
-        .map_err(|_| JsValue::from_str("should be an HtmlElement"))?;
-    Ok(element)
-}
-// Helper function to get element height
-fn get_element_height(element: &Element) -> u32 {
-    let style = window()
-        .unwrap()
-        .get_computed_style(element)
-        .unwrap()
-        .unwrap();
-    style
-        .get_property_value("height")
-        .unwrap()
-        .replace("px", "")
-        .parse::<u32>()
-        .unwrap_or(0)
-}
-// Helper function to get element width
-fn get_element_width(element: &Element) -> u32 {
-    let style = window()
-        .unwrap()
-        .get_computed_style(element)
-        .unwrap()
-        .unwrap();
-    style
-        .get_property_value("width")
-        .unwrap()
-        .replace("px", "")
-        .parse::<u32>()
-        .unwrap_or(0)
-}
+
 ///////////////
 // Rendering
-
-// fn draw_working_area(av: RefPA) {
-//     let pam = av.borrow_mut();
-//     // Draw working area
-//     let _wa = pam.working_area;
-//     // Title
-//     // cst.push(CTText(Point::new(wa.x / 3., -20.), "Working sheet".into()));
-//     // let mut shape = ShapeType::new_line(Line::new(pick_pos, pick_pos + (snap_grid, snap_grid)));
-//     // // Arrows
-//     // let mut pos = Point::new(0., -10.);
-//     // prefab::arrow_right(pos, 100., &mut cst);
-//     // cst.push(CTText(Point::new(40., -20.), "X".into()));
-//     // pos = Point::new(-10., 0.);
-//     // prefab::arrow_down(pos, 100., &mut cst);
-//     // cst.push(CTText(Point::new(-30., 50.), "Y".into()));
-//     // // Border
-//     // use ConstructionPattern::*;
-//     // pos = Point::ZERO;
-//     // cst.push(CTSegment(NoSelection, pos, pos + (0., wa.y)));
-//     // cst.push(CTSegment(NoSelection, pos, pos + (wa.x, 0.)));
-//     // pos = Point::new(wa.x, wa.y);
-//     // cst.push(CTSegment(NoSelection, pos, pos + (-wa.x, 0.)));
-//     // cst.push(CTSegment(NoSelection, pos, pos + (0., -wa.y)));
-//     // draw_shape(&pam, &cst);
-// }
-// fn draw_background(av: RefPA) {
-//     let pam = av.borrow_mut();
-//     pam.back_canvas_ctx.set_stroke_style_str(&"#F00");
-//     pam.back_canvas_ctx
-//         .set_fill_style_str(&pam.draw_styles.get_background_color().to_string());
-//     pam.back_canvas_ctx.fill();
-//     let (canvas_width, canvas_height) = {
-//         (
-//             pam.back_canvas.width() as f64,
-//             pam.back_canvas.height() as f64,
-//         )
-//     };
-//     pam.back_canvas_ctx
-//         .fill_rect(0., 0., canvas_width as f64, canvas_height as f64);
-// }
 fn redraw_grid(avb: &mut RefMut<'_, AppVars>) {
-    avb.canvases.clear_grid_canvas();
-    let ctx = avb.canvases.get_context(CanvasKind::Grid);
     let draw_rec_size = avb.canvases.get_drawing_size();
     let draw_rec_grid_spacing = avb.canvases.get_grid_size();
     // log!("draw_rec_size: {}", draw_rec_size);
@@ -1239,84 +1016,63 @@ fn redraw_grid(avb: &mut RefMut<'_, AppVars>) {
         v.push(LineTo(Point::new(draw_rec_size.width, wy)));
         wy += draw_rec_grid_spacing;
     }
+    avb.canvases.clear_grid_canvas();
     draw_path(
         avb,
-        ctx,
+        CanvasKind::Grid,
         BezPath::from_vec(v),
         Layer::Grid,
-        Pattern::Grid,
+        Pattern::Grid(false),
         GlobalCompositeOperation::new_source_over(),
-        false,
     );
 }
 
 fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
-    avb.canvases.clear_main_canvas();
-
     let scale = avb.canvases.get_drawing_scale();
-    let ctx = avb.canvases.get_context(CanvasKind::Draw);
-
-    for (_, cshape) in avb.root_pool.iter() {
-        let layer = Layer::Worksheet;
+    avb.canvases.clear_main_canvas();
+    for cshape_root in avb.root_pool.values() {
+        avb.canvases.get_context(CanvasKind::Draw).save();
         // Shape
-        match (cshape.is_selected(), cshape.is_highlighted()) {
-            (false, false) => {
-                draw_path(
-                    &avb,
-                    ctx,
-                    cshape.get_shape_path(),
-                    layer,
-                    Pattern::Normal,
-                    cshape.get_op(),
-                    true,
-                );
-            }
-            (false, true) => {
-                draw_path(
-                    &avb,
-                    ctx,
-                    cshape.get_shape_path(),
-                    layer,
-                    Pattern::Highlighted,
-                    cshape.get_op(),
-                    true,
-                );
-            }
-            (true, false) => {
-                draw_path(
-                    &avb,
-                    ctx,
-                    cshape.get_shape_path(),
-                    layer,
-                    Pattern::Selected,
-                    cshape.get_op(),
-                    true,
-                );
-            }
-            (true, true) => {
-                draw_path(
-                    &avb,
-                    ctx,
-                    cshape.get_shape_path(),
-                    layer,
-                    Pattern::Selected,
-                    cshape.get_op(),
-                    true,
-                );
-            }
-        };
-
-        // Handles
-        for handle in cshape.get_handles().iter() {
-            let (pattern, path) = handle.get_path(scale);
+        draw_path(
+            &avb,
+            CanvasKind::Draw,
+            cshape_root.get_path(),
+            cshape_root.get_layer(),
+            cshape_root.get_pattern(),
+            cshape_root.get_op(),
+        );
+        // Shape children
+        for cshape_child in cshape_root.get_children().values() {
             draw_path(
                 &avb,
-                ctx,
-                path,
-                layer,
-                pattern,
+                CanvasKind::Draw,
+                cshape_child.get_path(),
+                cshape_child.get_layer(),
+                cshape_child.get_pattern(),
+                cshape_child.get_op(),
+            );
+            for handle in cshape_child.get_handles().iter() {
+                draw_path(
+                    &avb,
+                    CanvasKind::Draw,
+                    handle.get_path(scale),
+                    cshape_root.get_layer(),
+                    handle.get_pattern(),
+                    GlobalCompositeOperation::new_source_over(),
+                );
+            }
+        }
+
+        avb.canvases.get_context(CanvasKind::Draw).restore();
+        // Handles
+        for handle in cshape_root.get_handles().iter() {
+            draw_path(
+                &avb,
+                CanvasKind::Draw,
+                handle.get_path(scale),
+                cshape_root.get_layer(),
+                handle.get_pattern(),
                 GlobalCompositeOperation::new_source_over(),
-                true,
             );
         }
     }
@@ -1324,17 +1080,17 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
 
 fn draw_path(
     avb: &RefMut<'_, AppVars>,
-    ctx: &CanvasRenderingContext2d,
+    canvas_kind: CanvasKind,
     path: BezPath,
     _layer: Layer,
     pattern: Pattern,
     op: GlobalCompositeOperation,
-    fill: bool,
 ) {
+    let ctx = avb.canvases.get_context(canvas_kind);
     let scale = avb.canvases.get_drawing_scale();
     let offset = avb.canvases.get_drawing_offset();
 
-    let (stroke_style, stroke_width) = avb.styles.get_styles(pattern);
+    let (stroke_style, stroke_width, filled) = avb.styles.get_styles(pattern);
     let (fill_color, stroke_color) = avb.styles.get_colors(pattern);
     ctx.set_font("20px sans-serif");
     ctx.set_line_dash(stroke_style).unwrap();
@@ -1367,7 +1123,7 @@ fn draw_path(
             PathEl::ClosePath => ctx.close_path(),
         }
     }
-    if fill {
+    if filled {
         ctx.fill();
     }
     ctx.stroke();
