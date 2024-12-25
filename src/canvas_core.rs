@@ -208,21 +208,17 @@ pub enum Layer {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DrawStyles {
-    // Drawing colors
-    worksheet_color: String,
-    dimension_color: String,
-    geohelper_color: String,
-    origin_color: String,
-    grid_color: String,
-    selection_color: String,
-    selected_color: String,
     background_color: String,
-    on_creation_color: String,
-    on_creation_selected_color: String,
-    fill_color: String,
-    bold_color: String,
-    light_color: String,
+    grid_color: String,
+    main_color: String,
+    // Drawing colors
     normal_color: String,
+    highlight_color: String,
+    selected_color: String,
+    normal_fill_color: String,
+    highlight_fill_color: String,
+    selected_fill_color: String,
+    //
     transparent_color: String,
     // line patterns
     pattern_dashed: JsValue,
@@ -230,42 +226,37 @@ pub struct DrawStyles {
 }
 impl DrawStyles {
     pub fn build(style: CssStyleDeclaration) -> Result<DrawStyles, JsValue> {
-        let worksheet_color = style.get_property_value("--canvas-worksheet-color")?;
-        let dimension_color = style.get_property_value("--canvas-dimension-color")?;
-        let geohelper_color = style.get_property_value("--canvas-geohelper-color")?;
-        let origin_color = style.get_property_value("--canvas-origin-color")?;
-        let grid_color = style.get_property_value("--canvas-grid-color")?;
-        let selection_color = style.get_property_value("--canvas-selection-color")?;
-        let selected_color = style.get_property_value("--canvas-selected-color")?;
         let background_color = style.get_property_value("--canvas-background-color")?;
-        let on_creation_color = style.get_property_value("--canvas-on-creation-color")?;
-        let on_creation_selected_color =
-            style.get_property_value("--canvas-on-creation-selected-color")?;
-        let fill_color = style.get_property_value("--canvas-fill-color")?;
-        let highlight_color = style.get_property_value("--canvas-highlight-color")?;
-        let light_color = style.get_property_value("--canvas-light-color")?;
+        let grid_color = style.get_property_value("--canvas-grid-color")?;
+        let main_color = style.get_property_value("--canvas-main-color")?;
+
         let normal_color = style.get_property_value("--canvas-normal-color")?;
+        let highlight_color = style.get_property_value("--canvas-highlight-color")?;
+        let selected_color = style.get_property_value("--canvas-selected-color")?;
+        let normal_fill_color = style.get_property_value("--canvas-normal-fill-color")?;
+        let highlight_fill_color = style.get_property_value("--canvas-highlight-fill-color")?;
+        let selected_fill_color = style.get_property_value("--canvas-selected-fill-color")?;
+
         let transparent_color = style.get_property_value("--canvas-transparent-color")?;
+
         let dash_pattern = Array::new();
-        dash_pattern.push(&JsValue::from_f64(3.0));
-        dash_pattern.push(&JsValue::from_f64(3.0));
+        dash_pattern.push(&JsValue::from_f64(10.0));
+        dash_pattern.push(&JsValue::from_f64(10.0));
         let solid_pattern = Array::new();
         Ok(DrawStyles {
-            worksheet_color,
-            dimension_color,
-            geohelper_color,
-            origin_color,
-            grid_color,
-            selection_color,
-            selected_color,
             background_color,
-            on_creation_color,
-            on_creation_selected_color,
-            fill_color,
-            bold_color: highlight_color,
-            light_color,
+            grid_color,
+            main_color,
+            //
             normal_color,
+            highlight_color,
+            selected_color,
+            normal_fill_color,
+            highlight_fill_color,
+            selected_fill_color,
+            //
             transparent_color,
+            //
             pattern_dashed: JsValue::from(dash_pattern),
             pattern_solid: JsValue::from(solid_pattern),
         })
@@ -273,24 +264,32 @@ impl DrawStyles {
     pub fn get_styles(&self, pattern: Pattern) -> (&JsValue, f64, bool) {
         use Pattern::*;
         let (line_dash, line_width, filled) = match pattern {
-            Selected(filled) => (&self.pattern_solid, 2., filled),
-            Highlighted(filled) => (&self.pattern_solid, 3., filled),
-            Normal(filled) => (&self.pattern_solid, 1., filled),
-            Light(filled) => (&self.pattern_solid, 1., filled),
-            Bold(filled) => (&self.pattern_solid, 2., filled),
-            Grid(filled) => (&self.pattern_solid, 1., filled),
+            Grid => (&self.pattern_solid, 1., false),
+            ComposedNormal(filled) => (&self.pattern_solid, 2., filled),
+            ComposedHighlighted(filled) => (&self.pattern_solid, 2., filled),
+            ComposedSelected(filled) => (&self.pattern_solid, 2., filled),
+            BasicNormal => (&self.pattern_dashed, 1., false),
+            BasicHighlighted => (&self.pattern_dashed, 1., false),
+            BasicSelected => (&self.pattern_dashed, 1., false),
+            HandleNormal(filled) => (&self.pattern_solid, 1., filled),
+            HandleHighlighted(filled) => (&self.pattern_solid, 1., filled),
+            HandleSelected(filled) => (&self.pattern_solid, 1., filled),
         };
         (line_dash, line_width, filled)
     }
     pub fn get_colors(&self, pattern: Pattern) -> (&str, &str) {
         use Pattern::*;
         let (fill_color, color) = match pattern {
-            Selected(_) => (&self.selected_color, &self.selected_color),
-            Highlighted(_) => (&self.bold_color, &self.bold_color),
-            Normal(_) => (&self.light_color, &self.normal_color),
-            Light(_) => (&self.light_color, &self.light_color),
-            Bold(_) => (&self.worksheet_color, &self.worksheet_color),
-            Grid(_) => (&self.grid_color, &self.grid_color),
+            Grid => (&self.grid_color, &self.grid_color),
+            ComposedNormal(_) => (&self.normal_fill_color, &self.normal_color),
+            ComposedHighlighted(_) => (&self.highlight_fill_color, &self.highlight_color),
+            ComposedSelected(_) => (&self.selected_fill_color, &self.selected_color),
+            BasicNormal => (&self.transparent_color, &self.normal_color),
+            BasicHighlighted => (&self.transparent_color, &self.highlight_color),
+            BasicSelected => (&self.transparent_color, &self.selected_color),
+            HandleNormal(_) => (&self.normal_fill_color, &self.normal_color),
+            HandleHighlighted(_) => (&self.highlight_fill_color, &self.highlight_color),
+            HandleSelected(_) => (&self.selected_fill_color, &self.selected_color),
         };
         (fill_color, color)
     }
@@ -307,10 +306,14 @@ impl DrawStyles {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Pattern {
-    Normal(bool),
-    Light(bool),
-    Bold(bool),
-    Grid(bool),
-    Highlighted(bool),
-    Selected(bool),
+    Grid,
+    ComposedNormal(bool),
+    ComposedHighlighted(bool),
+    ComposedSelected(bool),
+    BasicNormal,
+    BasicHighlighted,
+    BasicSelected,
+    HandleNormal(bool),
+    HandleHighlighted(bool),
+    HandleSelected(bool),
 }

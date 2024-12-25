@@ -79,11 +79,7 @@ impl DOMElements {
         None
     }
 }
-// let cm_shape = document
-// .get_element_by_id(html_element.id())
-// .expect(&format!("should have {} id on the page", html_element.id()))
-// .dyn_into::<HtmlElement>()
-// .expect(&format!("{} should be an HtmlElement", html_element.id()));
+
 #[derive(Debug, Copy, Clone)]
 pub enum SystemMouse {
     Down,

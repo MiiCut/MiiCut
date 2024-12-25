@@ -33,7 +33,7 @@ impl Handle {
     pub fn set_highlighted(&mut self, highlighted: bool) {
         self.highlighted = highlighted;
     }
-    pub fn get_selection(&self) -> bool {
+    pub fn is_selected(&self) -> bool {
         self.selected
     }
     pub fn set_selection(&mut self, selected: bool) {
@@ -68,16 +68,16 @@ impl Handle {
     pub fn get_pattern(&self) -> Pattern {
         match self.kind {
             HandleKind::Grab => match (self.selected, self.highlighted) {
-                (false, false) => Pattern::Normal(true),
-                (false, true) => Pattern::Highlighted(true),
-                (true, false) => Pattern::Selected(true),
-                (true, true) => Pattern::Highlighted(true),
+                (false, false) => Pattern::HandleNormal(true),
+                (false, true) => Pattern::HandleHighlighted(true),
+                (true, false) => Pattern::HandleSelected(true),
+                (true, true) => Pattern::HandleSelected(true),
             },
             HandleKind::Modify => {
                 if self.highlighted {
-                    Pattern::Highlighted(true)
+                    Pattern::HandleHighlighted(true)
                 } else {
-                    Pattern::Light(true)
+                    Pattern::HandleNormal(true)
                 }
             }
         }

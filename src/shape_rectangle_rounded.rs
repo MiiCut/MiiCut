@@ -85,7 +85,7 @@ impl CShapes for CShapeRectRounded {
 
     fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind {
         // let pos2 = pos2 + Vec2::new(20., 20.);
-        let radii = RoundedRectRadii::new(2., 8., 3., 5.);
+        let radii = RoundedRectRadii::new(20., 20., 20., 20.);
         let (tl, tr, br, bl) = (
             radii.top_left,
             radii.top_right,
@@ -123,7 +123,7 @@ impl CShapes for CShapeRectRounded {
         self.get_rectangle_rounded().to_path(Self::TOLERANCE)
     }
 
-    fn highlight_object(&mut self, pos: Vec2, precision: f64) {
+    fn highlight_handles(&mut self, pos: Vec2, precision: f64) -> bool {
         self.handles
             .0
             .set_highlighted(is_near_position(pos, self.handles.0.get_pos(), precision));
@@ -142,11 +142,16 @@ impl CShapes for CShapeRectRounded {
         self.handles
             .5
             .set_highlighted(is_near_position(pos, self.handles.5.get_pos(), precision));
-        if self.get_handle_highlighted().is_none() {
-            self.highlighted = self.contains(pos.to_point());
-        } else {
-            self.highlighted = false;
-        }
+        self.handles.0.is_highlighted()
+            || self.handles.1.is_highlighted()
+            || self.handles.2.is_highlighted()
+            || self.handles.3.is_highlighted()
+            || self.handles.4.is_highlighted()
+            || self.handles.5.is_highlighted()
+    }
+    fn highlight_shape(&mut self, pos: Vec2) -> bool {
+        self.highlighted = self.contains(pos.to_point());
+        self.highlighted
     }
     fn set_highlight(&mut self, value: bool) {
         self.highlighted = value;
@@ -155,7 +160,7 @@ impl CShapes for CShapeRectRounded {
         self.highlighted
     }
 
-    fn select_object(&mut self, pos: Vec2, precision: f64) {
+    fn select_handles(&mut self, pos: Vec2, precision: f64) -> bool {
         self.handles
             .0
             .set_selection(is_near_position(pos, self.handles.0.get_pos(), precision));
@@ -174,12 +179,18 @@ impl CShapes for CShapeRectRounded {
         self.handles
             .5
             .set_selection(is_near_position(pos, self.handles.5.get_pos(), precision));
-        if self.get_handle_selected().is_none() {
-            self.selected = self.contains(pos.to_point());
-        } else {
-            self.selected = false;
-        }
+        self.handles.0.is_highlighted()
+            || self.handles.1.is_selected()
+            || self.handles.2.is_selected()
+            || self.handles.3.is_selected()
+            || self.handles.4.is_selected()
+            || self.handles.5.is_selected()
     }
+    fn select_shape(&mut self, pos: Vec2) -> bool {
+        self.selected = self.contains(pos.to_point());
+        self.selected
+    }
+
     fn set_selection(&mut self, value: bool) {
         self.selected = value;
     }
@@ -334,22 +345,22 @@ impl CShapes for CShapeRectRounded {
         ]
     }
     fn get_handle_selected(&self) -> Option<(Handle, usize)> {
-        if self.handles.0.get_selection() {
+        if self.handles.0.is_selected() {
             return Some((self.handles.0, 0));
         }
-        if self.handles.1.get_selection() {
+        if self.handles.1.is_selected() {
             return Some((self.handles.1, 1));
         }
-        if self.handles.2.get_selection() {
+        if self.handles.2.is_selected() {
             return Some((self.handles.2, 2));
         }
-        if self.handles.3.get_selection() {
+        if self.handles.3.is_selected() {
             return Some((self.handles.3, 3));
         }
-        if self.handles.4.get_selection() {
+        if self.handles.4.is_selected() {
             return Some((self.handles.4, 4));
         }
-        if self.handles.5.get_selection() {
+        if self.handles.5.is_selected() {
             return Some((self.handles.5, 5));
         }
         None

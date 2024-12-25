@@ -1,20 +1,15 @@
 
 :root {
-    --canvas-background-color: #dddddd;
-    --canvas-on-creation-color: #7070703d;
-    --canvas-on-creation-selected-color: #fe9b06;
-    --canvas-worksheet-color: #8d8b8b;
-    --canvas-dimension-color: rgb(133, 2, 85);
-    --canvas-geohelper-color: #f9ffaa;
-    --canvas-origin-color: #e0e;
-    --canvas-grid-color: #c1c0c0;
-    --canvas-selection-color: rgb(255, 255, 0);
+    --canvas-background-color: #bfbaba;
+    --canvas-grid-color: #69fdf86f;
+    --canvas-main-color: #8d8b8b;
+    /*  */
+    --canvas-normal-color: #424242;
+    --canvas-highlight-color:  #bfbb48;
     --canvas-selected-color:  #ff0000;
-    --canvas-highlight-color:  #ffb700;
-    --canvas-light-color:  #02ae0b;
-    --canvas-normal-color: #ffffff00;
-    --canvas-binding-requested-color:  #00e235;
-    --canvas-fill-color: rgba(0, 0, 0, 0.119);
+    --canvas-normal-fill-color: #4242428b;
+    --canvas-highlight-fill-color:  #595721a1;
+    --canvas-selected-fill-color:  #ff000097;
     --canvas-transparent-color: rgba(255, 255, 255, 0);
 }
 
@@ -141,7 +136,7 @@ body, html {
     left: 60px; /* Right of the sidebar */
     bottom: 50px; /* Above the status bar */
     right: 0; /* Extend to the right edge */
-    background-color: #eee;
+    background-color: #bcbcbc;
     z-index: 1; /* Position du canvas en arrière-plan */
 }
 canvas {
@@ -157,17 +152,17 @@ canvas {
 }
 #backgroundCanvas {
     z-index: 1; /* Bottom layer */
-    background-color: #000000; /* Background color for debugging */
+    background-color: #9a9a9a; /* Background color for debugging */
 }
 
 #gridCanvas {
     z-index: 2; /* Middle layer */
-    background-color: rgba(0, 255, 0, 0.5); /* Green with transparency */
+    background-color: rgba(255, 255, 255, 0); /* Green with transparency */
 }
 
 #mainCanvas {
     z-index: 3; /* Top layer */
-    background-color: rgba(255, 0, 0, 0.299); /* Red with transparency */
+    background-color: rgba(255, 0, 0, 0); /* Red with transparency */
 }
 
 /* Style the custom context menu */

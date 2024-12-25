@@ -10,147 +10,8 @@ use crate::{
     handles::Handle,
     shapes_pool::{CSPool, CShapeKind, CShid},
 };
-use kurbo::{BezPath, Vec2};
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum GlobalCompositeOperation {
-    SourceOver(&'static str),
-    SourceIn(&'static str),
-    SourceOut(&'static str),
-    SourceATop(&'static str),
-    DestinationOver(&'static str),
-    DeqstinationIn(&'static str),
-    DestinationOut(&'static str),
-    DestinationAtop(&'static str),
-    Lighter(&'static str),
-    Copy(&'static str),
-    Xor(&'static str),
-    Multiply(&'static str),
-    Screen(&'static str),
-    Overlay(&'static str),
-    Darken(&'static str),
-    Lighten(&'static str),
-    ColorDodge(&'static str),
-    ColorBurn(&'static str),
-    HardLight(&'static str),
-    SoftLight(&'static str),
-    Difference(&'static str),
-    Exclusion(&'static str),
-    Hue(&'static str),
-    Saturation(&'static str),
-    Color(&'static str),
-    Luminosity(&'static str),
-}
-impl GlobalCompositeOperation {
-    pub fn new_source_over() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::SourceOver("source-over")
-    }
-    pub fn new_source_in() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::SourceIn("source-in")
-    }
-    pub fn new_source_out() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::SourceOut("source-out")
-    }
-    pub fn new_source_atop() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::SourceATop("source-atop")
-    }
-    pub fn new_destination_over() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::DestinationOver("destination-over")
-    }
-    pub fn new_destination_in() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::DeqstinationIn("destination-in")
-    }
-    pub fn new_destination_out() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::DestinationOut("destination-out")
-    }
-    pub fn new_destination_atop() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::DestinationAtop("destination-atop")
-    }
-    pub fn new_lighter() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Lighter("lighter")
-    }
-    pub fn new_copy() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Copy("copy")
-    }
-    pub fn new_xor() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Xor("xor")
-    }
-    pub fn new_multiply() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Multiply("multiply")
-    }
-    pub fn new_screen() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Screen("screen")
-    }
-    pub fn new_overlay() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Overlay("overlay")
-    }
-    pub fn new_darken() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Darken("darken")
-    }
-    pub fn new_lighten() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Lighten("lighten")
-    }
-    pub fn new_color_dodge() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::ColorDodge("color-dodge")
-    }
-    pub fn new_color_burn() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::ColorBurn("color-burn")
-    }
-    pub fn new_hard_light() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::HardLight("hard-light")
-    }
-    pub fn new_soft_light() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::SoftLight("soft-light")
-    }
-    pub fn new_difference() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Difference("difference")
-    }
-    pub fn new_exclusion() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Exclusion("exclusion")
-    }
-    pub fn new_hue() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Hue("hue")
-    }
-    pub fn new_saturation() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Saturation("saturation")
-    }
-    pub fn new_color() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Color("color")
-    }
-    pub fn new_luminosity() -> GlobalCompositeOperation {
-        GlobalCompositeOperation::Luminosity("luminosity")
-    }
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            GlobalCompositeOperation::SourceOver(s) => s,
-            GlobalCompositeOperation::SourceIn(s) => s,
-            GlobalCompositeOperation::SourceOut(s) => s,
-            GlobalCompositeOperation::SourceATop(s) => s,
-            GlobalCompositeOperation::DestinationOver(s) => s,
-            GlobalCompositeOperation::DeqstinationIn(s) => s,
-            GlobalCompositeOperation::DestinationOut(s) => s,
-            GlobalCompositeOperation::DestinationAtop(s) => s,
-            GlobalCompositeOperation::Lighter(s) => s,
-            GlobalCompositeOperation::Copy(s) => s,
-            GlobalCompositeOperation::Xor(s) => s,
-            GlobalCompositeOperation::Multiply(s) => s,
-            GlobalCompositeOperation::Screen(s) => s,
-            GlobalCompositeOperation::Overlay(s) => s,
-            GlobalCompositeOperation::Darken(s) => s,
-            GlobalCompositeOperation::Lighten(s) => s,
-            GlobalCompositeOperation::ColorDodge(s) => s,
-            GlobalCompositeOperation::ColorBurn(s) => s,
-            GlobalCompositeOperation::HardLight(s) => s,
-            GlobalCompositeOperation::SoftLight(s) => s,
-            GlobalCompositeOperation::Difference(s) => s,
-            GlobalCompositeOperation::Exclusion(s) => s,
-            GlobalCompositeOperation::Hue(s) => s,
-            GlobalCompositeOperation::Saturation(s) => s,
-            GlobalCompositeOperation::Color(s) => s,
-            GlobalCompositeOperation::Luminosity(s) => s,
-        }
-    }
-}
+use geo::{BooleanOps, HasDimensions, OpType, Polygon};
+use kurbo::{flatten, BezPath, PathEl, Point, Vec2};
 
 pub trait CShapes {
     const TOLERANCE: f64;
@@ -160,11 +21,13 @@ pub trait CShapes {
     fn toggle_prop(&mut self);
     fn get_shape_path(&self) -> BezPath;
 
-    fn highlight_object(&mut self, pos: Vec2, precision: f64);
+    fn highlight_handles(&mut self, pos: Vec2, precision: f64) -> bool;
+    fn highlight_shape(&mut self, pos: Vec2) -> bool;
     fn set_highlight(&mut self, value: bool);
     fn is_highlighted(&self) -> bool;
 
-    fn select_object(&mut self, pos: Vec2, precision: f64);
+    fn select_handles(&mut self, pos: Vec2, precision: f64) -> bool;
+    fn select_shape(&mut self, pos: Vec2) -> bool;
     fn set_selection(&mut self, value: bool);
     fn is_selected(&self) -> bool;
     fn clear_selection(&mut self);
@@ -186,7 +49,6 @@ pub struct CShape {
     parent: Option<CShid>,
     children: CSPool,
     layer: Layer,
-    op: GlobalCompositeOperation,
 }
 impl CShape {
     pub fn new(
@@ -194,7 +56,6 @@ impl CShape {
         cshape_kind: CShapeKind,
         parent: Option<CShid>,
         layer: Layer,
-        op: GlobalCompositeOperation,
     ) -> CShape {
         CShape {
             cshid,
@@ -202,7 +63,6 @@ impl CShape {
             parent,
             children: CSPool::new(),
             layer,
-            op,
         }
     }
     pub fn get_id(&self) -> CShid {
@@ -210,9 +70,6 @@ impl CShape {
     }
     pub fn get_parent(&self) -> Option<CShid> {
         self.parent
-    }
-    pub fn get_op(&self) -> GlobalCompositeOperation {
-        self.op
     }
     pub fn get_children(&self) -> &CSPool {
         &self.children
@@ -235,21 +92,23 @@ impl CShape {
     pub fn toggle_prop(&mut self) {
         ()
     }
-    pub fn toggle_op(&mut self) {
-        if self.op == GlobalCompositeOperation::new_source_over() {
-            self.op = GlobalCompositeOperation::new_destination_out();
-        } else {
-            self.op = GlobalCompositeOperation::new_source_over();
-        }
-    }
 
-    pub fn highlight_object(&mut self, pos: Vec2, precision: f64) {
+    pub fn highlight_handles(&mut self, pos: Vec2, precision: f64) -> bool {
         use CShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.highlight_object(pos, precision),
-            CRectangleRounded(sh) => sh.highlight_object(pos, precision),
-            CHole(sh) => sh.highlight_object(pos, precision),
-            COblong(sh) => sh.highlight_object(pos, precision),
+            CRectangle(sh) => sh.highlight_handles(pos, precision),
+            CRectangleRounded(sh) => sh.highlight_handles(pos, precision),
+            CHole(sh) => sh.highlight_handles(pos, precision),
+            COblong(sh) => sh.highlight_handles(pos, precision),
+        }
+    }
+    pub fn highlight_shape(&mut self, pos: Vec2) -> bool {
+        use CShapeKind::*;
+        match &mut self.cshape_kind {
+            CRectangle(sh) => sh.highlight_shape(pos),
+            CRectangleRounded(sh) => sh.highlight_shape(pos),
+            CHole(sh) => sh.highlight_shape(pos),
+            COblong(sh) => sh.highlight_shape(pos),
         }
     }
     pub fn set_highlight(&mut self, value: bool) {
@@ -271,13 +130,22 @@ impl CShape {
         }
     }
 
-    pub fn select_object(&mut self, pos: Vec2, precision: f64) {
+    pub fn select_handles(&mut self, pos: Vec2, precision: f64) -> bool {
         use CShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.select_object(pos, precision),
-            CRectangleRounded(sh) => sh.select_object(pos, precision),
-            CHole(sh) => sh.select_object(pos, precision),
-            COblong(sh) => sh.select_object(pos, precision),
+            CRectangle(sh) => sh.select_handles(pos, precision),
+            CRectangleRounded(sh) => sh.select_handles(pos, precision),
+            CHole(sh) => sh.select_handles(pos, precision),
+            COblong(sh) => sh.select_handles(pos, precision),
+        }
+    }
+    pub fn select_shape(&mut self, pos: Vec2) -> bool {
+        use CShapeKind::*;
+        match &mut self.cshape_kind {
+            CRectangle(sh) => sh.select_shape(pos),
+            CRectangleRounded(sh) => sh.select_shape(pos),
+            CHole(sh) => sh.select_shape(pos),
+            COblong(sh) => sh.select_shape(pos),
         }
     }
     pub fn set_selection(&mut self, value: bool) {
@@ -328,16 +196,69 @@ impl CShape {
 
     pub fn get_handles(&self) -> Vec<Handle> {
         use CShapeKind::*;
-        match self.cshape_kind {
+        let mut handles = match self.cshape_kind {
             CRectangle(sh) => sh.get_handles(),
             CRectangleRounded(sh) => sh.get_handles(),
             CHole(sh) => sh.get_handles(),
             COblong(sh) => sh.get_handles(),
-        }
+        };
+        self.children.values().for_each(|child| {
+            handles.extend(child.get_handles());
+        });
+        handles
     }
     pub fn get_layer(&self) -> Layer {
         self.layer
     }
+    pub fn get_pattern(&self) -> Pattern {
+        match (self.is_selected(), self.is_highlighted()) {
+            (false, false) => Pattern::BasicNormal,
+            (false, true) => Pattern::BasicHighlighted,
+            (true, false) => Pattern::BasicSelected,
+            (true, true) => Pattern::BasicSelected,
+        }
+    }
+    pub fn get_pattern_operation(&self) -> Pattern {
+        match (self.is_selected(), self.is_highlighted()) {
+            (false, false) => Pattern::ComposedNormal(true),
+            (false, true) => Pattern::ComposedHighlighted(true),
+            (true, false) => Pattern::ComposedSelected(true),
+            (true, true) => Pattern::ComposedSelected(true),
+        }
+    }
+
+    pub fn get_full_segs(&self) -> Vec<BezPath> {
+        let mut multi_paths = Vec::new();
+
+        // Init: we take the root polygon
+        let mut polygons = vec![self.bez_path_to_geo_polygon()];
+
+        for child_polygon in self.get_child_geo_polygons() {
+            // for each polygon in polygons, we boolean op with each child
+            let mut result_polygons = vec![];
+            for polygon in polygons.iter() {
+                result_polygons.extend(polygon.boolean_op(&child_polygon, OpType::Difference));
+            }
+            polygons = result_polygons;
+        }
+        for polygon in polygons {
+            if let Some(path) = self.geo_polygon_to_bez_path(&polygon) {
+                multi_paths.push(path);
+            }
+        }
+
+        multi_paths
+    }
+
+    fn get_child_geo_polygons(&self) -> Vec<Polygon<f64>> {
+        // Récupérer les segments des enfants
+        let mut childs_segs: Vec<Polygon<f64>> = Vec::new();
+        for child in self.children.values() {
+            childs_segs.push(child.bez_path_to_geo_polygon());
+        }
+        childs_segs
+    }
+
     pub fn get_path(&self) -> BezPath {
         use CShapeKind::*;
         match self.cshape_kind {
@@ -347,12 +268,68 @@ impl CShape {
             COblong(sh) => sh.get_shape_path(),
         }
     }
-    pub fn get_pattern(&self) -> Pattern {
-        match (self.is_selected(), self.is_highlighted()) {
-            (false, false) => Pattern::Normal(true),
-            (false, true) => Pattern::Highlighted(true),
-            (true, false) => Pattern::Selected(true),
-            (true, true) => Pattern::Selected(true),
+
+    pub fn get_segs(&self) -> BezPath {
+        let mut segs = BezPath::new();
+        flatten(self.get_path(), 0.25, |s| segs.push(s));
+        segs
+    }
+
+    fn bez_path_to_geo_polygon(&self) -> Polygon<f64> {
+        let bez_path = self.get_segs();
+
+        let mut points = Vec::new();
+        for element in bez_path.elements() {
+            match element {
+                PathEl::MoveTo(p) | PathEl::LineTo(p) => points.push((p.x, p.y)),
+                PathEl::ClosePath => {
+                    // Le polygone doit être fermé
+                    if points.first() != points.last() {
+                        points.push(points[0]);
+                    }
+                }
+                _ => log!("Error: Non-linear path elements found."),
+            }
         }
+
+        if points.len() < 3 {
+            unreachable!()
+        } else {
+            Polygon::new(points.into(), vec![])
+        }
+    }
+
+    fn geo_polygon_to_bez_path(&self, polygon: &Polygon<f64>) -> Option<BezPath> {
+        let exterior = polygon.exterior();
+        if exterior.is_empty() {
+            return None; // Return None if the exterior is empty
+        }
+
+        let mut bez_path = BezPath::new();
+
+        // Iterate over the exterior points
+        let points: Vec<Point> = exterior
+            .coords()
+            .map(|coord| Point::new(coord.x, coord.y))
+            .collect();
+
+        if points.len() < 2 {
+            return None; // Not enough points to form a path
+        }
+
+        // Start with MoveTo
+        bez_path.push(PathEl::MoveTo(points[0]));
+
+        // Add LineTo for each segment
+        for point in &points[1..] {
+            bez_path.push(PathEl::LineTo(*point));
+        }
+
+        // Close the path if the polygon is closed
+        if points.first() == points.last() {
+            bez_path.push(PathEl::ClosePath);
+        }
+
+        Some(bez_path)
     }
 }

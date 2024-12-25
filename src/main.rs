@@ -2,7 +2,7 @@
 // A macro to provide `println!(..)`-style syntax for `console.log` logging.
 macro_rules! log {
     ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
+        web_sys::console::log_1(&format!( $( $t )* ).into())
     }
 }
 pub mod canvas_core;
@@ -22,7 +22,6 @@ use crate::dom::*;
 use crate::math::*;
 use canvas_core::{CanvasKind, Canvases, DrawStyles, Layer, Pattern};
 use kurbo::{BezPath, PathEl, Point, Size, Vec2};
-use shapes::GlobalCompositeOperation;
 use shapes_pool::CSPool;
 use shapes_pool::CShapeBuilder;
 use shapes_pool::CShid;
@@ -526,7 +525,6 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 Ok(())
             }
             MouseState::LeftDownMove(pos_dwn, cursor_pos) => {
-                avb.root_pool.highlight_object(cursor_pos, grab_precision);
                 avb.root_pool.move_selection(pos_dwn, cursor_pos);
                 Ok(())
             }
@@ -576,29 +574,23 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                         log!("Creating a new shape");
                         // B. We start drawing a new shape
                         let layer = Layer::Worksheet;
-                        let op = GlobalCompositeOperation::new_source_over();
                         // Determine if we have clicked inside a existing shape and if so, select it as parent
                         let ocshid_highlighted = avb.root_pool.get_first_highlighted();
                         let cshape = match ishape {
-                            IconsShapes::Rectangle => CShapeBuilder::new_rectangle(
-                                pos,
-                                pos,
-                                ocshid_highlighted,
-                                layer,
-                                op,
-                            ),
+                            IconsShapes::Rectangle => {
+                                CShapeBuilder::new_rectangle(pos, pos, ocshid_highlighted, layer)
+                            }
                             IconsShapes::RectangleRounded => CShapeBuilder::new_rectangle_rounded(
                                 pos,
                                 pos,
                                 ocshid_highlighted,
                                 layer,
-                                op,
                             ),
                             IconsShapes::Circle => {
-                                CShapeBuilder::new_circle(pos, pos, ocshid_highlighted, layer, op)
+                                CShapeBuilder::new_circle(pos, pos, ocshid_highlighted, layer)
                             }
                             IconsShapes::Oblong => {
-                                CShapeBuilder::new_oblong(pos, pos, ocshid_highlighted, layer, op)
+                                CShapeBuilder::new_oblong(pos, pos, ocshid_highlighted, layer)
                             }
                         };
                         avb.on_creation = Some(cshape.get_id());
@@ -901,10 +893,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
             avb.keys_states.shift_pressed = true;
         }
         if keyboard_event.key() == "t" {
-            if let Some(cshid) = avb.root_pool.get_first_highlighted() {
-                log!("get_first_highlighted: {}", cshid);
-                avb.root_pool.toggle_op(cshid);
-            }
+            //
         }
 
         render_drawing(&mut avb);
@@ -1022,26 +1011,35 @@ fn redraw_grid(avb: &mut RefMut<'_, AppVars>) {
         CanvasKind::Grid,
         BezPath::from_vec(v),
         Layer::Grid,
-        Pattern::Grid(false),
-        GlobalCompositeOperation::new_source_over(),
+        Pattern::Grid,
     );
 }
 
 fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     let scale = avb.canvases.get_drawing_scale();
     avb.canvases.clear_main_canvas();
+    // Draw the segmented paths
     for cshape_root in avb.root_pool.values() {
-        avb.canvases.get_context(CanvasKind::Draw).save();
         // Shape
+        for path in cshape_root.get_full_segs().into_iter() {
+            draw_path(
+                &avb,
+                CanvasKind::Draw,
+                path,
+                cshape_root.get_layer(),
+                cshape_root.get_pattern_operation(),
+            );
+        }
+    }
+    // Draw the outline of every shape
+    for cshape_root in avb.root_pool.values() {
         draw_path(
             &avb,
             CanvasKind::Draw,
             cshape_root.get_path(),
             cshape_root.get_layer(),
             cshape_root.get_pattern(),
-            cshape_root.get_op(),
         );
-        // Shape children
         for cshape_child in cshape_root.get_children().values() {
             draw_path(
                 &avb,
@@ -1049,22 +1047,10 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                 cshape_child.get_path(),
                 cshape_child.get_layer(),
                 cshape_child.get_pattern(),
-                cshape_child.get_op(),
             );
-            for handle in cshape_child.get_handles().iter() {
-                draw_path(
-                    &avb,
-                    CanvasKind::Draw,
-                    handle.get_path(scale),
-                    cshape_root.get_layer(),
-                    handle.get_pattern(),
-                    GlobalCompositeOperation::new_source_over(),
-                );
-            }
         }
-
-        avb.canvases.get_context(CanvasKind::Draw).restore();
-        // Handles
+    }
+    for cshape_root in avb.root_pool.values() {
         for handle in cshape_root.get_handles().iter() {
             draw_path(
                 &avb,
@@ -1072,8 +1058,18 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                 handle.get_path(scale),
                 cshape_root.get_layer(),
                 handle.get_pattern(),
-                GlobalCompositeOperation::new_source_over(),
             );
+        }
+        for cshape_child in cshape_root.get_children().values() {
+            for handle in cshape_child.get_handles().iter() {
+                draw_path(
+                    &avb,
+                    CanvasKind::Draw,
+                    handle.get_path(scale),
+                    cshape_root.get_layer(),
+                    handle.get_pattern(),
+                );
+            }
         }
     }
 }
@@ -1084,7 +1080,6 @@ fn draw_path(
     path: BezPath,
     _layer: Layer,
     pattern: Pattern,
-    op: GlobalCompositeOperation,
 ) {
     let ctx = avb.canvases.get_context(canvas_kind);
     let scale = avb.canvases.get_drawing_scale();
@@ -1095,9 +1090,8 @@ fn draw_path(
     ctx.set_font("20px sans-serif");
     ctx.set_line_dash(stroke_style).unwrap();
     ctx.set_line_width(stroke_width);
-    ctx.set_stroke_style_str(&stroke_color);
-    ctx.set_fill_style_str(&fill_color);
-    _ = ctx.set_global_composite_operation(op.as_str());
+    ctx.set_stroke_style_str(stroke_color);
+    ctx.set_fill_style_str(fill_color);
     ctx.begin_path();
     for cst in path.iter() {
         match cst {

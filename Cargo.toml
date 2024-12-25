@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 kurbo = { git = "https://github.com/linebender/kurbo" }
+geo = "0.29.3"
 approx = "0.5.1"
 console_error_panic_hook = "0.1.7"
 wasm-bindgen = "0.2.99"
