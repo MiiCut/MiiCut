@@ -7,7 +7,7 @@ macro_rules! log {
 }
 
 use approx::*;
-use kurbo::{BezPath, Line, ParamCurveNearest, PathEl, Rect, RoundedRectRadii, Vec2};
+use kurbo::{Arc, BezPath, Line, ParamCurveNearest, PathEl, Point, RoundedRectRadii, Vec2};
 use std::f64::consts::PI;
 use std::{
     error::Error,
@@ -148,52 +148,6 @@ fn _is_between(pt: &Vec2, pt1: &Vec2, pt2: &Vec2) -> bool {
 //     is_between(pos, &pos1, &pos2)
 // }
 
-pub fn is_box_inside(box_outer: &Rect, box_inner: &Rect) -> bool {
-    box_outer.contains_rect(*box_inner)
-}
-pub fn reorder_corners(bb: &mut [Vec2; 2]) {
-    let pt1 = bb[0];
-    let pt2 = bb[1];
-    if pt1.x < pt2.x {
-        if pt1.y < pt2.y {
-            let bl = Vec2 { x: pt1.x, y: pt1.y };
-            let tr = Vec2 { x: pt2.x, y: pt2.y };
-            bb[0] = bl;
-            bb[1] = tr;
-        } else {
-            let bl = Vec2 { x: pt1.x, y: pt2.y };
-            let tr = Vec2 { x: pt2.x, y: pt1.y };
-            bb[0] = bl;
-            bb[1] = tr;
-        }
-    } else {
-        if pt1.y < pt2.y {
-            let bl = Vec2 { x: pt2.x, y: pt1.y };
-            let tr = Vec2 { x: pt1.x, y: pt2.y };
-            bb[0] = bl;
-            bb[1] = tr;
-        } else {
-            let bl = Vec2 { x: pt2.x, y: pt2.y };
-            let tr = Vec2 { x: pt1.x, y: pt1.y };
-            bb[0] = bl;
-            bb[1] = tr;
-        }
-    }
-}
-
-pub fn _snap_to_positive_value(value: f64, snap_value: f64) -> f64 {
-    let value = (value / snap_value).round() * snap_value;
-    if value == 0. {
-        snap_value
-    } else {
-        if value < 0. {
-            -value
-        } else {
-            value
-        }
-    }
-}
-
 pub fn is_near_position(pos: Vec2, other_pos: Vec2, grab_handle_precision: f64) -> bool {
     (pos - other_pos).hypot() < grab_handle_precision / 2.
 }
@@ -256,23 +210,33 @@ pub fn signed_distance(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     (p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x)
 }
 
-pub fn get_dist_to_line(pt1: Vec2, pt2: Vec2, pos: Vec2) -> f64 {
+pub fn get_dist_to_segment(pt1: Vec2, pt2: Vec2, pos: Vec2) -> f64 {
     let v1 = pt2 - pt1; // Vector from pt1 to pt2
     let v2 = pos - pt1; // Vector from pt1 to pos
+    let v3 = pos - pt2; // Vector from pt2 to pos
 
-    // Compute the cross product magnitude between v1 and v2
-    let cross = v1.x * v2.y - v1.y * v2.x;
+    // Compute the squared length of the segment
+    let length_v1_sq = v1.hypot2();
 
-    // Compute the length of v1 (the base of the triangle)
-    let length_v1 = v1.hypot();
-
-    if length_v1 == 0.0 {
-        // If pt1 and pt2 are the same point, return the distance to the point
+    if length_v1_sq == 0.0 {
+        // If pt1 and pt2 are the same point, return the distance to that point
         return v2.hypot();
     }
 
-    // Distance is the height of the triangle formed
-    cross.abs() / length_v1
+    // Project v2 onto v1 to find the perpendicular point on the line
+    let t = v2.dot(v1) / length_v1_sq;
+
+    if t < 0.0 {
+        // Closest point is pt1
+        v2.hypot()
+    } else if t > 1.0 {
+        // Closest point is pt2
+        v3.hypot()
+    } else {
+        // Closest point is on the segment
+        let projection = pt1 + t * v1;
+        (pos - projection).hypot()
+    }
 }
 
 // intersection of the perpendicular to the line
@@ -370,12 +334,6 @@ pub fn point_at_distance(pt1: Vec2, pt2: Vec2, distance: f64) -> Vec2 {
     let result = midpoint + distance * perpendicular;
 
     result
-}
-
-pub fn angle_between(pt1: Vec2, pt2: Vec2) -> f64 {
-    let vector = pt2 - pt1; // Vector from pt1 to pt2
-    let angle = vector.y.atan2(vector.x); // atan2 gives the angle in radians
-    angle
 }
 
 pub fn magnet_to_grid(pt: &Vec2) -> Vec2 {
@@ -806,3 +764,120 @@ pub fn get_max_radius(radii: RoundedRectRadii) -> f64 {
         .max(radii.bottom_left)
         .max(radii.bottom_right)
 }
+
+pub fn calculate_arc_points(arc: Arc) -> (Vec2, Vec2) {
+    let center = arc.center; // Center of the arc
+    let radii = arc.radii; // Radii of the ellipse
+    let start_angle = arc.start_angle; // Start angle in radians
+    let sweep_angle = arc.sweep_angle; // Sweep angle in radians
+    let rotation = arc.x_rotation; // Rotation in radians
+
+    // Start and end angles in radians
+    let end_angle = start_angle + sweep_angle;
+
+    // Function to compute an elliptical point without rotation
+    let compute_point =
+        |angle: f64| -> Vec2 { Vec2::new(radii.x * angle.cos(), radii.y * angle.sin()) };
+
+    // Rotate a point around the origin by a given angle
+    let rotate_point = |point: Vec2, angle: f64| -> Vec2 {
+        Vec2::new(
+            point.x * angle.cos() - point.y * angle.sin(),
+            point.x * angle.sin() + point.y * angle.cos(),
+        )
+    };
+
+    // Compute the unrotated start and end points
+    let start_point_unrotated = compute_point(start_angle);
+    let end_point_unrotated = compute_point(end_angle);
+
+    // Rotate the points by the given rotation angle
+    let start_point_rotated = rotate_point(start_point_unrotated, rotation);
+    let end_point_rotated = rotate_point(end_point_unrotated, rotation);
+
+    // Translate the points to the center
+    let start_point = Vec2::new(
+        center.x + start_point_rotated.x,
+        center.y + start_point_rotated.y,
+    );
+    let end_point = Vec2::new(
+        center.x + end_point_rotated.x,
+        center.y + end_point_rotated.y,
+    );
+
+    (start_point, end_point)
+}
+
+pub fn is_point_near_path(path: &BezPath, point: Vec2, threshold: f64) -> bool {
+    let threshold_squared = threshold * threshold;
+
+    for el in path.elements() {
+        match *el {
+            kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) => {
+                if (p.x - point.x).powi(2) + (p.y - point.y).powi(2) <= threshold_squared {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    false
+}
+
+/// Calculate the shortest distance from a point to a line segment.
+pub fn distance_to_line(point: Vec2, line: Line) -> f64 {
+    let a = line.p0;
+    let b = line.p1;
+
+    // Vector from a to b
+    let ab = (b.x - a.x, b.y - a.y);
+
+    // Vector from a to the point
+    let ap = (point.x - a.x, point.y - a.y);
+
+    // Project point onto the line segment, clamping t to [0, 1]
+    let ab_length_squared = ab.0 * ab.0 + ab.1 * ab.1;
+    let t = if ab_length_squared == 0.0 {
+        0.0 // Degenerate segment
+    } else {
+        ((ap.0 * ab.0 + ap.1 * ab.1) / ab_length_squared).clamp(0.0, 1.0)
+    };
+
+    // Closest point on the segment
+    let closest = Vec2::new(a.x + t * ab.0, a.y + t * ab.1);
+
+    // Distance to the closest point
+    (point - closest).hypot()
+}
+
+// pub fn calculate_arc_points(
+//     center: Vec2,
+//     radii: Vec2,
+//     start_angle: f64,
+//     sweep_angle: f64,
+//     rotation: f64,
+// ) -> (Vec2, Vec2) {
+//     let (cx, cy) = (center.x, center.y); // Center of the arc
+//     let (rx, ry) = (radii.x, radii.y); // Radii of the ellipse
+//     // Start and end angles in radians
+//     let end_angle = start_angle + sweep_angle;
+//     // Function to compute an elliptical point without rotation
+//     let compute_point = |angle: f64| -> (f64, f64) { (rx * angle.cos(), ry * angle.sin()) };
+//     // Rotate a point around the origin by a given angle
+//     let rotate_point = |x: f64, y: f64, angle: f64| -> (f64, f64) {
+//         let rotated_x = x * angle.cos() - y * angle.sin();
+//         let rotated_y = x * angle.sin() + y * angle.cos();
+//         (rotated_x, rotated_y)
+//     };
+//     // Compute the unrotated start and end points
+//     let (start_x, start_y) = compute_point(start_angle);
+//     let (end_x, end_y) = compute_point(end_angle);
+//     // Rotate the points by the given rotation angle
+//     let (start_x, start_y) = rotate_point(start_x, start_y, rotation);
+//     let (end_x, end_y) = rotate_point(end_x, end_y, rotation);
+//     // Translate the points to the center
+//     let start_point = Vec2::new(cx + start_x, cy + start_y);
+//     let end_point = Vec2::new(cx + end_x, cy + end_y);
+//     (start_point, end_point)
+// }

@@ -7,7 +7,6 @@ macro_rules! log {
 }
 pub mod canvas_core;
 pub mod dom;
-pub mod handles;
 pub mod math;
 pub mod prefab;
 pub mod shape_hole;
@@ -16,12 +15,13 @@ pub mod shape_rectangle;
 pub mod shape_rectangle_rounded;
 pub mod shapes;
 pub mod shapes_pool;
+pub mod sub_shapes;
 
-// use crate::closed_shapes::COperation;
 use crate::dom::*;
 use crate::math::*;
-use canvas_core::{CanvasKind, Canvases, DrawStyles, Layer, Pattern};
-use kurbo::{BezPath, PathEl, Point, Size, Vec2};
+use canvas_core::{CanvasKind, Canvases, DrawStyles, Layer};
+use geo::OpType;
+use kurbo::{Size, Vec2};
 use shapes_pool::CSPool;
 use shapes_pool::CShapeBuilder;
 use shapes_pool::CShid;
@@ -36,8 +36,8 @@ use web_sys::{
     HtmlInputElement, KeyboardEvent, MouseEvent, WheelEvent, Window,
 };
 
-pub type RefAV = Rc<RefCell<AppVars>>;
-pub type ElementCallback = Box<dyn Fn(RefAV, Event) + 'static>;
+type RefAV = Rc<RefCell<AppVars>>;
+type ElementCallback = Box<dyn Fn(RefAV, Event) + 'static>;
 
 #[derive(Default)]
 struct KeysStates {
@@ -52,7 +52,7 @@ fn main() {
 }
 
 #[allow(dead_code)]
-pub struct AppVars {
+struct AppVars {
     root_pool: CSPool,
     on_creation: Option<CShid>,
 
@@ -91,7 +91,7 @@ pub struct AppVars {
 
 ///////////////
 // Initialization
-pub fn create_app_vars(window: Window) -> Result<(), JsValue> {
+fn create_app_vars(window: Window) -> Result<(), JsValue> {
     log!("Creating application variables");
     let document = window.document().expect("should have a document on window");
     let document_element = document
@@ -152,7 +152,13 @@ pub fn create_app_vars(window: Window) -> Result<(), JsValue> {
         .expect("should have status-snapgrid on the page")
         .dyn_into()?;
 
-    let canvases = Canvases::new(c_back, c_grid, c_draw, Size::new(1000., 500.));
+    let canvases = Canvases::new(
+        window.clone(),
+        c_back,
+        c_grid,
+        c_draw,
+        Size::new(1000., 500.),
+    )?;
 
     let wa_size = canvases.get_drawing_size();
     settings_width_input.set_value(&wa_size.width.to_string());
@@ -319,48 +325,6 @@ fn init_icons(av: RefAV) -> Result<(), JsValue> {
 
     Ok(())
 }
-// fn init_context_menu(av: RefAV) -> Result<(), JsValue> {
-//     let pam = av.borrow_mut();
-//     let document = pam.document.clone();
-//     //
-//     let cm_shape_force_horizontal = document
-//         .get_element_by_id("cm-shape-force-horizontal")
-//         .unwrap();
-//     set_callback(
-//         av.clone(),
-//         "click".into(),
-//         &cm_shape_force_horizontal,
-//         Box::new(on_cm_shape_force_horizontal),
-//     )?;
-//     let cm_shape_force_vertical = document
-//         .get_element_by_id("cm-shape-force-vertical")
-//         .unwrap();
-//     set_callback(
-//         av.clone(),
-//         "click".into(),
-//         &cm_shape_force_vertical,
-//         Box::new(on_cm_shape_force_vertical),
-//     )?;
-//     let cm_shape_unforce_horizontal = document
-//         .get_element_by_id("cm-shape-unforce-horizontal")
-//         .unwrap();
-//     set_callback(
-//         av.clone(),
-//         "click".into(),
-//         &cm_shape_unforce_horizontal,
-//         Box::new(on_cm_shape_unforce_horizontal),
-//     )?;
-//     let cm_shape_unforce_vertical = document
-//         .get_element_by_id("cm-shape-unforce-vertical")
-//         .unwrap();
-//     set_callback(
-//         av.clone(),
-//         "click".into(),
-//         &cm_shape_unforce_vertical,
-//         Box::new(on_cm_shape_unforce_vertical),
-//     )?;
-//     Ok(())
-// }
 fn init_canvas(av: RefAV) -> Result<(), JsValue> {
     log!("init_canvas");
     let pam = av.borrow_mut();
@@ -528,22 +492,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 avb.root_pool.move_selection(pos_dwn, cursor_pos);
                 Ok(())
             }
-            MouseState::LeftUp(_cursor_pos) => {
-                // match pam.dp.get_selection() {
-                //     DrawObject::Vertex(vid_sel_old) => {
-                //         // pam.dp
-                //         //     .set_selection(&cursor_pos, grab_precision, Some(vid_sel_old))?;
-                //         // match pam.dp.get_selection() {
-                //         //     DrawObject::Vertex(vid_sel_new) => {
-                //         //         pam.dp.merge_vertices(&vid_sel_old, &vid_sel_new)?
-                //         //     }
-                //         //     _ => pam.dp.force_selection_to_vertex(&vid_sel_old),
-                //         // }
-                //     }
-                //     _ => (),
-                // };
-                Ok(())
-            }
+            MouseState::LeftUp(_cursor_pos) => Ok(()),
             MouseState::LeftUpMove(_, cursor_pos) => {
                 avb.root_pool.highlight_object(cursor_pos, grab_precision);
                 Ok(())
@@ -565,33 +514,46 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     if let Some(cshid) = avb.on_creation {
                         // A. We were drawing a new shape, finish all
                         if let Some(shape) = avb.root_pool.get_shape_mut(cshid) {
-                            shape.clear_selection_all();
+                            shape.select(false);
+                            shape.select_modifiers(false);
                         }
                         avb.on_creation = None;
                         go_to_arrow_tool(avb);
                         Ok(())
                     } else {
-                        log!("Creating a new shape");
                         // B. We start drawing a new shape
                         let layer = Layer::Worksheet;
                         // Determine if we have clicked inside a existing shape and if so, select it as parent
                         let ocshid_highlighted = avb.root_pool.get_first_highlighted();
                         let cshape = match ishape {
-                            IconsShapes::Rectangle => {
-                                CShapeBuilder::new_rectangle(pos, pos, ocshid_highlighted, layer)
-                            }
-                            IconsShapes::RectangleRounded => CShapeBuilder::new_rectangle_rounded(
+                            IconsShapes::Rectangle => CShapeBuilder::new_rectangle(
                                 pos,
                                 pos,
+                                OpType::Union,
                                 ocshid_highlighted,
                                 layer,
                             ),
-                            IconsShapes::Circle => {
-                                CShapeBuilder::new_circle(pos, pos, ocshid_highlighted, layer)
-                            }
-                            IconsShapes::Oblong => {
-                                CShapeBuilder::new_oblong(pos, pos, ocshid_highlighted, layer)
-                            }
+                            IconsShapes::RectangleRounded => CShapeBuilder::new_rectangle_rounded(
+                                pos,
+                                pos,
+                                OpType::Union,
+                                ocshid_highlighted,
+                                layer,
+                            ),
+                            IconsShapes::Circle => CShapeBuilder::new_circle(
+                                pos,
+                                pos,
+                                OpType::Union,
+                                ocshid_highlighted,
+                                layer,
+                            ),
+                            IconsShapes::Oblong => CShapeBuilder::new_oblong(
+                                pos,
+                                pos,
+                                OpType::Union,
+                                ocshid_highlighted,
+                                layer,
+                            ),
                         };
                         avb.on_creation = Some(cshape.get_id());
                         if let Some(cshid_highlighted) = ocshid_highlighted {
@@ -871,7 +833,6 @@ fn on_window_resize(av: RefAV, _event: Event) {
 }
 fn on_window_click(_pa: RefAV, _event: Event) {}
 fn on_window_keydown(av: RefAV, event: Event) {
-    log!("on_keydown");
     event.prevent_default();
     if let Ok(keyboard_event) = event.dyn_into::<KeyboardEvent>() {
         let mut avb = av.borrow_mut();
@@ -893,9 +854,12 @@ fn on_window_keydown(av: RefAV, event: Event) {
             avb.keys_states.shift_pressed = true;
         }
         if keyboard_event.key() == "t" {
-            //
+            if let Some(cshid) = avb.root_pool.get_first_child_highlighted() {
+                if let Some(cshape) = avb.root_pool.get_shape_mut(cshid) {
+                    cshape.toggle_boolean_op();
+                }
+            }
         }
-
         render_drawing(&mut avb);
         drop(avb);
     }
@@ -904,7 +868,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
 ///////////////
 // Icons events
 fn on_icon_click(av: RefAV, event: Event) {
-    log!("icon click");
+    log!("icon cliick");
     let mut avb = av.borrow_mut();
     if let Some(target) = event.target() {
         if let Some(element) = wasm_bindgen::JsCast::dyn_ref::<Element>(&target) {
@@ -987,138 +951,36 @@ fn html_deselect_icons(icon: Icons) {
 ///////////////
 // Rendering
 fn redraw_grid(avb: &mut RefMut<'_, AppVars>) {
-    let draw_rec_size = avb.canvases.get_drawing_size();
-    let draw_rec_grid_spacing = avb.canvases.get_grid_size();
-    // log!("draw_rec_size: {}", draw_rec_size);
-    use PathEl::*;
-    let mut v: Vec<PathEl> = vec![];
-    let mut wx = 0.;
-    while wx <= draw_rec_size.width {
-        v.push(MoveTo(Point::new(wx, 0.)));
-        v.push(LineTo(Point::new(wx, draw_rec_size.height)));
-        wx += draw_rec_grid_spacing
-    }
-    // Horizontal grid lines
-    let mut wy = 0.;
-    while wy <= draw_rec_size.height {
-        v.push(MoveTo(Point::new(0., wy)));
-        v.push(LineTo(Point::new(draw_rec_size.width, wy)));
-        wy += draw_rec_grid_spacing;
-    }
     avb.canvases.clear_grid_canvas();
-    draw_path(
-        avb,
-        CanvasKind::Grid,
-        BezPath::from_vec(v),
-        Layer::Grid,
-        Pattern::Grid,
-    );
+    avb.canvases.draw_grid();
 }
 
 fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
-    let scale = avb.canvases.get_drawing_scale();
+    let _scale = avb.canvases.get_drawing_scale();
     avb.canvases.clear_main_canvas();
     // Draw the segmented paths
     for cshape_root in avb.root_pool.values() {
-        // Shape
-        for path in cshape_root.get_full_segs().into_iter() {
-            draw_path(
-                &avb,
-                CanvasKind::Draw,
-                path,
-                cshape_root.get_layer(),
-                cshape_root.get_pattern_operation(),
-            );
-        }
+        avb.canvases.draw_closed_path(
+            CanvasKind::Draw,
+            cshape_root.get_full_segs(),
+            cshape_root.get_pattern_operation(),
+            cshape_root.get_layer(),
+        );
     }
     // Draw the outline of every shape
     for cshape_root in avb.root_pool.values() {
-        draw_path(
-            &avb,
+        avb.canvases.draw_path(
             CanvasKind::Draw,
-            cshape_root.get_path(),
+            cshape_root.get_paths(),
             cshape_root.get_layer(),
-            cshape_root.get_pattern(),
         );
+
         for cshape_child in cshape_root.get_children().values() {
-            draw_path(
-                &avb,
+            avb.canvases.draw_path(
                 CanvasKind::Draw,
-                cshape_child.get_path(),
+                cshape_child.get_paths(),
                 cshape_child.get_layer(),
-                cshape_child.get_pattern(),
             );
         }
     }
-    for cshape_root in avb.root_pool.values() {
-        for handle in cshape_root.get_handles().iter() {
-            draw_path(
-                &avb,
-                CanvasKind::Draw,
-                handle.get_path(scale),
-                cshape_root.get_layer(),
-                handle.get_pattern(),
-            );
-        }
-        for cshape_child in cshape_root.get_children().values() {
-            for handle in cshape_child.get_handles().iter() {
-                draw_path(
-                    &avb,
-                    CanvasKind::Draw,
-                    handle.get_path(scale),
-                    cshape_root.get_layer(),
-                    handle.get_pattern(),
-                );
-            }
-        }
-    }
-}
-
-fn draw_path(
-    avb: &RefMut<'_, AppVars>,
-    canvas_kind: CanvasKind,
-    path: BezPath,
-    _layer: Layer,
-    pattern: Pattern,
-) {
-    let ctx = avb.canvases.get_context(canvas_kind);
-    let scale = avb.canvases.get_drawing_scale();
-    let offset = avb.canvases.get_drawing_offset();
-
-    let (stroke_style, stroke_width, filled) = avb.styles.get_styles(pattern);
-    let (fill_color, stroke_color) = avb.styles.get_colors(pattern);
-    ctx.set_font("20px sans-serif");
-    ctx.set_line_dash(stroke_style).unwrap();
-    ctx.set_line_width(stroke_width);
-    ctx.set_stroke_style_str(stroke_color);
-    ctx.set_fill_style_str(fill_color);
-    ctx.begin_path();
-    for cst in path.iter() {
-        match cst {
-            PathEl::MoveTo(pt) => {
-                let cpt = to_canvas(&pt.to_vec2(), scale, &offset);
-                ctx.move_to(cpt.x, cpt.y);
-            }
-            PathEl::LineTo(pt) => {
-                let cpt = to_canvas(&pt.to_vec2(), scale, &offset);
-                ctx.line_to(cpt.x, cpt.y);
-            }
-            PathEl::QuadTo(pt1, pt2) => {
-                let cpt1 = to_canvas(&pt1.to_vec2(), scale, &offset);
-                let cpt2 = to_canvas(&pt2.to_vec2(), scale, &offset);
-                ctx.quadratic_curve_to(cpt1.x, cpt1.y, cpt2.x, cpt2.y);
-            }
-            PathEl::CurveTo(pt1, pt2, pt3) => {
-                let cpt1 = to_canvas(&pt1.to_vec2(), scale, &offset);
-                let cpt2 = to_canvas(&pt2.to_vec2(), scale, &offset);
-                let cpt3 = to_canvas(&pt3.to_vec2(), scale, &offset);
-                ctx.bezier_curve_to(cpt1.x, cpt1.y, cpt2.x, cpt2.y, cpt3.x, cpt3.y);
-            }
-            PathEl::ClosePath => ctx.close_path(),
-        }
-    }
-    if filled {
-        ctx.fill();
-    }
-    ctx.stroke();
 }

@@ -1,16 +1,21 @@
 
 :root {
+    --canvas-transparent-color: rgba(255, 255, 255, 0);
     --canvas-background-color: #bfbaba;
-    --canvas-grid-color: #69fdf86f;
+    --canvas-grid-color: #7d7c686f;
     --canvas-main-color: #8d8b8b;
     /*  */
-    --canvas-normal-color: #424242;
-    --canvas-highlight-color:  #bfbb48;
-    --canvas-selected-color:  #ff0000;
-    --canvas-normal-fill-color: #4242428b;
-    --canvas-highlight-fill-color:  #595721a1;
-    --canvas-selected-fill-color:  #ff000097;
-    --canvas-transparent-color: rgba(255, 255, 255, 0);
+    --canvas-basic-normal-color: #424242;
+    --canvas-basic-highlight-color:  #bfbb48;
+    --canvas-basic-selected-color:  #ff0000;
+
+    --canvas-composed-normal-color: #424242;
+    --canvas-composed-highlight-color:  #bfbb48;
+    --canvas-composed-selected-color:  #ff0000;
+
+    --canvas-composed-normal-fill-color: #4242428b;
+    --canvas-composed-highlight-fill-color:  #595721a1;
+    --canvas-composed-selected-fill-color:  #ff000097;
 }
 
 body, html {

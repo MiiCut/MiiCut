@@ -6,35 +6,50 @@
 // }
 
 use crate::{
-    handles::{Handle, HandleKind},
+    canvas_core::Pattern,
     math::*,
-    shapes::CShapes,
-    shapes_pool::CShapeKind,
+    shapes::{CShapeKind, CShapes},
+    sub_shapes::Position,
 };
-use kurbo::{Arc, ArcAppendIter, BezPath, Line, LinePathIter, PathEl, Point, Rect, Shape, Vec2};
+use kurbo::{
+    flatten, Arc, ArcAppendIter, BezPath, Line, LinePathIter, PathEl, Point, Rect, Shape, Vec2,
+};
 use std::{
     f64::consts::{FRAC_PI_2, PI},
     fmt::Display,
+    path,
 };
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CShapeOblong {
-    radius: f64,
-    handles: (Handle, Handle, Handle),
+    start: Position,
+    end: Position,
+    width: f64,
+    width_saved: f64,
+
+    arc_start_highlighted: bool,
+    arc_end_highlighted: bool,
+    line_up_highlighted: bool,
+    line_down_highlighted: bool,
+
+    arc_start_selected: bool,
+    arc_end_selected: bool,
+    line_up_selected: bool,
+    line_down_selected: bool,
+
     highlighted: bool,
     selected: bool,
 }
 impl CShapeOblong {
+    const MIN_SIZE: f64 = 2.;
+    const GRAB: f64 = 2.;
+
     fn get_arc(&self, start_arc: bool) -> Arc {
-        let (pos1, pos2, r_vec) = (
-            self.handles.0.get_pos(),
-            self.handles.1.get_pos(),
-            self.handles.2.get_pos(),
-        );
-        let radius = get_dist_to_line(pos1, pos2, r_vec);
-        let angle = angle_between(pos1, pos2);
+        let (start, end, width) = (self.start.get_pos(), self.end.get_pos(), self.width);
+        let radius = width / 2.;
+        let angle = (end - start).atan2();
         if start_arc {
             Arc::new(
-                pos1.to_point(),
+                start.to_point(),
                 Vec2::new(radius, radius),
                 3. * FRAC_PI_2,
                 -PI,
@@ -42,7 +57,7 @@ impl CShapeOblong {
             )
         } else {
             Arc::new(
-                pos2.to_point(),
+                end.to_point(),
                 Vec2::new(radius, radius),
                 FRAC_PI_2,
                 -PI,
@@ -50,64 +65,29 @@ impl CShapeOblong {
             )
         }
     }
-    fn get_rectangle_vertices(&self) -> [Vec2; 4] {
-        let (pos1, pos2, r_vec) = (
-            self.handles.0.get_pos(),
-            self.handles.1.get_pos(),
-            self.handles.2.get_pos(),
-        );
-        let v0 = get_intersection(pos1, pos2, r_vec);
-        let v1 = get_intersection(pos2, pos1, r_vec);
-        let r_vec_sym = symmetric_point(pos2, pos1, r_vec);
-        let v3 = get_intersection(pos1, pos2, r_vec_sym);
-        let v2 = get_intersection(pos2, pos1, r_vec_sym);
-        [v0, v1, v2, v3]
-    }
     fn get_line(&self, upper_line: bool) -> Line {
-        let [v0, v1, v2, v3] = self.get_rectangle_vertices();
+        let start_arc_points = calculate_arc_points(self.get_arc(true));
+        let end_arc_points = calculate_arc_points(self.get_arc(false));
         if upper_line {
-            Line::new(v0.to_point(), v1.to_point())
+            Line::new(start_arc_points.1.to_point(), end_arc_points.0.to_point())
         } else {
-            Line::new(v2.to_point(), v3.to_point())
+            Line::new(end_arc_points.1.to_point(), start_arc_points.0.to_point())
         }
     }
-
-    fn get_radius_from_point(&self, pos: Vec2) -> f64 {
-        let (pos1, pos2) = (self.handles.0.get_pos(), self.handles.1.get_pos());
-        get_dist_to_line(pos1, pos2, pos)
+    fn get_segs(&self, path: BezPath) -> BezPath {
+        let mut segs = BezPath::new();
+        flatten(path, 0.25, |s| segs.push(s));
+        segs
     }
-    fn is_point_in_rectangle(&self, pos: Vec2) -> bool {
-        let rect_vertices = self.get_rectangle_vertices();
-
-        let mut signs = vec![];
-
-        // Compute signed distances to each edge of the rectangle
-        for i in 0..4 {
-            let a = rect_vertices[i];
-            let b = rect_vertices[(i + 1) % 4];
-            let distance = signed_distance(pos, a, b);
-            signs.push(distance);
+    fn get_modifier_pattern(&self, mut selected: bool, mut highlighted: bool) -> Pattern {
+        selected |= self.selected;
+        highlighted |= self.highlighted;
+        match (selected, highlighted) {
+            (false, false) => Pattern::BasicNormal,
+            (false, true) => Pattern::BasicHighlighted,
+            (true, false) => Pattern::BasicSelected,
+            (true, true) => Pattern::BasicSelected,
         }
-
-        // Check if all distances have the same sign
-        let all_positive = signs.iter().all(|&d| d > 0.0);
-        let all_negative = signs.iter().all(|&d| d < 0.0);
-
-        all_positive || all_negative
-    }
-
-    fn is_point_in_circle(&self, point: Point, start_arc: bool) -> bool {
-        let vertices = self.get_rectangle_vertices(); // Call once
-        let (center, radius_squared) = if start_arc {
-            let center = self.handles.0.get_pos();
-            (center, (vertices[0] - center).hypot2())
-        } else {
-            let center = self.handles.1.get_pos();
-            (center, (vertices[2] - center).hypot2())
-        };
-
-        let dist_squared = (point.x - center.x).powi(2) + (point.y - center.y).powi(2);
-        dist_squared <= radius_squared
     }
 }
 impl Display for CShapeOblong {
@@ -146,14 +126,7 @@ impl Shape for CShapeOblong {
     }
     #[inline]
     fn winding(&self, pt: Point) -> i32 {
-        if self.is_point_in_rectangle(pt.to_vec2())
-            || self.is_point_in_circle(pt, true)
-            || self.is_point_in_circle(pt, false)
-        {
-            1
-        } else {
-            0
-        }
+        0 // TODO
     }
     #[inline]
     fn bounding_box(&self) -> Rect {
@@ -169,174 +142,150 @@ impl CShapes for CShapeOblong {
     const TOLERANCE: f64 = 0.01;
 
     fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind {
-        let radius = 5.;
-        let pos3 = point_at_distance(pos1, pos2, radius);
-        use HandleKind::*;
-        let handles = (
-            Handle::new(Vec2::new(pos1.x, pos1.y), Grab, false),
-            Handle::new(Vec2::new(pos2.x, pos2.y), Grab, true),
-            Handle::new(pos3, Modify, false),
-        );
         CShapeKind::COblong(CShapeOblong {
-            radius,
-            handles,
+            start: Position::new(pos1),
+            end: Position::new(pos2),
+            width: 10.,
+            width_saved: 10.,
+            arc_start_highlighted: false,
+            arc_end_highlighted: true,
+            line_up_highlighted: false,
+            line_down_highlighted: false,
+            arc_start_selected: false,
+            arc_end_selected: false,
+            line_up_selected: false,
+            line_down_selected: false,
             highlighted: false,
             selected: false,
         })
     }
     fn save_pos(&mut self) {
-        self.handles.0.save_pos();
-        self.handles.1.save_pos();
-        self.handles.2.save_pos();
+        self.start.save_pos();
+        self.end.save_pos();
+        self.width_saved = self.width;
     }
     fn toggle_prop(&mut self) {
         ()
     }
-    fn get_shape_path(&self) -> BezPath {
-        self.path_elements(CShapeOblong::TOLERANCE).collect()
+    fn get_shape_paths(&self) -> Vec<(BezPath, Pattern)> {
+        let mut paths = vec![];
+        paths.push((
+            self.get_line(true).to_path(CShapeOblong::TOLERANCE),
+            self.get_modifier_pattern(self.line_up_selected, self.line_up_highlighted),
+        ));
+        paths.push((
+            self.get_arc(false).to_path(CShapeOblong::TOLERANCE),
+            self.get_modifier_pattern(self.arc_end_selected, self.arc_end_highlighted),
+        ));
+
+        paths.push((
+            self.get_line(false).to_path(CShapeOblong::TOLERANCE),
+            self.get_modifier_pattern(self.line_down_selected, self.line_down_highlighted),
+        ));
+        paths.push((
+            self.get_arc(true).to_path(CShapeOblong::TOLERANCE),
+            self.get_modifier_pattern(self.arc_start_selected, self.arc_start_highlighted),
+        ));
+        paths
     }
 
-    fn highlight_handles(&mut self, pos: Vec2, precision: f64) -> bool {
-        self.handles
-            .0
-            .set_highlighted(is_near_position(pos, self.handles.0.get_pos(), precision));
-        self.handles
-            .1
-            .set_highlighted(is_near_position(pos, self.handles.1.get_pos(), precision));
-        self.handles
-            .2
-            .set_highlighted(is_near_position(pos, self.handles.2.get_pos(), precision));
-        self.handles.0.is_highlighted()
-            || self.handles.1.is_highlighted()
-            || self.handles.2.is_highlighted()
-    }
-    fn highlight_shape(&mut self, pos: Vec2) -> bool {
+    fn highlight_from_pos(&mut self, pos: Vec2) -> bool {
         self.highlighted = self.contains(pos.to_point());
         self.highlighted
     }
+    fn highlight_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
+        let line_up = self.get_line(true);
+        let end_segs = self.get_segs(self.get_arc(false).to_path(CShapeOblong::TOLERANCE));
+        let line_down = self.get_line(false);
+        let start_segs = self.get_segs(self.get_arc(true).to_path(CShapeOblong::TOLERANCE));
 
-    fn set_highlight(&mut self, value: bool) {
+        self.line_up_highlighted = distance_to_line(pos, line_up) < CShapeOblong::GRAB;
+        self.arc_end_highlighted = is_point_near_path(&end_segs, pos, CShapeOblong::GRAB);
+        self.line_down_highlighted = distance_to_line(pos, line_down) < CShapeOblong::GRAB;
+        self.arc_start_highlighted = is_point_near_path(&start_segs, pos, CShapeOblong::GRAB);
+        self.line_up_highlighted
+            || self.arc_end_highlighted
+            || self.line_down_highlighted
+            || self.arc_start_highlighted
+    }
+    fn highlight(&mut self, value: bool) {
         self.highlighted = value;
+    }
+    fn highlight_modifiers(&mut self, value: bool) {
+        self.line_up_highlighted = value;
+        self.arc_end_highlighted = value;
+        self.line_down_highlighted = value;
+        self.arc_start_highlighted = value;
     }
     fn is_highlighted(&self) -> bool {
         self.highlighted
     }
 
-    fn select_handles(&mut self, pos: Vec2, precision: f64) -> bool {
-        self.handles
-            .0
-            .set_selection(is_near_position(pos, self.handles.0.get_pos(), precision));
-        self.handles
-            .1
-            .set_selection(is_near_position(pos, self.handles.1.get_pos(), precision));
-        self.handles
-            .2
-            .set_selection(is_near_position(pos, self.handles.2.get_pos(), precision));
-        self.handles.0.is_selected() || self.handles.1.is_selected() || self.handles.2.is_selected()
-    }
-    fn select_shape(&mut self, pos: Vec2) -> bool {
+    fn select_from_pos(&mut self, pos: Vec2) -> bool {
         self.selected = self.contains(pos.to_point());
         self.selected
     }
-    fn set_selection(&mut self, value: bool) {
+    fn select_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
+        let line_up = self.get_line(true);
+        let end_segs = self.get_segs(self.get_arc(false).to_path(CShapeOblong::TOLERANCE));
+        let line_down = self.get_line(false);
+        let start_segs = self.get_segs(self.get_arc(true).to_path(CShapeOblong::TOLERANCE));
+
+        self.line_up_selected = distance_to_line(pos, line_up) < CShapeOblong::GRAB;
+        self.arc_end_selected = is_point_near_path(&end_segs, pos, CShapeOblong::GRAB);
+        self.line_down_selected = distance_to_line(pos, line_down) < CShapeOblong::GRAB;
+        self.arc_start_selected = is_point_near_path(&start_segs, pos, CShapeOblong::GRAB);
+        self.line_up_selected
+            || self.arc_end_selected
+            || self.line_down_selected
+            || self.arc_start_selected
+    }
+    fn select(&mut self, value: bool) {
         self.selected = value;
+    }
+    fn select_modifiers(&mut self, value: bool) {
+        self.line_up_selected = value;
+        self.arc_end_selected = value;
+        self.line_down_selected = value;
+        self.arc_start_selected = value;
     }
     fn is_selected(&self) -> bool {
         self.selected
     }
-    fn clear_selection(&mut self) {
-        self.selected = false;
-    }
-    fn clear_selection_all(&mut self) {
-        self.clear_selection();
-        self.handles.0.set_selection(false);
-        self.handles.1.set_selection(false);
-        self.handles.2.set_selection(false);
-    }
 
     fn get_position(&self) -> Vec2 {
-        (self.handles.0.get_pos() + self.handles.1.get_pos()) / 2.
+        (self.start.get_pos() + self.end.get_pos()) / 2.
     }
     fn move_position(&mut self, pos_init: Vec2, pos: Vec2) {
+        let start_saved = self.start.get_saved_pos();
+        let end_saved = self.end.get_saved_pos();
+        let width_saved = self.width_saved;
         let dpos = pos - pos_init;
-        let h1 = self.handles.0.get_saved_pos();
-        let h2 = self.handles.1.get_saved_pos();
-        let h3 = self.handles.2.get_saved_pos();
-        match self.get_handle_selected() {
-            None => {
+
+        match (
+            self.line_up_selected,
+            self.arc_end_selected,
+            self.line_down_selected,
+            self.arc_start_selected,
+        ) {
+            (false, false, false, false) => {
                 if self.selected {
-                    self.handles.0.set_pos(h1 + dpos);
-                    self.handles.1.set_pos(h2 + dpos);
-                    self.handles.2.set_pos(h3 + dpos);
+                    self.start.set_pos(start_saved + dpos);
+                    self.end.set_pos(end_saved + dpos);
                 }
             }
-            Some((_handle, idx)) => match idx {
-                0 => {
-                    if (h1 + dpos - h2).hypot() >= 1.0 {
-                        self.handles.0.set_pos(h1 + dpos);
-                        let pos3 = point_at_distance(
-                            self.handles.0.get_pos(),
-                            self.handles.1.get_pos(),
-                            self.radius,
-                        );
-                        self.handles.2.set_pos(pos3);
-                    }
-                }
-                1 => {
-                    if (h2 + dpos - h1).hypot() >= 1.0 {
-                        self.handles.1.set_pos(h2 + dpos);
-                        let pos3 = point_at_distance(
-                            self.handles.0.get_pos(),
-                            self.handles.1.get_pos(),
-                            self.radius,
-                        );
-                        self.handles.2.set_pos(pos3);
-                    }
-                }
-                2 => {
-                    let pos3 = projection_to_perpendicular(h1, h2, h3 + dpos);
-                    let mut radius = self.get_radius_from_point(pos3);
-                    if radius < 1. {
-                        radius = 1.
-                    }
-                    let pos3 = point_at_distance(
-                        self.handles.0.get_pos(),
-                        self.handles.1.get_pos(),
-                        radius,
-                    );
-                    self.handles.2.set_pos(pos3);
-                    self.radius = radius;
-                }
-                _ => unreachable!(),
-            },
+            (true, false, false, false) => {
+                //
+            }
+            (false, true, false, false) => {
+                self.start.set_pos(start_saved + dpos);
+            }
+            (false, false, true, false) => {}
+            (false, false, false, true) => {
+                self.end.set_pos(end_saved + dpos);
+            }
+            _ => (),
         }
-    }
-    fn get_handles(&self) -> Vec<Handle> {
-        vec![self.handles.0, self.handles.1, self.handles.2]
-    }
-    fn get_handle_selected(&self) -> Option<(Handle, usize)> {
-        if self.handles.0.is_selected() {
-            return Some((self.handles.0, 0));
-        }
-        if self.handles.1.is_selected() {
-            return Some((self.handles.1, 1));
-        }
-        if self.handles.2.is_selected() {
-            return Some((self.handles.2, 2));
-        }
-        None
-    }
-    fn get_handle_highlighted(&self) -> Option<(Handle, usize)> {
-        if self.handles.0.is_highlighted() {
-            return Some((self.handles.0, 0));
-        }
-        if self.handles.1.is_highlighted() {
-            return Some((self.handles.1, 1));
-        }
-        if self.handles.2.is_highlighted() {
-            return Some((self.handles.2, 2));
-        }
-        None
     }
 }
 #[doc(hidden)]

@@ -9,22 +9,36 @@ use kurbo::{BezPath, Circle, CirclePathIter, Point, Rect, Shape, Vec2};
 use std::fmt::Display;
 
 use crate::{
-    handles::{Handle, HandleKind},
-    math::*,
-    shapes::CShapes,
-    shapes_pool::CShapeKind,
+    canvas_core::Pattern,
+    shapes::{CShapeKind, CShapes},
+    sub_shapes::Position,
 };
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CShapeHole {
-    handles: (Handle, Handle),
-    saved_handles: (Handle, Handle),
+    center: Position,
+    radius: f64,
+    saved_radius: f64,
+    circonference_highlighted: bool,
+    circonference_selected: bool,
     highlighted: bool,
     selected: bool,
 }
 impl CShapeHole {
+    const MIN_SIZE: f64 = 2.;
+    const GRAB: f64 = 2.;
+
     fn get_circle(&self) -> Circle {
-        let (pos1, pos2) = (self.handles.0.get_pos(), self.handles.1.get_pos());
-        Circle::new(pos1.to_point(), (pos2 - pos1).hypot())
+        Circle::new(self.center.get_pos().to_point(), self.radius)
+    }
+    fn get_modifier_pattern(&self, mut selected: bool, mut highlighted: bool) -> Pattern {
+        selected |= self.selected;
+        highlighted |= self.highlighted;
+        match (selected, highlighted) {
+            (false, false) => Pattern::BasicNormal,
+            (false, true) => Pattern::BasicHighlighted,
+            (true, false) => Pattern::BasicSelected,
+            (true, true) => Pattern::BasicSelected,
+        }
     }
 }
 
@@ -68,125 +82,84 @@ impl Shape for CShapeHole {
 impl CShapes for CShapeHole {
     const TOLERANCE: f64 = 0.01;
 
-    fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind {
-        use HandleKind::*;
-        let handles = (
-            Handle::new(Vec2::new(pos1.x, pos1.y), Grab, false),
-            Handle::new(Vec2::new(pos2.x, pos2.y), Modify, true),
-        );
+    fn new(pos1: Vec2, _pos2: Vec2) -> CShapeKind {
         CShapeKind::CHole(CShapeHole {
-            handles,
-            saved_handles: handles,
+            center: Position::new(pos1),
+            radius: CShapeHole::MIN_SIZE,
+            saved_radius: CShapeHole::MIN_SIZE,
+            circonference_highlighted: false,
+            circonference_selected: true,
             highlighted: false,
             selected: false,
         })
     }
     fn save_pos(&mut self) {
-        self.saved_handles.0.set_pos(self.handles.0.get_pos());
-        self.saved_handles.1.set_pos(self.handles.1.get_pos());
+        self.center.save_pos();
+        self.saved_radius = self.radius;
     }
     fn toggle_prop(&mut self) {
         ()
     }
-    fn get_shape_path(&self) -> BezPath {
-        self.get_circle().to_path(Self::TOLERANCE)
+    fn get_shape_paths(&self) -> Vec<(BezPath, Pattern)> {
+        vec![(
+            self.get_circle().to_path(Self::TOLERANCE),
+            self.get_modifier_pattern(self.circonference_selected, self.circonference_highlighted),
+        )]
     }
 
-    fn highlight_handles(&mut self, pos: Vec2, precision: f64) -> bool {
-        self.handles
-            .0
-            .set_highlighted(is_near_position(pos, self.handles.0.get_pos(), precision));
-        self.handles
-            .1
-            .set_highlighted(is_near_position(pos, self.handles.1.get_pos(), precision));
-        self.handles.0.is_highlighted() || self.handles.1.is_highlighted()
-    }
-    fn highlight_shape(&mut self, pos: Vec2) -> bool {
+    fn highlight_from_pos(&mut self, pos: Vec2) -> bool {
         self.highlighted = self.contains(pos.to_point());
         self.highlighted
     }
-    fn set_highlight(&mut self, value: bool) {
+    fn highlight_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
+        self.circonference_highlighted =
+            ((pos - self.center.get_pos()).hypot() - self.radius).abs() < CShapeHole::GRAB;
+        self.circonference_highlighted
+    }
+    fn highlight(&mut self, value: bool) {
         self.highlighted = value;
+    }
+    fn highlight_modifiers(&mut self, value: bool) {
+        self.circonference_highlighted = value;
     }
     fn is_highlighted(&self) -> bool {
         self.highlighted
     }
 
-    fn select_handles(&mut self, pos: Vec2, precision: f64) -> bool {
-        self.handles
-            .0
-            .set_selection(is_near_position(pos, self.handles.0.get_pos(), precision));
-        self.handles
-            .1
-            .set_selection(is_near_position(pos, self.handles.1.get_pos(), precision));
-        self.handles.0.is_selected() || self.handles.1.is_selected()
-    }
-    fn select_shape(&mut self, pos: Vec2) -> bool {
+    fn select_from_pos(&mut self, pos: Vec2) -> bool {
         self.selected = self.contains(pos.to_point());
         self.selected
     }
-    fn set_selection(&mut self, value: bool) {
+    fn select_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
+        self.circonference_selected =
+            ((pos - self.center.get_pos()).hypot() - self.radius).abs() < CShapeHole::GRAB;
+        self.circonference_selected
+    }
+    fn select(&mut self, value: bool) {
         self.selected = value;
+    }
+    fn select_modifiers(&mut self, value: bool) {
+        self.circonference_selected = value;
     }
     fn is_selected(&self) -> bool {
         self.selected
     }
-    fn clear_selection(&mut self) {
-        self.selected = false;
-    }
-    fn clear_selection_all(&mut self) {
-        self.clear_selection();
-        self.handles.0.set_selection(false);
-        self.handles.1.set_selection(false);
-    }
 
     fn get_position(&self) -> Vec2 {
-        self.handles.0.get_pos()
+        self.center.get_pos()
     }
     fn move_position(&mut self, pos_init: Vec2, pos: Vec2) {
+        let c_saved = self.center.get_saved_pos();
+
         let dpos = pos - pos_init;
-        let h1 = self.saved_handles.0.get_pos();
-        let h2 = self.saved_handles.1.get_pos();
-        match self.get_handle_selected() {
-            None => {
-                if self.selected {
-                    self.handles.0.set_pos(h1 + dpos);
-                    self.handles.1.set_pos(h2 + dpos);
-                }
+
+        if self.circonference_selected {
+            let radius = (self.center.get_pos() - pos).hypot();
+            self.radius = radius.max(CShapeHole::MIN_SIZE);
+        } else {
+            if self.selected {
+                self.center.set_pos(c_saved + dpos);
             }
-            Some((_handle, idx)) => match idx {
-                0 => {
-                    self.handles.0.set_pos(h1 + dpos);
-                    self.handles.1.set_pos(h2 + dpos);
-                }
-                1 => {
-                    if (h2 + dpos - h1).hypot() >= 1.0 {
-                        self.handles.1.set_pos(h2 + dpos);
-                    }
-                }
-                _ => unreachable!(),
-            },
         }
-    }
-    fn get_handles(&self) -> Vec<Handle> {
-        vec![self.handles.0, self.handles.1]
-    }
-    fn get_handle_selected(&self) -> Option<(Handle, usize)> {
-        if self.handles.0.is_selected() {
-            return Some((self.handles.0, 0));
-        }
-        if self.handles.1.is_selected() {
-            return Some((self.handles.1, 1));
-        }
-        None
-    }
-    fn get_handle_highlighted(&self) -> Option<(Handle, usize)> {
-        if self.handles.0.is_highlighted() {
-            return Some((self.handles.0, 0));
-        }
-        if self.handles.1.is_highlighted() {
-            return Some((self.handles.1, 1));
-        }
-        None
     }
 }

@@ -6,26 +6,47 @@
 // }
 
 use crate::{
-    handles::{Handle, HandleKind},
+    canvas_core::Pattern,
     math::*,
-    shapes::CShapes,
-    shapes_pool::CShapeKind,
+    shapes::{CShapeKind, CShapes},
+    sub_shapes::Position,
 };
-use kurbo::{BezPath, Point, Rect, RectPathIter, Shape, Vec2};
+use kurbo::{BezPath, Line, LinePathIter, PathEl, Point, Rect, Shape, Vec2};
 use std::fmt::Display;
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CShapeRectangle {
-    handles: (Handle, Handle),
+    tl: Position,
+    br: Position,
+    top_highlighed: bool,
+    right_highlighed: bool,
+    bottom_highlighed: bool,
+    left_highlighed: bool,
+    top_selected: bool,
+    right_selected: bool,
+    bottom_selected: bool,
+    left_selected: bool,
+
     highlighted: bool,
     selected: bool,
 }
 impl CShapeRectangle {
-    const MIN_SIZE: f64 = 1.;
-    fn get_rectangle(&self) -> Rect {
-        let (pos1, pos2) = (self.handles.0.get_pos(), self.handles.1.get_pos());
-        Rect::new(pos1.x, pos1.y, pos2.x, pos2.y).abs()
+    const MIN_SIZE: f64 = 10.;
+    fn get_lines(&self) -> (Line, Line, Line, Line) {
+        let tl_pos = self.tl.get_pos();
+        let br_pos = self.br.get_pos();
+        (
+            Line::new(tl_pos.to_point(), Vec2::new(br_pos.x, tl_pos.y).to_point()),
+            Line::new(Vec2::new(br_pos.x, tl_pos.y).to_point(), br_pos.to_point()),
+            Line::new(br_pos.to_point(), Vec2::new(tl_pos.x, br_pos.y).to_point()),
+            Line::new(Vec2::new(tl_pos.x, br_pos.y).to_point(), tl_pos.to_point()),
+        )
     }
-    fn enforce_constraints(&self, pos: Vec2, other: Vec2, last_pos: Vec2) -> Vec2 {
+    fn get_rectangle(&self) -> Rect {
+        let tl_pos = self.tl.get_pos();
+        let br_pos = self.br.get_pos();
+        Rect::new(tl_pos.x, tl_pos.y, br_pos.x, br_pos.y)
+    }
+    fn force_consistency(&self, pos: Vec2, other: Vec2, last_pos: Vec2) -> Vec2 {
         let dx = (pos.x - other.x).abs();
         let dy = (pos.y - other.y).abs();
 
@@ -45,6 +66,16 @@ impl CShapeRectangle {
             ),
         }
     }
+    fn get_modifier_pattern(&self, mut selected: bool, mut highlighted: bool) -> Pattern {
+        selected |= self.selected;
+        highlighted |= self.highlighted;
+        match (selected, highlighted) {
+            (false, false) => Pattern::BasicNormal,
+            (false, true) => Pattern::BasicHighlighted,
+            (true, false) => Pattern::BasicSelected,
+            (true, true) => Pattern::BasicSelected,
+        }
+    }
 }
 impl Display for CShapeRectangle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -52,10 +83,18 @@ impl Display for CShapeRectangle {
     }
 }
 impl Shape for CShapeRectangle {
-    type PathElementsIter<'iter> = RectPathIter;
+    type PathElementsIter<'iter> = CShapeRectangleIter;
 
-    fn path_elements(&self, tolerance: f64) -> RectPathIter {
-        self.get_rectangle().path_elements(tolerance)
+    fn path_elements(&self, tolerance: f64) -> CShapeRectangleIter {
+        let lines = self.get_lines();
+        let lines_iter = [
+            lines.0.path_elements(tolerance),
+            lines.1.path_elements(tolerance),
+            lines.2.path_elements(tolerance),
+            lines.3.path_elements(tolerance),
+        ];
+
+        CShapeRectangleIter { idx: 0, lines_iter }
     }
     #[inline]
     fn area(&self) -> f64 {
@@ -79,132 +118,206 @@ impl Shape for CShapeRectangle {
     }
     #[inline]
     fn contains(&self, pt: Point) -> bool {
-        self.get_rectangle().contains(pt)
+        self.get_rectangle().abs().contains(pt)
     }
 }
 impl CShapes for CShapeRectangle {
     const TOLERANCE: f64 = 0.01;
 
     fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind {
-        use HandleKind::*;
-        let handles = (
-            Handle::new(Vec2::new(pos1.x, pos1.y), Grab, false),
-            Handle::new(Vec2::new(pos2.x, pos2.y), Grab, true),
-        );
         CShapeKind::CRectangle(CShapeRectangle {
-            handles,
+            tl: Position::new(pos1),
+            br: Position::new(
+                pos2 + Vec2::new(CShapeRectangle::MIN_SIZE, CShapeRectangle::MIN_SIZE),
+            ),
+            top_highlighed: false,
+            right_highlighed: false,
+            bottom_highlighed: false,
+            left_highlighed: false,
+            top_selected: false,
+            right_selected: true,
+            bottom_selected: true,
+            left_selected: false,
             highlighted: false,
             selected: false,
         })
     }
     fn save_pos(&mut self) {
-        self.handles.0.save_pos();
-        self.handles.1.save_pos();
+        self.tl.save_pos();
+        self.br.save_pos();
     }
     fn toggle_prop(&mut self) {
         ()
     }
-    fn get_shape_path(&self) -> BezPath {
-        self.get_rectangle().to_path(Self::TOLERANCE)
+    fn get_shape_paths(&self) -> Vec<(BezPath, Pattern)> {
+        let (top, right, bottom, left) = self.get_lines();
+        vec![
+            (
+                top.path_elements(CShapeRectangle::TOLERANCE)
+                    .collect::<BezPath>(),
+                self.get_modifier_pattern(self.top_selected, self.top_highlighed),
+            ),
+            (
+                right
+                    .path_elements(CShapeRectangle::TOLERANCE)
+                    .collect::<BezPath>(),
+                self.get_modifier_pattern(self.right_selected, self.right_highlighed),
+            ),
+            (
+                bottom
+                    .path_elements(CShapeRectangle::TOLERANCE)
+                    .collect::<BezPath>(),
+                self.get_modifier_pattern(self.bottom_selected, self.bottom_highlighed),
+            ),
+            (
+                left.path_elements(CShapeRectangle::TOLERANCE)
+                    .collect::<BezPath>(),
+                self.get_modifier_pattern(self.left_selected, self.left_highlighed),
+            ),
+        ]
     }
 
-    fn highlight_handles(&mut self, pos: Vec2, precision: f64) -> bool {
-        self.handles
-            .0
-            .set_highlighted(is_near_position(pos, self.handles.0.get_pos(), precision));
-        self.handles
-            .1
-            .set_highlighted(is_near_position(pos, self.handles.1.get_pos(), precision));
-        self.handles.0.is_highlighted() || self.handles.1.is_highlighted()
-    }
-    fn highlight_shape(&mut self, pos: Vec2) -> bool {
+    fn highlight_from_pos(&mut self, pos: Vec2) -> bool {
         self.highlighted = self.contains(pos.to_point());
         self.highlighted
     }
-    fn set_highlight(&mut self, value: bool) {
+    fn highlight_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
+        let tl_pos = self.tl.get_pos();
+        let tr_pos = Vec2::new(self.br.get_pos().x, self.tl.get_pos().y);
+        let br_pos = self.br.get_pos();
+        let bl_pos = Vec2::new(self.tl.get_pos().x, self.br.get_pos().y);
+        self.top_highlighed = get_dist_to_segment(tl_pos, tr_pos, pos) < 4.;
+        self.right_highlighed = get_dist_to_segment(tr_pos, br_pos, pos) < 4.;
+        self.bottom_highlighed = get_dist_to_segment(br_pos, bl_pos, pos) < 4.;
+        self.left_highlighed = get_dist_to_segment(bl_pos, tl_pos, pos) < 4.;
+
+        self.top_highlighed
+            || self.right_highlighed
+            || self.bottom_highlighed
+            || self.left_highlighed
+    }
+    fn highlight(&mut self, value: bool) {
         self.highlighted = value;
+    }
+    fn highlight_modifiers(&mut self, value: bool) {
+        self.top_highlighed = value;
+        self.right_highlighed = value;
+        self.bottom_highlighed = value;
+        self.left_highlighed = value;
     }
     fn is_highlighted(&self) -> bool {
         self.highlighted
     }
 
-    fn select_handles(&mut self, pos: Vec2, precision: f64) -> bool {
-        self.handles
-            .0
-            .set_selection(is_near_position(pos, self.handles.0.get_pos(), precision));
-        self.handles
-            .1
-            .set_selection(is_near_position(pos, self.handles.1.get_pos(), precision));
-
-        self.handles.0.is_selected() || self.handles.1.is_selected()
-    }
-    fn select_shape(&mut self, pos: Vec2) -> bool {
+    fn select_from_pos(&mut self, pos: Vec2) -> bool {
         self.selected = self.contains(pos.to_point());
         self.selected
     }
+    fn select_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
+        let tl_pos = self.tl.get_pos();
+        let tr_pos = Vec2::new(self.br.get_pos().x, self.tl.get_pos().y);
+        let br_pos = self.br.get_pos();
+        let bl_pos = Vec2::new(self.tl.get_pos().x, self.br.get_pos().y);
+        self.top_selected = get_dist_to_segment(tl_pos, tr_pos, pos) < 4.;
+        self.right_selected = get_dist_to_segment(tr_pos, br_pos, pos) < 4.;
+        self.bottom_selected = get_dist_to_segment(br_pos, bl_pos, pos) < 4.;
+        self.left_selected = get_dist_to_segment(bl_pos, tl_pos, pos) < 4.;
 
-    fn set_selection(&mut self, value: bool) {
+        self.top_selected || self.right_selected || self.bottom_selected || self.left_selected
+    }
+    fn select(&mut self, value: bool) {
         self.selected = value;
+    }
+    fn select_modifiers(&mut self, value: bool) {
+        self.top_selected = value;
+        self.right_selected = value;
+        self.bottom_selected = value;
+        self.left_selected = value;
     }
     fn is_selected(&self) -> bool {
         self.selected
     }
-    fn clear_selection(&mut self) {
-        self.selected = false;
-    }
-    fn clear_selection_all(&mut self) {
-        self.clear_selection();
-        self.handles.0.set_selection(false);
-        self.handles.1.set_selection(false);
-    }
+
     fn get_position(&self) -> Vec2 {
-        (self.handles.0.get_pos() + self.handles.1.get_pos()) / 2.
+        (self.tl.get_pos() + self.br.get_pos()) / 2.
     }
     fn move_position(&mut self, pos_init: Vec2, pos: Vec2) {
-        let h1 = self.handles.0.get_saved_pos();
-        let h2 = self.handles.1.get_saved_pos();
-        let last_h1 = self.handles.0.get_last_pos();
-        let last_h2 = self.handles.1.get_last_pos();
+        let tl_saved = self.tl.get_saved_pos();
+        let br_saved = self.br.get_saved_pos();
+        let tl_last = self.tl.get_last_pos();
+        let br_last = self.br.get_last_pos();
+
+        let top_sel = self.top_selected;
+        let right_sel = self.right_selected;
+        let bottom_sel = self.bottom_selected;
+        let left_sel = self.left_selected;
+
         let dpos = pos - pos_init;
-        match self.get_handle_selected() {
-            None => {
+        match (top_sel, right_sel, bottom_sel, left_sel) {
+            (false, false, false, false) => {
                 if self.selected {
-                    self.handles.0.set_pos(h1 + dpos);
-                    self.handles.1.set_pos(h2 + dpos);
+                    self.tl.set_pos(tl_saved + dpos);
+                    self.br.set_pos(br_saved + dpos);
                 }
             }
-            Some((_handle, idx)) => match idx {
-                0 => {
-                    let new_h1 = self.enforce_constraints(h1 + dpos, h2, last_h1);
-                    self.handles.0.set_pos(new_h1);
+            (true, false, false, false) => {
+                let tlpos = self.force_consistency(tl_saved + dpos, br_saved, tl_last);
+                self.tl.set_pos(Vec2::new(tl_saved.x, tlpos.y))
+            }
+            (false, true, false, false) => {
+                let brpos = self.force_consistency(br_saved + dpos, tl_saved, br_last);
+                self.br.set_pos(Vec2::new(brpos.x, br_saved.y))
+            }
+            (false, false, true, false) => {
+                let brpos = self.force_consistency(br_saved + dpos, tl_saved, br_last);
+                self.br.set_pos(Vec2::new(br_saved.x, brpos.y))
+            }
+            (false, false, false, true) => {
+                let tlpos = self.force_consistency(tl_saved + dpos, br_saved, tl_last);
+                self.tl.set_pos(Vec2::new(tlpos.x, tl_saved.y))
+            }
+            (true, true, false, false) => {
+                let tlpos = self.force_consistency(tl_saved + dpos, br_saved, tl_last);
+                let brpos = self.force_consistency(br_saved + dpos, tl_saved, br_last);
+                self.tl.set_pos(Vec2::new(tl_saved.x, tlpos.y));
+                self.br.set_pos(Vec2::new(brpos.x, br_saved.y))
+            }
+            (true, false, false, true) => {
+                let tlpos = self.force_consistency(tl_saved + dpos, br_saved, tl_last);
+                self.tl.set_pos(tlpos);
+            }
+            (false, true, true, false) => {
+                let brpos = self.force_consistency(br_saved + dpos, tl_saved, br_last);
+                self.br.set_pos(brpos);
+            }
+            (false, false, true, true) => {
+                let tlpos = self.force_consistency(tl_saved + dpos, br_saved, tl_last);
+                let brpos = self.force_consistency(br_saved + dpos, tl_saved, br_last);
+                self.tl.set_pos(Vec2::new(tlpos.x, tl_saved.y));
+                self.br.set_pos(Vec2::new(br_saved.x, brpos.y))
+            }
+            _ => (),
+        }
+    }
+}
+
+pub struct CShapeRectangleIter {
+    idx: usize,
+    lines_iter: [LinePathIter; 4],
+}
+impl Iterator for CShapeRectangleIter {
+    type Item = PathEl;
+
+    fn next(&mut self) -> Option<PathEl> {
+        match self.idx {
+            0..=3 => match self.lines_iter[self.idx].next() {
+                Some(el) => Some(el),
+                None => {
+                    self.idx += 1;
+                    self.next()
                 }
-                1 => {
-                    let new_h2 = self.enforce_constraints(h2 + dpos, h1, last_h2);
-                    self.handles.1.set_pos(new_h2);
-                }
-                _ => unreachable!(),
             },
-        };
-    }
-    fn get_handles(&self) -> Vec<Handle> {
-        vec![self.handles.0, self.handles.1]
-    }
-    fn get_handle_selected(&self) -> Option<(Handle, usize)> {
-        if self.handles.0.is_selected() {
-            return Some((self.handles.0, 0));
+            _ => None,
         }
-        if self.handles.1.is_selected() {
-            return Some((self.handles.1, 1));
-        }
-        None
-    }
-    fn get_handle_highlighted(&self) -> Option<(Handle, usize)> {
-        if self.handles.0.is_highlighted() {
-            return Some((self.handles.0, 0));
-        }
-        if self.handles.1.is_highlighted() {
-            return Some((self.handles.1, 1));
-        }
-        None
     }
 }

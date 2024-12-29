@@ -4,8 +4,9 @@ use crate::{
     shape_oblong::CShapeOblong,
     shape_rectangle::CShapeRectangle,
     shape_rectangle_rounded::CShapeRectRounded,
-    shapes::{CShape, CShapes},
+    shapes::{CShape, CShapeKind, CShapes},
 };
+use geo::OpType;
 use kurbo::Vec2;
 use std::{
     collections::HashMap,
@@ -14,53 +15,60 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum CShapeKind {
-    CRectangle(CShapeRectangle),
-    CRectangleRounded(CShapeRectRounded),
-    CHole(CShapeHole),
-    COblong(CShapeOblong),
-}
-impl Display for CShapeKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use CShapeKind::*;
-        match self {
-            CRectangle(sh) => write!(f, "{sh}"),
-            CRectangleRounded(sh) => write!(f, "{sh}"),
-            CHole(sh) => write!(f, "{sh}"),
-            COblong(sh) => write!(f, "{sh}"),
-        }
-    }
-}
 pub struct CShapeBuilder;
 impl CShapeBuilder {
-    fn new(parent: Option<CShid>, cshape_kind: CShapeKind, layer: Layer) -> CShape {
+    fn new(
+        parent: Option<CShid>,
+        cshape_kind: CShapeKind,
+        boolean_op: OpType,
+        layer: Layer,
+    ) -> CShape {
         let cshid = CShid::new();
-        CShape::new(cshid, cshape_kind, parent, layer)
+        CShape::new(cshid, cshape_kind, boolean_op, parent, layer)
     }
-    pub fn new_rectangle(pos1: Vec2, pos2: Vec2, parent: Option<CShid>, layer: Layer) -> CShape {
+    pub fn new_rectangle(
+        pos1: Vec2,
+        pos2: Vec2,
+        boolean_op: OpType,
+        parent: Option<CShid>,
+        layer: Layer,
+    ) -> CShape {
+        log!("Creating rectangle");
         let cshape_kind = CShapeRectangle::new(pos1, pos2);
-        CShapeBuilder::new(parent, cshape_kind, layer)
+        CShapeBuilder::new(parent, cshape_kind, boolean_op, layer)
     }
     pub fn new_rectangle_rounded(
         pos1: Vec2,
         pos2: Vec2,
+        boolean_op: OpType,
         parent: Option<CShid>,
         layer: Layer,
     ) -> CShape {
         let cshape_kind = CShapeRectRounded::new(pos1, pos2);
-        CShapeBuilder::new(parent, cshape_kind, layer)
+        CShapeBuilder::new(parent, cshape_kind, boolean_op, layer)
     }
-    pub fn new_circle(pos1: Vec2, pos2: Vec2, parent: Option<CShid>, layer: Layer) -> CShape {
+    pub fn new_circle(
+        pos1: Vec2,
+        pos2: Vec2,
+        boolean_op: OpType,
+        parent: Option<CShid>,
+        layer: Layer,
+    ) -> CShape {
         let cshape_kind = CShapeHole::new(pos1, pos2);
-        CShapeBuilder::new(parent, cshape_kind, layer)
+        CShapeBuilder::new(parent, cshape_kind, boolean_op, layer)
     }
-    pub fn new_oblong(pos1: Vec2, pos2: Vec2, parent: Option<CShid>, layer: Layer) -> CShape {
+
+    pub fn new_oblong(
+        pos1: Vec2,
+        pos2: Vec2,
+        boolean_op: OpType,
+        parent: Option<CShid>,
+        layer: Layer,
+    ) -> CShape {
         let cshape_kind = CShapeOblong::new(pos1, pos2);
-        CShapeBuilder::new(parent, cshape_kind, layer)
+        CShapeBuilder::new(parent, cshape_kind, boolean_op, layer)
     }
 }
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct CSPool {
     cshapes: HashMap<CShid, CShape>,
@@ -132,21 +140,38 @@ impl CSPool {
     }
 
     // Highlighting
-    pub fn highlight_object(&mut self, pos: Vec2, precision: f64) {
+    pub fn highlight_object(&mut self, pos: Vec2, _precision: f64) {
         self.cshapes.values_mut().for_each(|cs| {
-            let cs_highlight = cs.highlight_shape(pos);
-            cs.highlight_handles(pos, precision);
-            let mut cs_child_handles_highlight = false;
-            cs.get_children_mut().values_mut().for_each(|csc| {
-                if !cs_highlight {
-                    csc.highlight_shape(pos);
+            if !cs.highlight_modifiers_from_pos(pos) {
+                let mut cs_child_highlighted = false;
+                let mut cs_child_handles_highlighted = false;
+
+                cs.get_children_mut().values_mut().for_each(|csc| {
+                    cs_child_highlighted |= csc.highlight_from_pos(pos);
+                    cs_child_handles_highlighted |= csc.highlight_modifiers_from_pos(pos);
+                });
+                if cs_child_handles_highlighted {
+                    cs.get_children_mut().values_mut().for_each(|csc| {
+                        csc.highlight(false);
+                    });
+                    cs.highlight(false);
                 } else {
-                    csc.set_highlight(true);
+                    if cs_child_highlighted {
+                        cs.highlight(false);
+                    } else {
+                        if cs.highlight_from_pos(pos) {
+                            cs.get_children_mut().values_mut().for_each(|csc| {
+                                csc.highlight(true);
+                            });
+                        }
+                    }
                 }
-                cs_child_handles_highlight |= csc.highlight_handles(pos, precision);
-            });
-            if cs_child_handles_highlight {
-                cs.set_highlight(false);
+            } else {
+                cs.highlight(false);
+                cs.get_children_mut().values_mut().for_each(|csc| {
+                    csc.highlight(false);
+                    csc.select_modifiers(false);
+                });
             }
         });
     }
@@ -154,6 +179,19 @@ impl CSPool {
         for cshape in self.cshapes.values() {
             if cshape.is_highlighted() {
                 return Some(cshape.get_id());
+            }
+            for cshape_child in cshape.get_children().values() {
+                if cshape_child.is_highlighted() {
+                    return Some(cshape.get_id());
+                }
+            }
+        }
+        None
+    }
+    pub fn get_first_child_highlighted(&self) -> Option<CShid> {
+        for cshape in self.cshapes.values() {
+            if cshape.is_highlighted() {
+                return None;
             }
             for cshape_child in cshape.get_children().values() {
                 if cshape_child.is_highlighted() {
@@ -174,53 +212,55 @@ impl CSPool {
     }
 
     // Selections
-    pub fn select_object(&mut self, pos: Vec2, precision: f64) {
+    pub fn select_object(&mut self, pos: Vec2, _precision: f64) {
         self.cshapes.values_mut().for_each(|cs| {
-            if !cs.select_handles(pos, precision) {
+            if !cs.select_modifiers_from_pos(pos) {
                 let mut cs_child_selection = false;
                 let mut cs_child_handles_selection = false;
-
                 cs.get_children_mut().values_mut().for_each(|csc| {
-                    cs_child_selection |= csc.select_shape(pos);
-                    cs_child_handles_selection |= csc.select_handles(pos, precision);
+                    cs_child_selection |= csc.select_from_pos(pos);
+                    cs_child_handles_selection |= csc.select_modifiers_from_pos(pos);
                 });
                 if cs_child_handles_selection {
                     cs.get_children_mut().values_mut().for_each(|csc| {
-                        csc.set_selection(false);
+                        csc.select(false);
                     });
-                    cs.set_selection(false);
+                    cs.select(false);
                 } else {
                     if cs_child_selection {
-                        cs.set_selection(false);
+                        cs.select(false);
                     } else {
-                        if cs.select_shape(pos) {
+                        if cs.select_from_pos(pos) {
                             cs.get_children_mut().values_mut().for_each(|csc| {
-                                csc.set_selection(true);
+                                csc.select(true);
                             });
                         }
                     }
                 }
             } else {
-                cs.set_selection(false);
+                cs.select(false);
                 cs.get_children_mut().values_mut().for_each(|csc| {
-                    csc.set_selection(false);
+                    csc.select(false);
+                    csc.select_modifiers(false);
                 });
             }
         });
     }
     pub fn clear_selections(&mut self) {
         self.cshapes.values_mut().for_each(|cs| {
-            cs.clear_selection();
+            cs.select(false);
             cs.get_children_mut().values_mut().for_each(|csc| {
-                csc.clear_selection();
+                csc.select(false);
             });
         });
     }
     pub fn clear_selections_all(&mut self) {
         self.cshapes.values_mut().for_each(|cs| {
-            cs.clear_selection_all();
+            cs.select(false);
+            cs.select_modifiers(false);
             cs.get_children_mut().values_mut().for_each(|csc| {
-                csc.clear_selection_all();
+                csc.select(false);
+                csc.select_modifiers(false);
             });
         });
     }
