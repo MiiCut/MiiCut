@@ -8,38 +8,35 @@
 use std::fmt::Display;
 
 use crate::{
-    canvas_core::{Layer, Pattern},
-    shape_hole::CShapeHole,
-    shape_oblong::CShapeOblong,
-    shape_rectangle::CShapeRectangle,
-    shape_rectangle_rounded::CShapeRectRounded,
-    shapes_pool::{CSPool, CShid},
+    canvas_core::Pattern, shape_hole::ShapeHole, shape_oblong::ShapeOblong,
+    shape_rectangle::ShapeRectangle, shape_rectangle_rounded::ShapeRectRounded, shapes_pool::Shid,
 };
-use geo::{BooleanOps, HasDimensions, OpType, Polygon};
-use kurbo::{flatten, BezPath, PathEl, Point, Vec2};
+use geo::{OpType, Polygon};
+use kurbo::{flatten, BezPath, PathEl, Vec2};
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum CShapeKind {
-    CRectangle(CShapeRectangle),
-    CRectangleRounded(CShapeRectRounded),
-    CHole(CShapeHole),
-    COblong(CShapeOblong),
+pub enum ShapeKind {
+    Rectangle(ShapeRectangle),
+    RectangleRounded(ShapeRectRounded),
+    Hole(ShapeHole),
+    Oblong(ShapeOblong),
 }
-impl Display for CShapeKind {
+impl Display for ShapeKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match self {
-            CRectangle(sh) => write!(f, "{sh}"),
-            CRectangleRounded(sh) => write!(f, "{sh}"),
-            CHole(sh) => write!(f, "{sh}"),
-            COblong(sh) => write!(f, "{sh}"),
+            Rectangle(sh) => write!(f, "{sh}"),
+            RectangleRounded(sh) => write!(f, "{sh}"),
+            Hole(sh) => write!(f, "{sh}"),
+            Oblong(sh) => write!(f, "{sh}"),
         }
     }
 }
-pub trait CShapes {
+pub trait Shapes {
     const TOLERANCE: f64;
 
-    fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind;
+    fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind;
+    fn good_size(&self) -> bool;
     fn save_pos(&mut self);
     fn toggle_prop(&mut self);
 
@@ -62,53 +59,38 @@ pub trait CShapes {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CShape {
-    cshid: CShid,
-    cshape_kind: CShapeKind,
+pub struct Shape {
+    shid: Shid,
+    cshape_kind: ShapeKind,
     boolean_op: OpType,
-    parent: Option<CShid>,
-    children: CSPool,
-    layer: Layer,
 }
-impl CShape {
-    pub fn new(
-        cshid: CShid,
-        cshape_kind: CShapeKind,
-        boolean_op: OpType,
-        parent: Option<CShid>,
-        layer: Layer,
-    ) -> CShape {
-        CShape {
-            cshid,
+impl Shape {
+    pub fn new(cshid: Shid, cshape_kind: ShapeKind, boolean_op: OpType) -> Shape {
+        Shape {
+            shid: cshid,
             cshape_kind,
             boolean_op,
-            parent,
-            children: CSPool::new(),
-            layer,
         }
     }
-    pub fn get_id(&self) -> CShid {
-        self.cshid
+    pub fn get_id(&self) -> Shid {
+        self.shid
     }
-    pub fn get_parent(&self) -> Option<CShid> {
-        self.parent
-    }
-    pub fn get_children(&self) -> &CSPool {
-        &self.children
-    }
-    pub fn get_children_mut(&mut self) -> &mut CSPool {
-        &mut self.children
-    }
-    pub fn add_child(&mut self, cshape: CShape) {
-        self.children.add_shape(cshape)
+    pub fn good_size(&self) -> bool {
+        use ShapeKind::*;
+        match &self.cshape_kind {
+            Rectangle(sh) => sh.good_size(),
+            RectangleRounded(sh) => sh.good_size(),
+            Hole(sh) => sh.good_size(),
+            Oblong(sh) => sh.good_size(),
+        }
     }
     pub fn save_pos(&mut self) {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.save_pos(),
-            CRectangleRounded(sh) => sh.save_pos(),
-            CHole(sh) => sh.save_pos(),
-            COblong(sh) => sh.save_pos(),
+            Rectangle(sh) => sh.save_pos(),
+            RectangleRounded(sh) => sh.save_pos(),
+            Hole(sh) => sh.save_pos(),
+            Oblong(sh) => sh.save_pos(),
         }
     }
     pub fn toggle_boolean_op(&mut self) {
@@ -120,110 +102,107 @@ impl CShape {
     }
 
     pub fn highlight_from_pos(&mut self, pos: Vec2) -> bool {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.highlight_from_pos(pos),
-            CRectangleRounded(sh) => sh.highlight_from_pos(pos),
-            CHole(sh) => sh.highlight_from_pos(pos),
-            COblong(sh) => sh.highlight_from_pos(pos),
+            Rectangle(sh) => sh.highlight_from_pos(pos),
+            RectangleRounded(sh) => sh.highlight_from_pos(pos),
+            Hole(sh) => sh.highlight_from_pos(pos),
+            Oblong(sh) => sh.highlight_from_pos(pos),
         }
     }
     pub fn highlight_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.highlight_modifiers_from_pos(pos),
-            CRectangleRounded(sh) => sh.highlight_modifiers_from_pos(pos),
-            CHole(sh) => sh.highlight_modifiers_from_pos(pos),
-            COblong(sh) => sh.highlight_modifiers_from_pos(pos),
+            Rectangle(sh) => sh.highlight_modifiers_from_pos(pos),
+            RectangleRounded(sh) => sh.highlight_modifiers_from_pos(pos),
+            Hole(sh) => sh.highlight_modifiers_from_pos(pos),
+            Oblong(sh) => sh.highlight_modifiers_from_pos(pos),
         }
     }
     pub fn highlight(&mut self, value: bool) {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.highlight(value),
-            CRectangleRounded(sh) => sh.highlight(value),
-            CHole(sh) => sh.highlight(value),
-            COblong(sh) => sh.highlight(value),
+            Rectangle(sh) => sh.highlight(value),
+            RectangleRounded(sh) => sh.highlight(value),
+            Hole(sh) => sh.highlight(value),
+            Oblong(sh) => sh.highlight(value),
         }
     }
     pub fn highlight_modifiers(&mut self, value: bool) {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.highlight_modifiers(value),
-            CRectangleRounded(sh) => sh.highlight_modifiers(value),
-            CHole(sh) => sh.highlight_modifiers(value),
-            COblong(sh) => sh.highlight_modifiers(value),
+            Rectangle(sh) => sh.highlight_modifiers(value),
+            RectangleRounded(sh) => sh.highlight_modifiers(value),
+            Hole(sh) => sh.highlight_modifiers(value),
+            Oblong(sh) => sh.highlight_modifiers(value),
         }
     }
     pub fn is_highlighted(&self) -> bool {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &self.cshape_kind {
-            CRectangle(sh) => sh.is_highlighted(),
-            CRectangleRounded(sh) => sh.is_highlighted(),
-            CHole(sh) => sh.is_highlighted(),
-            COblong(sh) => sh.is_highlighted(),
+            Rectangle(sh) => sh.is_highlighted(),
+            RectangleRounded(sh) => sh.is_highlighted(),
+            Hole(sh) => sh.is_highlighted(),
+            Oblong(sh) => sh.is_highlighted(),
         }
     }
 
     pub fn select_from_pos(&mut self, pos: Vec2) -> bool {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.select_from_pos(pos),
-            CRectangleRounded(sh) => sh.select_from_pos(pos),
-            CHole(sh) => sh.select_from_pos(pos),
-            COblong(sh) => sh.select_from_pos(pos),
+            Rectangle(sh) => sh.select_from_pos(pos),
+            RectangleRounded(sh) => sh.select_from_pos(pos),
+            Hole(sh) => sh.select_from_pos(pos),
+            Oblong(sh) => sh.select_from_pos(pos),
         }
     }
     pub fn select_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.select_modifiers_from_pos(pos),
-            CRectangleRounded(sh) => sh.select_modifiers_from_pos(pos),
-            CHole(sh) => sh.select_modifiers_from_pos(pos),
-            COblong(sh) => sh.select_modifiers_from_pos(pos),
+            Rectangle(sh) => sh.select_modifiers_from_pos(pos),
+            RectangleRounded(sh) => sh.select_modifiers_from_pos(pos),
+            Hole(sh) => sh.select_modifiers_from_pos(pos),
+            Oblong(sh) => sh.select_modifiers_from_pos(pos),
         }
     }
     pub fn select(&mut self, value: bool) {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.select(value),
-            CRectangleRounded(sh) => sh.select(value),
-            CHole(sh) => sh.select(value),
-            COblong(sh) => sh.select(value),
+            Rectangle(sh) => sh.select(value),
+            RectangleRounded(sh) => sh.select(value),
+            Hole(sh) => sh.select(value),
+            Oblong(sh) => sh.select(value),
         }
     }
     pub fn select_modifiers(&mut self, value: bool) {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.select_modifiers(value),
-            CRectangleRounded(sh) => sh.select_modifiers(value),
-            CHole(sh) => sh.select_modifiers(value),
-            COblong(sh) => sh.select_modifiers(value),
+            Rectangle(sh) => sh.select_modifiers(value),
+            RectangleRounded(sh) => sh.select_modifiers(value),
+            Hole(sh) => sh.select_modifiers(value),
+            Oblong(sh) => sh.select_modifiers(value),
         }
     }
     pub fn is_selected(&self) -> bool {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &self.cshape_kind {
-            CRectangle(sh) => sh.is_selected(),
-            CRectangleRounded(sh) => sh.is_selected(),
-            CHole(sh) => sh.is_selected(),
-            COblong(sh) => sh.is_selected(),
+            Rectangle(sh) => sh.is_selected(),
+            RectangleRounded(sh) => sh.is_selected(),
+            Hole(sh) => sh.is_selected(),
+            Oblong(sh) => sh.is_selected(),
         }
     }
 
     pub fn move_selection(&mut self, pos_init: Vec2, pos: Vec2) {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &mut self.cshape_kind {
-            CRectangle(sh) => sh.move_position(pos_init, pos),
-            CRectangleRounded(sh) => sh.move_position(pos_init, pos),
-            CHole(sh) => sh.move_position(pos_init, pos),
-            COblong(sh) => sh.move_position(pos_init, pos),
+            Rectangle(sh) => sh.move_position(pos_init, pos),
+            RectangleRounded(sh) => sh.move_position(pos_init, pos),
+            Hole(sh) => sh.move_position(pos_init, pos),
+            Oblong(sh) => sh.move_position(pos_init, pos),
         }
     }
 
-    pub fn get_layer(&self) -> Layer {
-        self.layer
-    }
     pub fn get_boolean_op(&self) -> OpType {
         self.boolean_op
     }
@@ -236,53 +215,15 @@ impl CShape {
             (true, true) => Pattern::ComposedSelected(true),
         }
     }
-
-    pub fn get_full_segs(&self) -> Vec<BezPath> {
-        // Init: we take the root polygon
-        let mut polygons = vec![self.bez_path_to_geo_polygon()];
-        let childs: Vec<(Polygon, OpType)> = self.childs_bez_path_to_geo_polygons();
-
-        for (child_polygon, boolean_op) in childs {
-            let mut result_polygons = vec![];
-            polygons
-                .iter()
-                .for_each(|p| result_polygons.extend(p.boolean_op(&child_polygon, boolean_op)));
-            polygons = result_polygons;
-        }
-
-        let mut multi_paths = Vec::new();
-
-        polygons.iter().for_each(|p| {
-            multi_paths.extend(self.geo_polygon_to_bez_path(&p));
-        });
-        multi_paths
-    }
-
-    fn childs_bez_path_to_geo_polygons(&self) -> Vec<(Polygon<f64>, OpType)> {
-        // Récupérer les segments des enfants
-        let mut childs_segs = Vec::new();
-        self.children
-            .values()
-            .for_each(|c| childs_segs.push((c.bez_path_to_geo_polygon(), c.get_boolean_op())));
-        // Sort by OpType, prioritizing Union over Difference
-        childs_segs.sort_by(|a, b| match (&a.1, &b.1) {
-            (OpType::Union, OpType::Difference) => std::cmp::Ordering::Less,
-            (OpType::Difference, OpType::Union) => std::cmp::Ordering::Greater,
-            _ => std::cmp::Ordering::Equal,
-        });
-        childs_segs
-    }
-
     pub fn get_paths(&self) -> Vec<(BezPath, Pattern)> {
-        use CShapeKind::*;
+        use ShapeKind::*;
         match &self.cshape_kind {
-            CRectangle(sh) => sh.get_shape_paths(),
-            CRectangleRounded(sh) => sh.get_shape_paths(),
-            CHole(sh) => sh.get_shape_paths(),
-            COblong(sh) => sh.get_shape_paths(),
+            Rectangle(sh) => sh.get_shape_paths(),
+            RectangleRounded(sh) => sh.get_shape_paths(),
+            Hole(sh) => sh.get_shape_paths(),
+            Oblong(sh) => sh.get_shape_paths(),
         }
     }
-
     pub fn get_segs(&self) -> BezPath {
         let mut segs = BezPath::new();
         for path in self.get_paths() {
@@ -290,8 +231,7 @@ impl CShape {
         }
         segs
     }
-
-    fn bez_path_to_geo_polygon(&self) -> Polygon<f64> {
+    pub fn bez_path_to_geo_polygon(&self) -> Polygon<f64> {
         let bez_path = self.get_segs();
 
         let mut points = Vec::new();
@@ -315,82 +255,78 @@ impl CShape {
         }
     }
 
-    fn _geo_polygon_to_bez_path(&self, polygon: &Polygon<f64>) -> Option<BezPath> {
-        let mut bez_path = BezPath::new();
+    // fn _geo_polygon_to_bez_path(&self, polygon: &Polygon<f64>) -> Option<BezPath> {
+    //     let mut bez_path = BezPath::new();
+    //     let exterior = polygon.exterior();
+    //     if exterior.is_empty() {
+    //         return None; // Return None if the exterior is empty
+    //     }
+    //     // Iterate over the exterior points
+    //     let points: Vec<Point> = exterior
+    //         .coords()
+    //         .map(|coord| Point::new(coord.x, coord.y))
+    //         .collect();
+    //     if points.len() < 2 {
+    //         return None; // Not enough points to form a path
+    //     }
+    //     // Start with MoveTo
+    //     bez_path.push(PathEl::MoveTo(points[0]));
+    //     // Add LineTo for each segment
+    //     for point in &points[1..] {
+    //         bez_path.push(PathEl::LineTo(*point));
+    //     }
+    //     // Close the path if the polygon is closed
+    //     if points.first() == points.last() {
+    //         bez_path.push(PathEl::ClosePath);
+    //     }
+    //     Some(bez_path)
+    // }
 
-        let exterior = polygon.exterior();
-        if exterior.is_empty() {
-            return None; // Return None if the exterior is empty
-        }
+    // fn geo_polygon_to_bez_path(&self, polygon: &Polygon<f64>) -> Vec<BezPath> {
+    //     let mut vec_bez_path: Vec<BezPath> = vec![];
+    //     let mut bez_path = BezPath::new();
+    //     // Convert exterior ring to bezier path
+    //     let exterior = polygon.exterior();
+    //     if exterior.is_empty() {
+    //         return vec_bez_path; // Return None if the exterior is empty
+    //     }
+    //     let exterior_points: Vec<Point> = exterior
+    //         .coords()
+    //         .map(|coord| Point::new(coord.x, coord.y))
+    //         .collect();
+    //     if exterior_points.len() < 2 {
+    //         return vec_bez_path; // Not enough points to form a path
+    //     }
+    //     // Add exterior points to path
+    //     bez_path.push(PathEl::MoveTo(exterior_points[0]));
+    //     for point in &exterior_points[1..] {
+    //         bez_path.push(PathEl::LineTo(*point));
+    //     }
+    //     if exterior_points.first() == exterior_points.last() {
+    //         bez_path.push(PathEl::ClosePath);
+    //     }
+    //     vec_bez_path.push(bez_path);
+    //     bez_path = BezPath::new();
+    //     // Convert interior rings (holes) to bezier paths
+    //     for interior in polygon.interiors() {
+    //         let interior_points: Vec<Point> = interior
+    //             .coords()
+    //             .map(|coord| Point::new(coord.x, coord.y))
+    //             .collect();
+    //         if interior_points.len() < 2 {
+    //             continue; // Skip invalid rings
+    //         }
+    //         bez_path.push(PathEl::MoveTo(interior_points[0]));
+    //         for point in &interior_points[1..] {
+    //             bez_path.push(PathEl::LineTo(*point));
+    //         }
+    //         if interior_points.first() == interior_points.last() {
+    //             bez_path.push(PathEl::ClosePath);
+    //         }
 
-        // Iterate over the exterior points
-        let points: Vec<Point> = exterior
-            .coords()
-            .map(|coord| Point::new(coord.x, coord.y))
-            .collect();
-        if points.len() < 2 {
-            return None; // Not enough points to form a path
-        }
-        // Start with MoveTo
-        bez_path.push(PathEl::MoveTo(points[0]));
-        // Add LineTo for each segment
-        for point in &points[1..] {
-            bez_path.push(PathEl::LineTo(*point));
-        }
-        // Close the path if the polygon is closed
-        if points.first() == points.last() {
-            bez_path.push(PathEl::ClosePath);
-        }
-        Some(bez_path)
-    }
-
-    fn geo_polygon_to_bez_path(&self, polygon: &Polygon<f64>) -> Vec<BezPath> {
-        let mut vec_bez_path: Vec<BezPath> = vec![];
-        let mut bez_path = BezPath::new();
-        // Convert exterior ring to bezier path
-        let exterior = polygon.exterior();
-        if exterior.is_empty() {
-            return vec_bez_path; // Return None if the exterior is empty
-        }
-        let exterior_points: Vec<Point> = exterior
-            .coords()
-            .map(|coord| Point::new(coord.x, coord.y))
-            .collect();
-        if exterior_points.len() < 2 {
-            return vec_bez_path; // Not enough points to form a path
-        }
-        // Add exterior points to path
-        bez_path.push(PathEl::MoveTo(exterior_points[0]));
-        for point in &exterior_points[1..] {
-            bez_path.push(PathEl::LineTo(*point));
-        }
-        if exterior_points.first() == exterior_points.last() {
-            bez_path.push(PathEl::ClosePath);
-        }
-
-        vec_bez_path.push(bez_path);
-        bez_path = BezPath::new();
-
-        // Convert interior rings (holes) to bezier paths
-        for interior in polygon.interiors() {
-            let interior_points: Vec<Point> = interior
-                .coords()
-                .map(|coord| Point::new(coord.x, coord.y))
-                .collect();
-            if interior_points.len() < 2 {
-                continue; // Skip invalid rings
-            }
-            bez_path.push(PathEl::MoveTo(interior_points[0]));
-            for point in &interior_points[1..] {
-                bez_path.push(PathEl::LineTo(*point));
-            }
-            if interior_points.first() == interior_points.last() {
-                bez_path.push(PathEl::ClosePath);
-            }
-
-            vec_bez_path.push(bez_path);
-            bez_path = BezPath::new();
-        }
-        vec_bez_path
-    }
+    //         vec_bez_path.push(bez_path);
+    //         bez_path = BezPath::new();
+    //     }
+    //     vec_bez_path
+    // }
 }

@@ -5,11 +5,13 @@ edition = "2021"
 
 [dependencies]
 # kurbo = { git = "https://github.com/linebender/kurbo" }
+ttf-parser = "0.25.1"
 kurbo = "0.11.1"
 geo = "0.29.3"
 approx = "0.5.1"
 console_error_panic_hook = "0.1.7"
 wasm-bindgen = "0.2.99"
+wasm-bindgen-futures = "0.4.24"
 js-sys = "0.3.70"
 
 [dependencies.web-sys]
@@ -19,6 +21,7 @@ features = [
     "CssStyleDeclaration",
     "Document",
     "Element",
+    "FontFaceSet",
     "EventTarget",
     "HtmlCanvasElement",
     "HtmlElement",

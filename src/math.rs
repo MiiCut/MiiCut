@@ -7,7 +7,7 @@ macro_rules! log {
 }
 
 use approx::*;
-use kurbo::{Arc, BezPath, Line, ParamCurveNearest, PathEl, Point, RoundedRectRadii, Vec2};
+use kurbo::{Arc, BezPath, Line, ParamCurveNearest, PathEl, RoundedRectRadii, Vec2};
 use std::f64::consts::PI;
 use std::{
     error::Error,
@@ -15,12 +15,12 @@ use std::{
     fmt::{self},
 };
 
-use crate::shapes_pool::CShid;
+use crate::shapes_pool::Shid;
 
 #[derive(Debug)]
 pub enum MyError {
     NoShapeSelected,
-    NoClosedShapeForCShid(CShid),
+    NoClosedShapeForCShid(Shid),
     Inconsistent,
     Impossible,
     ShapesFull,
@@ -654,13 +654,13 @@ pub fn dotp(pt2: &Vec2, pt1: &Vec2) -> f64 {
 //     None
 // }
 
-pub fn to_canvas(pt: &Vec2, scale: f64, offset: &Vec2) -> Vec2 {
+pub fn to_canvas(pt: Vec2, scale: f64, offset: Vec2) -> Vec2 {
     Vec2 {
         x: (pt.x * scale) + offset.x,
         y: (pt.y * scale) + offset.y,
     }
 }
-pub fn to_draw(pt: &Vec2, scale: f64, offset: &Vec2) -> Vec2 {
+pub fn to_draw(pt: Vec2, scale: f64, offset: Vec2) -> Vec2 {
     Vec2 {
         x: (pt.x - offset.x) / scale,
         y: (pt.y - offset.y) / scale,
@@ -851,33 +851,78 @@ pub fn distance_to_line(point: Vec2, line: Line) -> f64 {
     (point - closest).hypot()
 }
 
-// pub fn calculate_arc_points(
-//     center: Vec2,
-//     radii: Vec2,
-//     start_angle: f64,
-//     sweep_angle: f64,
-//     rotation: f64,
-// ) -> (Vec2, Vec2) {
-//     let (cx, cy) = (center.x, center.y); // Center of the arc
-//     let (rx, ry) = (radii.x, radii.y); // Radii of the ellipse
-//     // Start and end angles in radians
-//     let end_angle = start_angle + sweep_angle;
-//     // Function to compute an elliptical point without rotation
-//     let compute_point = |angle: f64| -> (f64, f64) { (rx * angle.cos(), ry * angle.sin()) };
-//     // Rotate a point around the origin by a given angle
-//     let rotate_point = |x: f64, y: f64, angle: f64| -> (f64, f64) {
-//         let rotated_x = x * angle.cos() - y * angle.sin();
-//         let rotated_y = x * angle.sin() + y * angle.cos();
-//         (rotated_x, rotated_y)
-//     };
-//     // Compute the unrotated start and end points
-//     let (start_x, start_y) = compute_point(start_angle);
-//     let (end_x, end_y) = compute_point(end_angle);
-//     // Rotate the points by the given rotation angle
-//     let (start_x, start_y) = rotate_point(start_x, start_y, rotation);
-//     let (end_x, end_y) = rotate_point(end_x, end_y, rotation);
-//     // Translate the points to the center
-//     let start_point = Vec2::new(cx + start_x, cy + start_y);
-//     let end_point = Vec2::new(cx + end_x, cy + end_y);
-//     (start_point, end_point)
-// }
+pub fn compute_winding_number(path: &BezPath, point: Vec2) -> i32 {
+    let mut winding_number = 0;
+    let mut last_point = None;
+
+    for element in path.elements() {
+        match element {
+            PathEl::MoveTo(p1) => {
+                last_point = Some(p1);
+            }
+            PathEl::LineTo(p2) => {
+                if let Some(p1) = last_point {
+                    winding_number +=
+                        segment_winding_contribution(p1.to_vec2(), p2.to_vec2(), point);
+                }
+                last_point = Some(p2);
+            }
+            PathEl::ClosePath => {
+                if let Some(p1) = last_point {
+                    if let Some(PathEl::MoveTo(p_start)) = path.elements().first() {
+                        winding_number +=
+                            segment_winding_contribution(p1.to_vec2(), p_start.to_vec2(), point);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    winding_number
+}
+
+fn segment_winding_contribution(p1: Vec2, p2: Vec2, point: Vec2) -> i32 {
+    if p1.y <= point.y {
+        if p2.y > point.y && is_left(p1, p2, point) > 0.0 {
+            // Upward crossing, and the point is to the left of the segment
+            return 1;
+        }
+    } else {
+        if p2.y <= point.y && is_left(p1, p2, point) < 0.0 {
+            // Downward crossing, and the point is to the right of the segment
+            return -1;
+        }
+    }
+    0
+}
+
+fn is_left(p1: Vec2, p2: Vec2, point: Vec2) -> f64 {
+    // Compute determinant to check if the point is to the left of the line
+    (p2.x - p1.x) * (point.y - p1.y) - (point.x - p1.x) * (p2.y - p1.y)
+}
+
+pub fn project_to_perpendicular_with_direction(p1: Vec2, p2: Vec2, q: Vec2) -> (Vec2, f64) {
+    // First segment vector
+    let v1 = p2 - p1;
+
+    // Perpendicular vector to the first segment
+    let v_perp = Vec2::new(-v1.y, v1.x);
+
+    // Second segment vector (q already starts at the origin)
+    let v2 = q;
+
+    // Dot product of v2 and v_perp
+    let dot_product = v2.dot(v_perp);
+
+    // Magnitude squared of v_perp
+    let v_perp_magnitude_squared = v_perp.length_squared();
+
+    // Projection formula
+    let projection = (dot_product / v_perp_magnitude_squared) * v_perp;
+
+    // Direction relative to the first segment's perpendicular
+    let direction = dot_product.signum(); // -1.0, 0.0, or 1.0
+
+    (projection, direction)
+}

@@ -10,11 +10,11 @@ use std::fmt::Display;
 
 use crate::{
     canvas_core::Pattern,
-    shapes::{CShapeKind, CShapes},
+    shapes::{ShapeKind, Shapes},
     sub_shapes::Position,
 };
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct CShapeHole {
+pub struct ShapeHole {
     center: Position,
     radius: f64,
     saved_radius: f64,
@@ -23,7 +23,7 @@ pub struct CShapeHole {
     highlighted: bool,
     selected: bool,
 }
-impl CShapeHole {
+impl ShapeHole {
     const MIN_SIZE: f64 = 2.;
     const GRAB: f64 = 2.;
 
@@ -42,12 +42,12 @@ impl CShapeHole {
     }
 }
 
-impl Display for CShapeHole {
+impl Display for ShapeHole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Circle")
     }
 }
-impl Shape for CShapeHole {
+impl Shape for ShapeHole {
     type PathElementsIter<'iter> = CirclePathIter;
 
     fn path_elements(&self, tolerance: f64) -> CirclePathIter {
@@ -79,19 +79,22 @@ impl Shape for CShapeHole {
     }
 }
 
-impl CShapes for CShapeHole {
+impl Shapes for ShapeHole {
     const TOLERANCE: f64 = 0.01;
 
-    fn new(pos1: Vec2, _pos2: Vec2) -> CShapeKind {
-        CShapeKind::CHole(CShapeHole {
+    fn new(pos1: Vec2, _pos2: Vec2) -> ShapeKind {
+        ShapeKind::Hole(ShapeHole {
             center: Position::new(pos1),
-            radius: CShapeHole::MIN_SIZE,
-            saved_radius: CShapeHole::MIN_SIZE,
+            radius: ShapeHole::MIN_SIZE,
+            saved_radius: ShapeHole::MIN_SIZE,
             circonference_highlighted: false,
             circonference_selected: true,
             highlighted: false,
             selected: false,
         })
+    }
+    fn good_size(&self) -> bool {
+        self.radius >= ShapeHole::MIN_SIZE
     }
     fn save_pos(&mut self) {
         self.center.save_pos();
@@ -113,7 +116,7 @@ impl CShapes for CShapeHole {
     }
     fn highlight_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
         self.circonference_highlighted =
-            ((pos - self.center.get_pos()).hypot() - self.radius).abs() < CShapeHole::GRAB;
+            ((pos - self.center.get_pos()).hypot() - self.radius).abs() < ShapeHole::GRAB;
         self.circonference_highlighted
     }
     fn highlight(&mut self, value: bool) {
@@ -132,7 +135,7 @@ impl CShapes for CShapeHole {
     }
     fn select_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
         self.circonference_selected =
-            ((pos - self.center.get_pos()).hypot() - self.radius).abs() < CShapeHole::GRAB;
+            ((pos - self.center.get_pos()).hypot() - self.radius).abs() < ShapeHole::GRAB;
         self.circonference_selected
     }
     fn select(&mut self, value: bool) {
@@ -155,7 +158,7 @@ impl CShapes for CShapeHole {
 
         if self.circonference_selected {
             let radius = (self.center.get_pos() - pos).hypot();
-            self.radius = radius.max(CShapeHole::MIN_SIZE);
+            self.radius = radius.max(ShapeHole::MIN_SIZE);
         } else {
             if self.selected {
                 self.center.set_pos(c_saved + dpos);

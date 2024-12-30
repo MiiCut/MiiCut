@@ -8,7 +8,7 @@
 use crate::{
     canvas_core::Pattern,
     math::*,
-    shapes::{CShapeKind, CShapes},
+    shapes::{ShapeKind, Shapes},
     sub_shapes::Position,
 };
 use kurbo::{
@@ -17,7 +17,7 @@ use kurbo::{
 };
 use std::{f64::consts::PI, fmt::Display};
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct CShapeRectRounded {
+pub struct ShapeRectRounded {
     tl: Position,
     br: Position,
     top_highlighed: bool,
@@ -43,7 +43,7 @@ pub struct CShapeRectRounded {
     highlighted: bool,
     selected: bool,
 }
-impl CShapeRectRounded {
+impl ShapeRectRounded {
     const MIN_SIZE: f64 = 10.;
     fn get_lines(&self) -> (Line, Line, Line, Line) {
         let rad_tl = self.radii.top_left;
@@ -131,18 +131,18 @@ impl CShapeRectRounded {
         let dy = (pos.y - other.y).abs();
 
         match (
-            dx < CShapeRectRounded::MIN_SIZE,
-            dy < CShapeRectRounded::MIN_SIZE,
+            dx < ShapeRectRounded::MIN_SIZE,
+            dy < ShapeRectRounded::MIN_SIZE,
         ) {
             (false, false) => pos,
             (true, true) => last_pos,
             (true, false) => Vec2::new(
-                other.x + CShapeRectRounded::MIN_SIZE * (pos.x - other.x).signum(),
+                other.x + ShapeRectRounded::MIN_SIZE * (pos.x - other.x).signum(),
                 pos.y,
             ),
             (false, true) => Vec2::new(
                 pos.x,
-                other.y + CShapeRectRounded::MIN_SIZE * (pos.y - other.y).signum(),
+                other.y + ShapeRectRounded::MIN_SIZE * (pos.y - other.y).signum(),
             ),
         }
     }
@@ -163,12 +163,12 @@ impl CShapeRectRounded {
     }
 }
 
-impl Display for CShapeRectRounded {
+impl Display for ShapeRectRounded {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Rounded rectangle")
     }
 }
-impl Shape for CShapeRectRounded {
+impl Shape for ShapeRectRounded {
     type PathElementsIter<'iter> = CShapeRectRoundedIter;
 
     fn path_elements(&self, tolerance: f64) -> CShapeRectRoundedIter {
@@ -217,25 +217,20 @@ impl Shape for CShapeRectRounded {
         self.get_rectangle_rounded().contains(pt)
     }
 }
-impl CShapes for CShapeRectRounded {
+impl Shapes for ShapeRectRounded {
     const TOLERANCE: f64 = 0.01;
 
-    fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind {
+    fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
         // let pos2 = pos2 + Vec2::new(20., 20.);
         let radii = RoundedRectRadii::new(
-            CShapeRectRounded::MIN_SIZE,
-            CShapeRectRounded::MIN_SIZE,
-            CShapeRectRounded::MIN_SIZE,
-            CShapeRectRounded::MIN_SIZE,
+            ShapeRectRounded::MIN_SIZE,
+            ShapeRectRounded::MIN_SIZE,
+            ShapeRectRounded::MIN_SIZE,
+            ShapeRectRounded::MIN_SIZE,
         );
-        CShapeKind::CRectangleRounded(CShapeRectRounded {
+        ShapeKind::RectangleRounded(ShapeRectRounded {
             tl: Position::new(pos1),
-            br: Position::new(
-                pos2 + Vec2::new(
-                    2. * CShapeRectRounded::MIN_SIZE,
-                    2. * CShapeRectRounded::MIN_SIZE,
-                ),
-            ),
+            br: Position::new(pos2),
             top_highlighed: false,
             right_highlighed: false,
             bottom_highlighed: false,
@@ -260,6 +255,10 @@ impl CShapes for CShapeRectRounded {
             selected: false,
         })
     }
+    fn good_size(&self) -> bool {
+        (self.tl.get_pos().x - self.br.get_pos().x).abs() >= ShapeRectRounded::MIN_SIZE
+            && (self.tl.get_pos().y - self.br.get_pos().y).abs() >= ShapeRectRounded::MIN_SIZE
+    }
     fn save_pos(&mut self) {
         self.tl.save_pos();
         self.br.save_pos();
@@ -273,44 +272,44 @@ impl CShapes for CShapeRectRounded {
         let (tl, tr, br, bl) = self.get_corners();
         vec![
             (
-                top.path_elements(CShapeRectRounded::TOLERANCE)
+                top.path_elements(ShapeRectRounded::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.top_selected, self.top_highlighed),
             ),
             (
-                tr.path_elements(CShapeRectRounded::TOLERANCE)
+                tr.path_elements(ShapeRectRounded::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.rad_tr_selected, self.rad_tr_highlighed),
             ),
             (
                 right
-                    .path_elements(CShapeRectRounded::TOLERANCE)
+                    .path_elements(ShapeRectRounded::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.right_selected, self.right_highlighed),
             ),
             (
-                br.path_elements(CShapeRectRounded::TOLERANCE)
+                br.path_elements(ShapeRectRounded::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.rad_br_selected, self.rad_br_highlighed),
             ),
             (
                 bottom
-                    .path_elements(CShapeRectRounded::TOLERANCE)
+                    .path_elements(ShapeRectRounded::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.bottom_selected, self.bottom_highlighed),
             ),
             (
-                bl.path_elements(CShapeRectRounded::TOLERANCE)
+                bl.path_elements(ShapeRectRounded::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.rad_bl_selected, self.rad_bl_highlighed),
             ),
             (
-                left.path_elements(CShapeRectRounded::TOLERANCE)
+                left.path_elements(ShapeRectRounded::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.left_selected, self.left_highlighed),
             ),
             (
-                tl.path_elements(CShapeRectRounded::TOLERANCE)
+                tl.path_elements(ShapeRectRounded::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.rad_tl_selected, self.rad_tl_highlighed),
             ),
@@ -491,22 +490,22 @@ impl CShapes for CShapeRectRounded {
             (false, false, false, false) => false,
             (true, false, false, false) => {
                 let rad_tl = rad_saved.top_left + dpos.x.min(dpos.y);
-                self.radii.top_left = rad_tl.max(CShapeRectRounded::MIN_SIZE);
+                self.radii.top_left = rad_tl.max(ShapeRectRounded::MIN_SIZE);
                 true
             }
             (false, true, false, false) => {
                 let rad_tr = rad_saved.top_right - dpos.x.min(dpos.y);
-                self.radii.top_right = rad_tr.max(CShapeRectRounded::MIN_SIZE);
+                self.radii.top_right = rad_tr.max(ShapeRectRounded::MIN_SIZE);
                 true
             }
             (false, false, true, false) => {
                 let rad_br = rad_saved.bottom_right - dpos.x.min(-dpos.y);
-                self.radii.bottom_right = rad_br.max(CShapeRectRounded::MIN_SIZE);
+                self.radii.bottom_right = rad_br.max(ShapeRectRounded::MIN_SIZE);
                 true
             }
             (false, false, false, true) => {
                 let rad_bl = rad_saved.bottom_left + dpos.x.min(-dpos.y);
-                self.radii.bottom_left = rad_bl.max(CShapeRectRounded::MIN_SIZE);
+                self.radii.bottom_left = rad_bl.max(ShapeRectRounded::MIN_SIZE);
                 true
             }
             _ => false,

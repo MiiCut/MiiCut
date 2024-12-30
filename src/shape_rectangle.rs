@@ -8,13 +8,13 @@
 use crate::{
     canvas_core::Pattern,
     math::*,
-    shapes::{CShapeKind, CShapes},
+    shapes::{ShapeKind, Shapes},
     sub_shapes::Position,
 };
 use kurbo::{BezPath, Line, LinePathIter, PathEl, Point, Rect, Shape, Vec2};
 use std::fmt::Display;
 #[derive(Clone, Debug, PartialEq)]
-pub struct CShapeRectangle {
+pub struct ShapeRectangle {
     tl: Position,
     br: Position,
     top_highlighed: bool,
@@ -29,7 +29,7 @@ pub struct CShapeRectangle {
     highlighted: bool,
     selected: bool,
 }
-impl CShapeRectangle {
+impl ShapeRectangle {
     const MIN_SIZE: f64 = 10.;
     fn get_lines(&self) -> (Line, Line, Line, Line) {
         let tl_pos = self.tl.get_pos();
@@ -50,19 +50,16 @@ impl CShapeRectangle {
         let dx = (pos.x - other.x).abs();
         let dy = (pos.y - other.y).abs();
 
-        match (
-            dx < CShapeRectangle::MIN_SIZE,
-            dy < CShapeRectangle::MIN_SIZE,
-        ) {
+        match (dx < ShapeRectangle::MIN_SIZE, dy < ShapeRectangle::MIN_SIZE) {
             (false, false) => pos,
             (true, true) => last_pos,
             (true, false) => Vec2::new(
-                other.x + CShapeRectangle::MIN_SIZE * (pos.x - other.x).signum(),
+                other.x + ShapeRectangle::MIN_SIZE * (pos.x - other.x).signum(),
                 pos.y,
             ),
             (false, true) => Vec2::new(
                 pos.x,
-                other.y + CShapeRectangle::MIN_SIZE * (pos.y - other.y).signum(),
+                other.y + ShapeRectangle::MIN_SIZE * (pos.y - other.y).signum(),
             ),
         }
     }
@@ -77,12 +74,12 @@ impl CShapeRectangle {
         }
     }
 }
-impl Display for CShapeRectangle {
+impl Display for ShapeRectangle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Rectangle")
     }
 }
-impl Shape for CShapeRectangle {
+impl Shape for ShapeRectangle {
     type PathElementsIter<'iter> = CShapeRectangleIter;
 
     fn path_elements(&self, tolerance: f64) -> CShapeRectangleIter {
@@ -121,15 +118,13 @@ impl Shape for CShapeRectangle {
         self.get_rectangle().abs().contains(pt)
     }
 }
-impl CShapes for CShapeRectangle {
+impl Shapes for ShapeRectangle {
     const TOLERANCE: f64 = 0.01;
 
-    fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind {
-        CShapeKind::CRectangle(CShapeRectangle {
+    fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
+        ShapeKind::Rectangle(ShapeRectangle {
             tl: Position::new(pos1),
-            br: Position::new(
-                pos2 + Vec2::new(CShapeRectangle::MIN_SIZE, CShapeRectangle::MIN_SIZE),
-            ),
+            br: Position::new(pos2),
             top_highlighed: false,
             right_highlighed: false,
             bottom_highlighed: false,
@@ -142,6 +137,10 @@ impl CShapes for CShapeRectangle {
             selected: false,
         })
     }
+    fn good_size(&self) -> bool {
+        (self.tl.get_pos().x - self.br.get_pos().x).abs() >= ShapeRectangle::MIN_SIZE
+            && (self.tl.get_pos().y - self.br.get_pos().y).abs() >= ShapeRectangle::MIN_SIZE
+    }
     fn save_pos(&mut self) {
         self.tl.save_pos();
         self.br.save_pos();
@@ -153,24 +152,24 @@ impl CShapes for CShapeRectangle {
         let (top, right, bottom, left) = self.get_lines();
         vec![
             (
-                top.path_elements(CShapeRectangle::TOLERANCE)
+                top.path_elements(ShapeRectangle::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.top_selected, self.top_highlighed),
             ),
             (
                 right
-                    .path_elements(CShapeRectangle::TOLERANCE)
+                    .path_elements(ShapeRectangle::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.right_selected, self.right_highlighed),
             ),
             (
                 bottom
-                    .path_elements(CShapeRectangle::TOLERANCE)
+                    .path_elements(ShapeRectangle::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.bottom_selected, self.bottom_highlighed),
             ),
             (
-                left.path_elements(CShapeRectangle::TOLERANCE)
+                left.path_elements(ShapeRectangle::TOLERANCE)
                     .collect::<BezPath>(),
                 self.get_modifier_pattern(self.left_selected, self.left_highlighed),
             ),

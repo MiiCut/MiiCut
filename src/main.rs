@@ -19,23 +19,24 @@ pub mod sub_shapes;
 
 use crate::dom::*;
 use crate::math::*;
-use canvas_core::{CanvasKind, Canvases, DrawStyles, Layer};
+use canvas_core::Pattern;
+use canvas_core::{CanvasKind, Canvases, DrawStyles};
 use geo::OpType;
 use kurbo::{Size, Vec2};
 use shapes_pool::CSPool;
 use shapes_pool::CShapeBuilder;
-use shapes_pool::CShid;
+use shapes_pool::Shid;
 use std::collections::HashSet;
 use std::{
     cell::{RefCell, RefMut},
     rc::Rc,
 };
+
 use wasm_bindgen::prelude::*;
 use web_sys::{
     window, Document, Element, Event, FileList, FileReader, HtmlCanvasElement, HtmlElement,
     HtmlInputElement, KeyboardEvent, MouseEvent, WheelEvent, Window,
 };
-
 type RefAV = Rc<RefCell<AppVars>>;
 type ElementCallback = Box<dyn Fn(RefAV, Event) + 'static>;
 
@@ -54,7 +55,7 @@ fn main() {
 #[allow(dead_code)]
 struct AppVars {
     root_pool: CSPool,
-    on_creation: Option<CShid>,
+    on_creation: Option<Shid>,
 
     // DOM
     window: Window,
@@ -152,12 +153,14 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
         .expect("should have status-snapgrid on the page")
         .dyn_into()?;
 
+    // Load the font
+
     let canvases = Canvases::new(
         window.clone(),
         c_back,
         c_grid,
         c_draw,
-        Size::new(1000., 500.),
+        Size::new(3000., 1500.),
     )?;
 
     let wa_size = canvases.get_drawing_size();
@@ -168,8 +171,6 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     use Icons::*;
     use IconsShapes::*;
     user_icons.insert(Arrow);
-    user_icons.insert(Selection);
-    user_icons.insert(Scissors);
     user_icons.insert(IShapes(Rectangle));
     user_icons.insert(IShapes(RectangleRounded));
     user_icons.insert(IShapes(Circle));
@@ -501,7 +502,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
 
             MouseState::RightDownMove(pos_dwn, cursor_pos) => {
                 avb.canvases.move_drawing_offset(pos_dwn, cursor_pos);
-                redraw_grid(avb);
+                draw_grid_and_rules(avb);
                 Ok(())
             }
             _ => Ok(()),
@@ -516,57 +517,33 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                         if let Some(shape) = avb.root_pool.get_shape_mut(cshid) {
                             shape.select(false);
                             shape.select_modifiers(false);
+                            // Minimum size was not reached, delete the shape
+                            if !shape.good_size() {
+                                log!("Shape too small, deleting");
+                                avb.root_pool.delete_shape(cshid);
+                            }
                         }
                         avb.on_creation = None;
                         go_to_arrow_tool(avb);
                         Ok(())
                     } else {
                         // B. We start drawing a new shape
-                        let layer = Layer::Worksheet;
-                        // Determine if we have clicked inside a existing shape and if so, select it as parent
-                        let ocshid_highlighted = avb.root_pool.get_first_highlighted();
                         let cshape = match ishape {
-                            IconsShapes::Rectangle => CShapeBuilder::new_rectangle(
-                                pos,
-                                pos,
-                                OpType::Union,
-                                ocshid_highlighted,
-                                layer,
-                            ),
-                            IconsShapes::RectangleRounded => CShapeBuilder::new_rectangle_rounded(
-                                pos,
-                                pos,
-                                OpType::Union,
-                                ocshid_highlighted,
-                                layer,
-                            ),
-                            IconsShapes::Circle => CShapeBuilder::new_circle(
-                                pos,
-                                pos,
-                                OpType::Union,
-                                ocshid_highlighted,
-                                layer,
-                            ),
-                            IconsShapes::Oblong => CShapeBuilder::new_oblong(
-                                pos,
-                                pos,
-                                OpType::Union,
-                                ocshid_highlighted,
-                                layer,
-                            ),
+                            IconsShapes::Rectangle => {
+                                CShapeBuilder::new_rectangle(pos, pos, OpType::Union)
+                            }
+                            IconsShapes::RectangleRounded => {
+                                CShapeBuilder::new_rectangle_rounded(pos, pos, OpType::Union)
+                            }
+                            IconsShapes::Circle => {
+                                CShapeBuilder::new_circle(pos, pos, OpType::Union)
+                            }
+                            IconsShapes::Oblong => {
+                                CShapeBuilder::new_oblong(pos, pos, OpType::Union)
+                            }
                         };
                         avb.on_creation = Some(cshape.get_id());
-                        if let Some(cshid_highlighted) = ocshid_highlighted {
-                            if let Some(cshape_highlighted) =
-                                avb.root_pool.get_shape_mut(cshid_highlighted)
-                            {
-                                cshape_highlighted.add_child(cshape);
-                            } else {
-                                unreachable!("Could not get the highlighted shape");
-                            }
-                        } else {
-                            avb.root_pool.add_shape(cshape);
-                        }
+                        avb.root_pool.add_shape(cshape);
                         Ok(())
                     }
                 }
@@ -574,7 +551,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 | MouseState::LeftUpMove(pos_dwn, cursor_pos) => {
                     if let Some(cshid) = avb.on_creation {
                         avb.root_pool
-                            .move_cshid_selection(cshid, pos_dwn, cursor_pos);
+                            .move_selection_from_shid(cshid, pos_dwn, cursor_pos);
                     } else {
                         avb.root_pool.highlight_object(cursor_pos, grab_precision);
                     }
@@ -693,9 +670,17 @@ fn on_mouse_wheel(av: RefAV, event: Event) {
         let canvas_pos = pam.mouse.get_canvas_pos();
         let old_draw_offset_rel = canvas_pos - old_draw_offset;
         let new_draw_offset = canvas_pos - old_draw_offset_rel * (new_scale / old_draw_scale);
+
+        // log!("new_draw_offset: {:?}", new_draw_offset);
+        // if new_draw_offset.x < 0. {
+        //     new_draw_offset.x = 0.;
+        // }
+        // if new_draw_offset.y < 0. {
+        //     new_draw_offset.y = 0.;
+        // }
         pam.canvases.set_drawing_offset(new_draw_offset);
 
-        redraw_grid(&mut pam);
+        draw_grid_and_rules(&mut pam);
         render_drawing(&mut pam);
         drop(pam);
     }
@@ -735,15 +720,15 @@ fn show_contex_menu_shape(pos: Vec2) {
     display_html_element(DOMElements::ContextMenuShape, true);
     set_pos_html_element(DOMElements::ContextMenuShape, pos);
 
-    if let Some(cm_shape) = DOMElements::ContextMenuShape.get_html_element() {
+    if let Some(_cm_shape) = DOMElements::ContextMenuShape.get_html_element() {
         // Add a new context menu item
-        add_menu_item_with_listener(&cm_shape, "cm-shape-new-item", "New Menu Item", || {
-            log!("New Menu Item clicked");
-        });
+        // add_menu_item_with_listener(&cm_shape, "cm-shape-new-item", "New Menu Item", || {
+        //     log!("New Menu Item clicked");
+        // });
     }
 }
 /// Adds a new menu item to the context menu and attaches a click event listener
-fn add_menu_item_with_listener<F>(menu: &web_sys::Element, id: &str, text: &str, callback: F)
+fn _add_menu_item_with_listener<F>(menu: &web_sys::Element, id: &str, text: &str, callback: F)
 where
     F: Fn() + 'static,
 {
@@ -821,7 +806,7 @@ fn resize_canvases(av: RefAV) {
     // log!("resize sizes: ({},{})", width, height);
     pam.canvases.resize_canvases(width, height);
 
-    redraw_grid(&mut pam);
+    draw_grid_and_rules(&mut pam);
     render_drawing(&mut pam);
     drop(pam);
 }
@@ -854,7 +839,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
             avb.keys_states.shift_pressed = true;
         }
         if keyboard_event.key() == "t" {
-            if let Some(cshid) = avb.root_pool.get_first_child_highlighted() {
+            if let Some(cshid) = avb.root_pool.get_first_highlighted() {
                 if let Some(cshape) = avb.root_pool.get_shape_mut(cshid) {
                     cshape.toggle_boolean_op();
                 }
@@ -950,37 +935,25 @@ fn html_deselect_icons(icon: Icons) {
 
 ///////////////
 // Rendering
-fn redraw_grid(avb: &mut RefMut<'_, AppVars>) {
-    avb.canvases.clear_grid_canvas();
-    avb.canvases.draw_grid();
+fn draw_grid_and_rules(avb: &mut RefMut<'_, AppVars>) {
+    avb.canvases.draw_grid_and_rules();
 }
 
 fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     let _scale = avb.canvases.get_drawing_scale();
     avb.canvases.clear_main_canvas();
     // Draw the segmented paths
-    for cshape_root in avb.root_pool.values() {
-        avb.canvases.draw_closed_path(
-            CanvasKind::Draw,
-            cshape_root.get_full_segs(),
-            cshape_root.get_pattern_operation(),
-            cshape_root.get_layer(),
-        );
-    }
+    let segs = avb.root_pool.get_full_segs();
+    avb.canvases.draw_closed_path(
+        CanvasKind::Draw,
+        segs,
+        Pattern::ComposedNormal(true),
+        vec![],
+    );
+
     // Draw the outline of every shape
     for cshape_root in avb.root_pool.values() {
-        avb.canvases.draw_path(
-            CanvasKind::Draw,
-            cshape_root.get_paths(),
-            cshape_root.get_layer(),
-        );
-
-        for cshape_child in cshape_root.get_children().values() {
-            avb.canvases.draw_path(
-                CanvasKind::Draw,
-                cshape_child.get_paths(),
-                cshape_child.get_layer(),
-            );
-        }
+        avb.canvases
+            .draw_path(CanvasKind::Draw, cshape_root.get_paths(), vec![]);
     }
 }

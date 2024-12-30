@@ -241,7 +241,7 @@ impl Mouse {
                 x: self.mouse_client.x - canvas_offset_x as f64,
                 y: self.mouse_client.y - canvas_offset_y as f64,
             };
-            self.draw_pos = to_draw(&self.canvas_pos, drawing_scale, &drawing_offset);
+            self.draw_pos = to_draw(self.canvas_pos, drawing_scale, drawing_offset);
             self.draw_pos = magnet_to_grid(&self.draw_pos);
         }
 

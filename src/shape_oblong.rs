@@ -8,7 +8,7 @@
 use crate::{
     canvas_core::Pattern,
     math::*,
-    shapes::{CShapeKind, CShapes},
+    shapes::{ShapeKind, Shapes},
     sub_shapes::Position,
 };
 use kurbo::{
@@ -17,10 +17,9 @@ use kurbo::{
 use std::{
     f64::consts::{FRAC_PI_2, PI},
     fmt::Display,
-    path,
 };
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct CShapeOblong {
+pub struct ShapeOblong {
     start: Position,
     end: Position,
     width: f64,
@@ -39,8 +38,8 @@ pub struct CShapeOblong {
     highlighted: bool,
     selected: bool,
 }
-impl CShapeOblong {
-    const MIN_SIZE: f64 = 2.;
+impl ShapeOblong {
+    const MIN_SIZE: f64 = 10.;
     const GRAB: f64 = 2.;
 
     fn get_arc(&self, start_arc: bool) -> Arc {
@@ -51,16 +50,16 @@ impl CShapeOblong {
             Arc::new(
                 start.to_point(),
                 Vec2::new(radius, radius),
-                3. * FRAC_PI_2,
-                -PI,
+                FRAC_PI_2,
+                PI,
                 angle,
             )
         } else {
             Arc::new(
                 end.to_point(),
                 Vec2::new(radius, radius),
-                FRAC_PI_2,
-                -PI,
+                3. * FRAC_PI_2,
+                PI,
                 angle,
             )
         }
@@ -79,6 +78,14 @@ impl CShapeOblong {
         flatten(path, 0.25, |s| segs.push(s));
         segs
     }
+    fn get_segs_all(&self) -> BezPath {
+        let mut segs = BezPath::new();
+        segs.extend(self.get_segs(self.get_line(true).to_path(ShapeOblong::TOLERANCE)));
+        segs.extend(self.get_segs(self.get_arc(false).to_path(ShapeOblong::TOLERANCE)));
+        segs.extend(self.get_segs(self.get_line(false).to_path(ShapeOblong::TOLERANCE)));
+        segs.extend(self.get_segs(self.get_arc(true).to_path(ShapeOblong::TOLERANCE)));
+        segs
+    }
     fn get_modifier_pattern(&self, mut selected: bool, mut highlighted: bool) -> Pattern {
         selected |= self.selected;
         highlighted |= self.highlighted;
@@ -90,12 +97,12 @@ impl CShapeOblong {
         }
     }
 }
-impl Display for CShapeOblong {
+impl Display for ShapeOblong {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Rounded rectangle")
     }
 }
-impl Shape for CShapeOblong {
+impl Shape for ShapeOblong {
     type PathElementsIter<'iter> = CShapeOblongIter;
 
     fn path_elements(&self, tolerance: f64) -> CShapeOblongIter {
@@ -126,7 +133,7 @@ impl Shape for CShapeOblong {
     }
     #[inline]
     fn winding(&self, pt: Point) -> i32 {
-        0 // TODO
+        compute_winding_number(&self.get_segs_all(), pt.to_vec2())
     }
     #[inline]
     fn bounding_box(&self) -> Rect {
@@ -138,27 +145,31 @@ impl Shape for CShapeOblong {
         self.winding(pt) != 0
     }
 }
-impl CShapes for CShapeOblong {
+impl Shapes for ShapeOblong {
     const TOLERANCE: f64 = 0.01;
 
-    fn new(pos1: Vec2, pos2: Vec2) -> CShapeKind {
-        CShapeKind::COblong(CShapeOblong {
+    fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
+        ShapeKind::Oblong(ShapeOblong {
             start: Position::new(pos1),
             end: Position::new(pos2),
             width: 10.,
             width_saved: 10.,
             arc_start_highlighted: false,
-            arc_end_highlighted: true,
+            arc_end_highlighted: false,
             line_up_highlighted: false,
             line_down_highlighted: false,
             arc_start_selected: false,
-            arc_end_selected: false,
+            arc_end_selected: true,
             line_up_selected: false,
             line_down_selected: false,
             highlighted: false,
             selected: false,
         })
     }
+    fn good_size(&self) -> bool {
+        self.width >= ShapeOblong::MIN_SIZE
+    }
+
     fn save_pos(&mut self) {
         self.start.save_pos();
         self.end.save_pos();
@@ -170,20 +181,20 @@ impl CShapes for CShapeOblong {
     fn get_shape_paths(&self) -> Vec<(BezPath, Pattern)> {
         let mut paths = vec![];
         paths.push((
-            self.get_line(true).to_path(CShapeOblong::TOLERANCE),
+            self.get_line(true).to_path(ShapeOblong::TOLERANCE),
             self.get_modifier_pattern(self.line_up_selected, self.line_up_highlighted),
         ));
         paths.push((
-            self.get_arc(false).to_path(CShapeOblong::TOLERANCE),
+            self.get_arc(false).to_path(ShapeOblong::TOLERANCE),
             self.get_modifier_pattern(self.arc_end_selected, self.arc_end_highlighted),
         ));
 
         paths.push((
-            self.get_line(false).to_path(CShapeOblong::TOLERANCE),
+            self.get_line(false).to_path(ShapeOblong::TOLERANCE),
             self.get_modifier_pattern(self.line_down_selected, self.line_down_highlighted),
         ));
         paths.push((
-            self.get_arc(true).to_path(CShapeOblong::TOLERANCE),
+            self.get_arc(true).to_path(ShapeOblong::TOLERANCE),
             self.get_modifier_pattern(self.arc_start_selected, self.arc_start_highlighted),
         ));
         paths
@@ -195,14 +206,14 @@ impl CShapes for CShapeOblong {
     }
     fn highlight_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
         let line_up = self.get_line(true);
-        let end_segs = self.get_segs(self.get_arc(false).to_path(CShapeOblong::TOLERANCE));
+        let end_segs = self.get_segs(self.get_arc(false).to_path(ShapeOblong::TOLERANCE));
         let line_down = self.get_line(false);
-        let start_segs = self.get_segs(self.get_arc(true).to_path(CShapeOblong::TOLERANCE));
+        let start_segs = self.get_segs(self.get_arc(true).to_path(ShapeOblong::TOLERANCE));
 
-        self.line_up_highlighted = distance_to_line(pos, line_up) < CShapeOblong::GRAB;
-        self.arc_end_highlighted = is_point_near_path(&end_segs, pos, CShapeOblong::GRAB);
-        self.line_down_highlighted = distance_to_line(pos, line_down) < CShapeOblong::GRAB;
-        self.arc_start_highlighted = is_point_near_path(&start_segs, pos, CShapeOblong::GRAB);
+        self.line_up_highlighted = distance_to_line(pos, line_up) < ShapeOblong::GRAB;
+        self.arc_end_highlighted = is_point_near_path(&end_segs, pos, 4. * ShapeOblong::GRAB);
+        self.line_down_highlighted = distance_to_line(pos, line_down) < ShapeOblong::GRAB;
+        self.arc_start_highlighted = is_point_near_path(&start_segs, pos, 4. * ShapeOblong::GRAB);
         self.line_up_highlighted
             || self.arc_end_highlighted
             || self.line_down_highlighted
@@ -227,14 +238,14 @@ impl CShapes for CShapeOblong {
     }
     fn select_modifiers_from_pos(&mut self, pos: Vec2) -> bool {
         let line_up = self.get_line(true);
-        let end_segs = self.get_segs(self.get_arc(false).to_path(CShapeOblong::TOLERANCE));
+        let end_segs = self.get_segs(self.get_arc(false).to_path(ShapeOblong::TOLERANCE));
         let line_down = self.get_line(false);
-        let start_segs = self.get_segs(self.get_arc(true).to_path(CShapeOblong::TOLERANCE));
+        let start_segs = self.get_segs(self.get_arc(true).to_path(ShapeOblong::TOLERANCE));
 
-        self.line_up_selected = distance_to_line(pos, line_up) < CShapeOblong::GRAB;
-        self.arc_end_selected = is_point_near_path(&end_segs, pos, CShapeOblong::GRAB);
-        self.line_down_selected = distance_to_line(pos, line_down) < CShapeOblong::GRAB;
-        self.arc_start_selected = is_point_near_path(&start_segs, pos, CShapeOblong::GRAB);
+        self.line_up_selected = distance_to_line(pos, line_up) < ShapeOblong::GRAB;
+        self.arc_end_selected = is_point_near_path(&end_segs, pos, 4. * ShapeOblong::GRAB);
+        self.line_down_selected = distance_to_line(pos, line_down) < ShapeOblong::GRAB;
+        self.arc_start_selected = is_point_near_path(&start_segs, pos, 4. * ShapeOblong::GRAB);
         self.line_up_selected
             || self.arc_end_selected
             || self.line_down_selected
@@ -262,6 +273,9 @@ impl CShapes for CShapeOblong {
         let width_saved = self.width_saved;
         let dpos = pos - pos_init;
 
+        let (dpos_rel, dpos_dir) =
+            project_to_perpendicular_with_direction(start_saved, end_saved, dpos);
+
         match (
             self.line_up_selected,
             self.arc_end_selected,
@@ -275,14 +289,18 @@ impl CShapes for CShapeOblong {
                 }
             }
             (true, false, false, false) => {
-                //
+                self.width =
+                    (width_saved - 2. * dpos_rel.hypot() * dpos_dir).max(ShapeOblong::MIN_SIZE);
             }
             (false, true, false, false) => {
-                self.start.set_pos(start_saved + dpos);
-            }
-            (false, false, true, false) => {}
-            (false, false, false, true) => {
                 self.end.set_pos(end_saved + dpos);
+            }
+            (false, false, true, false) => {
+                self.width =
+                    (width_saved + 2. * dpos_rel.hypot() * dpos_dir).max(ShapeOblong::MIN_SIZE);
+            }
+            (false, false, false, true) => {
+                self.start.set_pos(start_saved + dpos);
             }
             _ => (),
         }
