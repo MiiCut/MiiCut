@@ -38,13 +38,19 @@ pub struct Position {
     saved_pos: Vec2,
     last_pos: Vec2,
     pos: Vec2,
+    highlighted: bool,
+    selected: bool,
+    magnet: bool,
 }
 impl Position {
-    pub fn new(pos: Vec2) -> Self {
+    pub fn new(pos: Vec2, magnet: bool) -> Self {
         Self {
             saved_pos: pos,
             last_pos: pos,
             pos,
+            highlighted: false,
+            selected: false,
+            magnet,
         }
     }
     pub fn get_pos(&self) -> Vec2 {
@@ -63,5 +69,20 @@ impl Position {
     pub fn save_pos(&mut self) {
         self.saved_pos = self.pos;
         self.last_pos = self.pos;
+    }
+    pub fn highlight(&mut self, value: bool) {
+        self.highlighted = value;
+    }
+    pub fn is_highlighted(&self) -> bool {
+        self.highlighted
+    }
+    pub fn select(&mut self, value: bool) {
+        self.selected = value;
+    }
+    pub fn is_selected(&self) -> bool {
+        self.selected
+    }
+    pub fn is_magnet(&self) -> bool {
+        self.magnet
     }
 }

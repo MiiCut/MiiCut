@@ -1,149 +1,233 @@
 use crate::{
-    shape_hole::ShapeHole,
+    shape_disc::{HighLightOrSelect, ShapeDisc},
     shape_oblong::ShapeOblong,
     shape_rectangle::ShapeRectangle,
     shape_rectangle_rounded::ShapeRectRounded,
-    shapes::{Shape, ShapeKind, Shapes},
+    shapes::{Shape, Shapes},
+    IconsShapes,
 };
-use geo::{BooleanOps, HasDimensions, MultiPolygon, OpType, Point, Polygon};
+use geo::{BooleanOps, HasDimensions, Intersects, MultiPolygon, OpType, Point, Polygon};
 use kurbo::{BezPath, PathEl, Vec2};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet, VecDeque},
     fmt::Display,
     ops::{Deref, DerefMut},
     sync::atomic::{AtomicUsize, Ordering},
     vec,
 };
 
-pub struct CShapeBuilder;
-impl CShapeBuilder {
-    fn new(cshape_kind: ShapeKind, boolean_op: OpType) -> Shape {
-        let cshid = Shid::new();
-        Shape::new(cshid, cshape_kind, boolean_op)
+#[derive(Clone, Debug, PartialEq)]
+struct ShapeSelector {
+    selectable_shapes: Vec<Shid>, // IDs of selectable shapes
+    current_index: usize,         // Current index in the list
+}
+impl ShapeSelector {
+    pub fn new() -> Self {
+        Self {
+            selectable_shapes: Vec::new(),
+            current_index: 0,
+        }
     }
-    pub fn new_rectangle(pos1: Vec2, pos2: Vec2, boolean_op: OpType) -> Shape {
-        log!("Creating rectangle");
-        let cshape_kind = ShapeRectangle::new(pos1, pos2);
-        CShapeBuilder::new(cshape_kind, boolean_op)
+    pub fn update_shapes(&mut self, new_shapes: HashSet<Shid>) {
+        let current_set: HashSet<_> = self.selectable_shapes.iter().cloned().collect();
+        // Compare the sets, ignoring order
+        if current_set != new_shapes {
+            // Reset if the set of shapes changes
+            self.selectable_shapes = new_shapes.into_iter().collect();
+            self.current_index = 0;
+        }
     }
-    pub fn new_rectangle_rounded(pos1: Vec2, pos2: Vec2, boolean_op: OpType) -> Shape {
-        let cshape_kind = ShapeRectRounded::new(pos1, pos2);
-        CShapeBuilder::new(cshape_kind, boolean_op)
-    }
-    pub fn new_circle(pos1: Vec2, pos2: Vec2, boolean_op: OpType) -> Shape {
-        let cshape_kind = ShapeHole::new(pos1, pos2);
-        CShapeBuilder::new(cshape_kind, boolean_op)
-    }
-
-    pub fn new_oblong(pos1: Vec2, pos2: Vec2, boolean_op: OpType) -> Shape {
-        let cshape_kind = ShapeOblong::new(pos1, pos2);
-        CShapeBuilder::new(cshape_kind, boolean_op)
+    pub fn next_selection(&mut self) -> Option<Shid> {
+        if self.selectable_shapes.is_empty() {
+            return None;
+        }
+        // Select the current shape and move to the next
+        let selected = self.selectable_shapes[self.current_index];
+        self.current_index = (self.current_index + 1) % self.selectable_shapes.len();
+        Some(selected)
     }
 }
+
+pub struct CShapeBuilder;
+impl CShapeBuilder {
+    pub fn new(icon_shape: IconsShapes, pos1: Vec2, pos2: Vec2, boolean_op: OpType) -> Shape {
+        let cshid = Shid::new();
+        let shape_kind = match icon_shape {
+            IconsShapes::Rectangle => ShapeRectangle::new(pos1, pos2),
+            IconsShapes::RectangleRounded => ShapeRectRounded::new(pos1, pos2),
+            IconsShapes::Disc => ShapeDisc::new(pos1, pos2),
+            IconsShapes::Oblong => ShapeOblong::new(pos1, pos2),
+        };
+        Shape::new(cshid, shape_kind, boolean_op)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct CSPool {
-    cshapes: HashMap<Shid, Shape>,
+    shapes: HashMap<Shid, Shape>,
+    shapes_selector: ShapeSelector,
 }
 impl CSPool {
     pub fn new() -> CSPool {
         CSPool {
-            cshapes: HashMap::new(),
+            shapes: HashMap::new(),
+            shapes_selector: ShapeSelector::new(),
         }
     }
     pub fn add_shape(&mut self, cshape: Shape) {
         let cshid = cshape.get_id();
-        self.cshapes.insert(cshid, cshape);
+        self.shapes.insert(cshid, cshape);
     }
     pub fn delete_shape(&mut self, cshid: Shid) -> Option<Shape> {
-        self.cshapes.remove(&cshid)
+        self.shapes.remove(&cshid)
     }
     pub fn get_shape(&self, target_cshid: Shid) -> Option<&Shape> {
-        self.cshapes.get(&target_cshid)
+        self.shapes.get(&target_cshid)
     }
     pub fn get_shape_mut(&mut self, target_cshid: Shid) -> Option<&mut Shape> {
-        self.cshapes.get_mut(&target_cshid)
+        self.shapes.get_mut(&target_cshid)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&Shid, &Shape)> {
-        self.cshapes.iter()
+        self.shapes.iter()
     }
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&Shid, &mut Shape)> {
-        self.cshapes.iter_mut()
+        self.shapes.iter_mut()
     }
     pub fn values(&self) -> impl Iterator<Item = &Shape> {
-        self.cshapes.values()
+        self.shapes.values()
     }
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Shape> {
-        self.cshapes.values_mut()
+        self.shapes.values_mut()
     }
 
     pub fn save_positions(&mut self) {
-        self.cshapes.values_mut().for_each(|cs| {
+        self.shapes.values_mut().for_each(|cs| {
             cs.save_pos();
         });
     }
 
-    // Highlighting
-    pub fn highlight_object(&mut self, pos: Vec2, _precision: f64) {
-        let mut modifier_highlighted = false;
-        self.cshapes.values_mut().for_each(|cs| {
-            cs.highlight(false);
-            if cs.highlight_modifiers_from_pos(pos) {
-                modifier_highlighted = true;
+    pub fn intersection_set(&self, shid: Shid) -> HashSet<Shid> {
+        let mut result = HashSet::new();
+        if let Some(shape) = self.get_shape(shid) {
+            for (k, v) in self.shapes.iter() {
+                if k == &shid {
+                    // result.insert(*k);
+                    continue;
+                }
+                if shape.get_polygon().intersects(&v.get_polygon()) {
+                    result.insert(*k);
+                }
             }
-        });
-        if !modifier_highlighted {
-            self.cshapes.values_mut().for_each(|cs| {
-                cs.highlight_from_pos(pos);
-            });
         }
+        result
     }
-    pub fn get_first_highlighted(&self) -> Option<Shid> {
-        for cshape in self.cshapes.values() {
-            if cshape.is_highlighted() {
-                return Some(cshape.get_id());
+    pub fn connected_shapes(&self, start_shid: Shid) -> HashSet<Shid> {
+        let mut visited = HashSet::new(); // Tracks visited shapes
+        let mut to_visit = VecDeque::new(); // Queue for BFS
+
+        // Start with the initial shape
+        to_visit.push_back(start_shid);
+        visited.insert(start_shid);
+
+        while let Some(current_shid) = to_visit.pop_front() {
+            // Retrieve shapes intersecting the current shape
+            let intersecting_shapes = self.intersection_set(current_shid);
+
+            for neighbor in intersecting_shapes {
+                // If the neighbor hasn't been visited yet
+                if !visited.contains(&neighbor) {
+                    visited.insert(neighbor); // Mark it as visited
+                    to_visit.push_back(neighbor); // Add it to the queue for further exploration
+                }
             }
         }
-        None
-    }
-    pub fn get_highlighted(&self) -> Vec<Shid> {
-        let mut highlight = vec![];
-        for cshape in self.cshapes.values() {
-            if cshape.is_highlighted() {
-                highlight.push(cshape.get_id());
-            }
-        }
-        highlight
+
+        visited
     }
 
-    // Selections
-    pub fn select_object(&mut self, pos: Vec2, _precision: f64) {
-        let mut modifier_selected = false;
-        self.cshapes.values_mut().for_each(|cs| {
-            cs.select(false);
-            if cs.select_modifiers_from_pos(pos) {
-                modifier_selected = true;
-            }
-        });
-        if !modifier_selected {
-            self.cshapes.values_mut().for_each(|cs| {
-                cs.select_from_pos(pos);
+    pub fn select_all_connected(&mut self) -> bool {
+        let mut res = false;
+
+        if let Some(start_shid) = self.get_hors(HighLightOrSelect::Select).get(0).copied() {
+            let connected_shids = self.connected_shapes(start_shid);
+            log!("Connected shapes: {:?}", connected_shids);
+            connected_shids.iter().for_each(|shid| {
+                if let Some(cshape) = self.get_shape_mut(*shid) {
+                    cshape.set_hors(true, HighLightOrSelect::Select);
+                    res = true;
+                }
             });
         }
+        res
     }
-    pub fn clear_selections(&mut self) {
-        self.cshapes.values_mut().for_each(|cs| {
-            cs.select(false);
+    pub fn set_hors_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
+        let mut res = false;
+        self.shapes.values_mut().for_each(|cs| {
+            res |= cs.hors_from_pos(pos, hors);
+        });
+        res
+    }
+    pub fn get_hors(&self, hors: HighLightOrSelect) -> Vec<Shid> {
+        let mut result = vec![];
+        for cshape in self.shapes.values() {
+            if cshape.get_hors(hors) {
+                result.push(cshape.get_id());
+            }
+        }
+        result
+    }
+    pub fn get_center_hors(&self, hors: HighLightOrSelect) -> Vec<Shid> {
+        let mut result = vec![];
+        for cshape in self.shapes.values() {
+            if cshape.get_center_hors(hors) {
+                result.push(cshape.get_id());
+            }
+        }
+        result
+    }
+
+    pub fn set_center_hors_from_pos(
+        &mut self,
+        pos: Vec2,
+        _precision: f64,
+        hors: HighLightOrSelect,
+    ) -> bool {
+        let mut setted = false;
+        self.shapes.values_mut().for_each(|cs| {
+            setted |= cs.hors_center_from_pos(pos, hors);
+        });
+        setted
+    }
+    pub fn set_hors_modifiers_from_pos(
+        &mut self,
+        pos: Vec2,
+        _precision: f64,
+        hors: HighLightOrSelect,
+    ) -> bool {
+        let mut setted = false;
+        self.shapes.values_mut().for_each(|cs| {
+            setted |= cs.hors_modifiers_from_pos(pos, hors);
+        });
+        setted
+    }
+    pub fn set_hors(&mut self, value: bool, hors: HighLightOrSelect) {
+        self.shapes.values_mut().for_each(|cs| {
+            cs.set_hors(value, hors);
         });
     }
-    pub fn clear_selections_all(&mut self) {
-        self.cshapes.values_mut().for_each(|cs| {
-            cs.select(false);
-            cs.select_modifiers(false);
+    pub fn set_hors_centers(&mut self, value: bool, hors: HighLightOrSelect) {
+        self.shapes.values_mut().for_each(|cs| {
+            cs.set_hors_center(value, hors);
+        });
+    }
+    pub fn set_hors_modifiers(&mut self, value: bool, hors: HighLightOrSelect) {
+        self.shapes.values_mut().for_each(|cs| {
+            cs.set_hors_modifiers(value, hors);
         });
     }
     pub fn move_selection(&mut self, pos_dwn: Vec2, cursor_pos: Vec2) {
-        self.cshapes.values_mut().for_each(|cs| {
+        self.shapes.values_mut().for_each(|cs| {
             cs.move_selection(pos_dwn, cursor_pos);
         });
     }
@@ -152,22 +236,15 @@ impl CSPool {
             cshape.move_selection(pos_dwn, cursor_pos);
         }
     }
-    pub fn get_selection(&self) -> Vec<Shid> {
-        let mut selection = vec![];
-        self.cshapes.values().for_each(|cs| {
-            if cs.is_selected() {
-                selection.push(cs.get_id());
-            }
-        });
-        selection
-    }
+
     pub fn delete_objects_selected(&mut self) {
-        self.cshapes.retain(|_, v| !v.is_selected());
+        self.shapes
+            .retain(|_, v| !v.get_hors(HighLightOrSelect::Select));
     }
 
     pub fn get_full_segs(&mut self) -> Vec<BezPath> {
         // Sort by OpType, prioritizing Union over Difference
-        let mut shapes = self.cshapes.clone().into_values().collect::<Vec<_>>();
+        let mut shapes = self.shapes.clone().into_values().collect::<Vec<_>>();
         shapes.sort_by(|a, b| match (a.get_boolean_op(), b.get_boolean_op()) {
             (OpType::Union, OpType::Difference) => std::cmp::Ordering::Less,
             (OpType::Difference, OpType::Union) => std::cmp::Ordering::Greater,
@@ -176,10 +253,11 @@ impl CSPool {
 
         let polygons: Vec<(Polygon, OpType)> = shapes
             .iter()
-            .map(|cs| (cs.bez_path_to_geo_polygon(), cs.get_boolean_op()))
+            .map(|cs| (cs.get_polygon(), cs.get_boolean_op()))
             .collect();
 
         let mut multi_polygon = MultiPolygon(vec![]);
+
         for (idx, p) in polygons.iter().enumerate() {
             if idx == 0 {
                 multi_polygon = MultiPolygon(vec![p.0.clone()]);

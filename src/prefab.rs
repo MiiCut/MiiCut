@@ -62,22 +62,17 @@ pub fn cross(pos: &Vec2, size: f64) -> BezPath {
     BezPath::from_vec(v)
 }
 
-pub fn handle_grab_path(pos: Vec2, scale: f64) -> BezPath {
+pub fn magnet_path(pos: Vec2, scale: f64, size: f64) -> BezPath {
     let tol = 0.01;
-    let size = 6.;
+    let size = size;
     Circle::new(pos.to_point(), size / 2. / scale).to_path(tol)
 }
 
 pub fn handle_modify_path(pos: Vec2, scale: f64) -> BezPath {
     let tol = 0.01;
-    let size = 4.;
+    let size = 2.;
     Circle::new(pos.to_point(), size / 2. / scale).to_path(tol)
 }
-
-// pub fn handle_big(pos: &Vec2, size: f64, scale: f64) -> BezPath {
-//     let tol = 0.01;
-//     Circle::new(pos.to_point(), size / 2. / scale * 1.5).to_path(tol)
-// }
 
 pub fn cstr_hori(pos: &Vec2) -> BezPath {
     let size = 3.;

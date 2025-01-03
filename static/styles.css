@@ -2,12 +2,17 @@
 :root {
     --canvas-transparent-color: rgba(255, 255, 255, 0);
     --canvas-background-color: #dfdfdf4d;
-    --canvas-grid-color: #7d7c686f;
+    --canvas-grid-primary-color: #7d7c686f;
+    --canvas-grid-secondary-color: #b5b5aa6f;
     --canvas-rules-color: #212121;
     --canvas-main-color: #8d8b8b;
+
+    --canvas-modifiers-color: #ffffff4f;
+    --canvas-modifiers-highlight-color: #00ff00;
+    --canvas-modifiers-selected-color: #ff00008c;
     /*  */
     --canvas-basic-normal-color: #424242;
-    --canvas-basic-highlight-color:  #bfbb48;
+    --canvas-basic-highlight-color:  #ffffff;
     --canvas-basic-selected-color:  #ff0000;
 
     --canvas-composed-normal-color: #424242;
@@ -17,6 +22,10 @@
     --canvas-composed-normal-fill-color: #4242428b;
     --canvas-composed-highlight-fill-color:  #595721a1;
     --canvas-composed-selected-fill-color:  #ff000097;
+
+    --canvas-dimension-normal-color: #424242;
+    --canvas-dimension-highlight-color:  #ffffff;
+    --canvas-dimension-selected-color:  #ff0000;
 }
 body, html {
     margin: 0;
@@ -169,6 +178,7 @@ canvas {
 #mainCanvas {
     z-index: 3; /* Top layer */
     background-color: rgba(255, 0, 0, 0); /* Red with transparency */
+    cursor: crosshair;
 }
 
 /* Style the custom context menu */

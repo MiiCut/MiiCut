@@ -1,13 +1,14 @@
 #![allow(dead_code)]
 // A macro to provide `println!(..)`-style syntax for `console.log` logging.
-macro_rules! log {
-    ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
-    }
-}
+// macro_rules! log {
+//     ( $( $t:tt )* ) => {
+//         web_sys::console::log_1(&format!( $( $t )* ).into());
+//     }
+// }
 
 use approx::*;
-use kurbo::{Arc, BezPath, Line, ParamCurveNearest, PathEl, RoundedRectRadii, Vec2};
+use geo::{LineString, Polygon};
+use kurbo::{flatten, Arc, BezPath, Line, ParamCurveNearest, PathEl, RoundedRectRadii, Vec2};
 use std::f64::consts::PI;
 use std::{
     error::Error,
@@ -15,6 +16,7 @@ use std::{
     fmt::{self},
 };
 
+use crate::canvas::Pattern;
 use crate::shapes_pool::Shid;
 
 #[derive(Debug)]
@@ -902,7 +904,100 @@ fn is_left(p1: Vec2, p2: Vec2, point: Vec2) -> f64 {
     (p2.x - p1.x) * (point.y - p1.y) - (point.x - p1.x) * (p2.y - p1.y)
 }
 
-pub fn project_to_perpendicular_with_direction(p1: Vec2, p2: Vec2, q: Vec2) -> (Vec2, f64) {
+pub fn rotate_vector(vector: Vec2, angle: f64) -> Vec2 {
+    // Compute the cosine and sine of the angle
+    let cos_theta = angle.cos();
+    let sin_theta = angle.sin();
+
+    // Apply the rotation formula
+    Vec2::new(
+        vector.x * cos_theta - vector.y * sin_theta,
+        vector.x * sin_theta + vector.y * cos_theta,
+    )
+}
+
+pub fn unit_perpendicular(p1: Vec2, p2: Vec2, clockwise: bool) -> Vec2 {
+    // Vector representing the segment
+    let v = p2 - p1;
+
+    // Compute the perpendicular vector
+    let perp = if clockwise {
+        Vec2::new(-v.y, v.x) // Clockwise
+    } else {
+        Vec2::new(v.y, -v.x) // Counterclockwise
+    };
+
+    // Normalize to unit length
+    perp.normalize()
+}
+
+pub fn symmetric_point_to_segment(p1: Vec2, p2: Vec2, q: Vec2) -> Vec2 {
+    // Segment midpoint
+    let midpoint = (p1 + p2) / 2.0;
+
+    // Segment direction vector
+    let direction = (p2 - p1).normalize();
+
+    // Vector from midpoint to the point `q`
+    let to_point = q - midpoint;
+
+    // Project `to_point` onto the segment's direction
+    let projection_length = to_point.dot(direction);
+    let projection = midpoint + projection_length * direction;
+
+    // Calculate the symmetric point
+    let symmetric = 2.0 * projection - q;
+
+    symmetric
+}
+
+pub fn project_to_segment_with_direction(p1: Vec2, p2: Vec2, q: Vec2) -> (f64, f64) {
+    // First segment vector
+    let v1 = p2 - p1;
+
+    // Second segment vector (q already starts at the origin)
+    let v2 = q;
+
+    // Dot product of v2 and v1
+    let dot_product = v2.dot(v1);
+
+    // Magnitude squared of v1
+    let v1_magnitude_squared = v1.length_squared();
+
+    // Projection formula
+    let projection_length = dot_product / v1_magnitude_squared;
+    let projection = projection_length * v1;
+
+    // Direction relative to the first segment
+    let direction = dot_product.signum(); // -1.0, 0.0, or 1.0
+
+    (projection.hypot(), direction)
+}
+
+pub fn project_to_perpendicular(p1: Vec2, p2: Vec2, q: Vec2) -> (Vec2, f64) {
+    // First segment vector
+    let v1 = p2 - p1;
+
+    // Perpendicular vector to the first segment
+    let v_perp = Vec2::new(-v1.y, v1.x);
+
+    // Second segment vector (q already starts at the origin)
+    let v2 = q;
+
+    // Dot product of v2 and v_perp
+    let dot_product = v2.dot(v_perp);
+
+    // Magnitude squared of v_perp
+    let v_perp_magnitude_squared = v_perp.length_squared();
+
+    // Projection formula
+    (
+        (dot_product / v_perp_magnitude_squared) * v_perp,
+        dot_product.signum(),
+    )
+}
+
+pub fn project_to_perpendicular_with_direction(p1: Vec2, p2: Vec2, q: Vec2) -> (f64, f64) {
     // First segment vector
     let v1 = p2 - p1;
 
@@ -924,5 +1019,50 @@ pub fn project_to_perpendicular_with_direction(p1: Vec2, p2: Vec2, q: Vec2) -> (
     // Direction relative to the first segment's perpendicular
     let direction = dot_product.signum(); // -1.0, 0.0, or 1.0
 
-    (projection, direction)
+    (projection.hypot(), direction)
+}
+
+pub fn get_middle_from_start_end_positions(start: Vec2, end: Vec2, width: f64, up: bool) -> Vec2 {
+    let middle = (start + end) / 2.;
+    let radius = width / 2.;
+    let angle = (end - start).atan2();
+    let middle = if up {
+        middle + Vec2::from_angle(angle + FRAC_PI_2) * radius
+    } else {
+        middle + Vec2::from_angle(angle - FRAC_PI_2) * radius
+    };
+    middle
+}
+
+pub fn bez_path_to_geo_polygon(bez_path: &BezPath) -> Polygon<f64> {
+    let mut points = Vec::new();
+    for element in bez_path.elements() {
+        match element {
+            PathEl::MoveTo(p) | PathEl::LineTo(p) => points.push((p.x, p.y)),
+            PathEl::ClosePath => {
+                // Le polygone doit être fermé
+                if points.first() != points.last() {
+                    points.push(points[0]);
+                }
+            }
+            _ => log!("Error: Non-linear path elements found."),
+        }
+    }
+
+    if points.len() < 3 {
+        Polygon::new(LineString::new(vec![]), vec![])
+    } else {
+        Polygon::new(points.into(), vec![])
+    }
+}
+
+pub fn calc_segs(paths_patterns: Vec<(BezPath, Pattern)>) -> BezPath {
+    let mut segs = BezPath::new();
+    for (path, _) in paths_patterns {
+        flatten(path, 0.15, |s| segs.push(s));
+    }
+    segs
+}
+pub fn calc_polygon(bez_path: &BezPath) -> Polygon<f64> {
+    bez_path_to_geo_polygon(bez_path)
 }

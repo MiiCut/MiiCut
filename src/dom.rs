@@ -7,7 +7,7 @@ use web_sys::{window, Document, Element, Event, EventTarget, HtmlElement, MouseE
 pub enum IconsShapes {
     Rectangle,
     RectangleRounded,
-    Circle,
+    Disc,
     Oblong,
 }
 impl IconsShapes {
@@ -16,7 +16,7 @@ impl IconsShapes {
         match self {
             Rectangle => "icon-rectangle",
             RectangleRounded => "icon-rectangle-rounded",
-            Circle => "icon-circle",
+            Disc => "icon-circle",
             Oblong => "icon-oblong",
         }
     }
