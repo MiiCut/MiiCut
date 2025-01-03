@@ -314,7 +314,7 @@ impl Shapes for ShapeOblong {
     fn get_position(&self) -> Vec2 {
         self.center.get_pos()
     }
-    fn move_position(&mut self, pos_init: Vec2, pos: Vec2) {
+    fn move_position(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) {
         let start_saved = self.start.get_saved_pos();
         let end_saved = self.end.get_saved_pos();
         let center_saved = self.center.get_saved_pos();

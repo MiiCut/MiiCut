@@ -1055,6 +1055,22 @@ pub fn bez_path_to_geo_polygon(bez_path: &BezPath) -> Polygon<f64> {
         Polygon::new(points.into(), vec![])
     }
 }
+pub fn geo_polygon_to_bez_path(polygon: &Polygon<f64>) -> Vec<BezPath> {
+    let mut vec_bez_path = Vec::new();
+
+    // Convert exterior ring
+    if let Some(exterior_path) = ring_to_bez_path(polygon.exterior()) {
+        vec_bez_path.push(exterior_path);
+    }
+    // Convert interior rings (holes)
+    polygon.interiors().iter().for_each(|interior| {
+        if let Some(interior_path) = ring_to_bez_path(interior) {
+            vec_bez_path.push(interior_path);
+        }
+    });
+
+    vec_bez_path
+}
 
 pub fn calc_segs(paths_patterns: Vec<(BezPath, Pattern)>) -> BezPath {
     let mut segs = BezPath::new();
@@ -1065,4 +1081,29 @@ pub fn calc_segs(paths_patterns: Vec<(BezPath, Pattern)>) -> BezPath {
 }
 pub fn calc_polygon(bez_path: &BezPath) -> Polygon<f64> {
     bez_path_to_geo_polygon(bez_path)
+}
+
+// Helper function to convert a ring (either exterior or interior) to a bezier path
+pub fn ring_to_bez_path(ring: &LineString<f64>) -> Option<BezPath> {
+    let points: Vec<_> = ring
+        .coords()
+        .map(|coord| kurbo::Point::new(coord.x, coord.y))
+        .collect();
+    if points.len() < 2 {
+        return None; // Skip invalid rings
+    }
+
+    let mut bez_path = BezPath::new();
+    bez_path.push(PathEl::MoveTo(points[0]));
+    points
+        .iter()
+        .skip(1)
+        .for_each(|&point| bez_path.push(PathEl::LineTo(point)));
+
+    // Close the path if it's a closed ring
+    if points.first() == points.last() {
+        bez_path.push(PathEl::ClosePath);
+    }
+
+    Some(bez_path)
 }

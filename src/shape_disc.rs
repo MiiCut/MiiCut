@@ -199,7 +199,7 @@ impl Shapes for ShapeDisc {
     fn get_position(&self) -> Vec2 {
         self.center.get_pos()
     }
-    fn move_position(&mut self, pos_init: Vec2, pos: Vec2) {
+    fn move_position(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) {
         let c_saved = self.center.get_saved_pos();
 
         let dpos = pos - pos_init;

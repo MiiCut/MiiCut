@@ -422,7 +422,7 @@ impl Canvases {
         ctx.set_fill_style_str(fill_color);
         ctx.set_font("14px Orbitron");
         ctx.begin_path();
-        for path in paths.iter() {
+        for (_idx, path) in paths.iter().enumerate() {
             for cst in path.iter() {
                 match cst {
                     PathEl::MoveTo(pt) => {

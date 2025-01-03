@@ -133,6 +133,7 @@ pub struct Mouse {
 
     canvas_pos: Vec2,
     canvas_pos_ms_dwn: Vec2,
+    last_draw_pos: Vec2,
     draw_pos: Vec2,
     draw_pos_down: Vec2,
     mouse_client: Vec2,
@@ -146,6 +147,7 @@ impl Mouse {
 
             canvas_pos: Vec2::ZERO,
             canvas_pos_ms_dwn: Vec2::ZERO,
+            last_draw_pos: Vec2::ZERO,
             draw_pos: Vec2::ZERO,
             draw_pos_down: Vec2::ZERO,
             mouse_client: Vec2::ZERO,
@@ -224,7 +226,8 @@ impl Mouse {
         drawing_scale: f64,
         event: &Event,
         sys_mouse: SystemMouse,
-    ) {
+    ) -> bool {
+        let mut modified = false;
         if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
             if mouse_event.buttons() == JSMouseState::JSLeft as u16 {
                 self.mouse_button = MouseButton::Left;
@@ -243,6 +246,10 @@ impl Mouse {
             };
             self.draw_pos = to_draw(self.canvas_pos, drawing_scale, drawing_offset);
             self.draw_pos = magnet_to_grid(&self.draw_pos);
+            if self.draw_pos != self.last_draw_pos {
+                self.last_draw_pos = self.draw_pos;
+                modified = true;
+            }
         }
 
         match sys_mouse {
@@ -258,6 +265,7 @@ impl Mouse {
                 self.moving = false;
             }
         }
+        modified
     }
 }
 

@@ -266,7 +266,7 @@ impl Shapes for ShapeRectangle {
     fn get_position(&self) -> Vec2 {
         self.center.get_pos()
     }
-    fn move_position(&mut self, pos_init: Vec2, pos: Vec2) {
+    fn move_position(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) {
         let tl_saved = self.tl.get_saved_pos();
         let tr_saved = self.tr.get_saved_pos();
         let br_saved = self.br.get_saved_pos();
@@ -276,7 +276,6 @@ impl Shapes for ShapeRectangle {
         let bottom_saved = self.bottom.get_saved_pos();
         let left_saved = self.left.get_saved_pos();
         let center_saved = self.center.get_saved_pos();
-
         let tl_sel = self.tl.is_selected();
         let tr_sel = self.tr.is_selected();
         let br_sel = self.br.is_selected();
@@ -285,7 +284,6 @@ impl Shapes for ShapeRectangle {
         let right_sel = self.right.is_selected();
         let bottom_sel = self.bottom.is_selected();
         let left_sel = self.left.is_selected();
-
         let dpos = pos - pos_init;
         const MIN_SIZE: f64 = ShapeRectangle::MIN_SIZE;
         if self.selected {
@@ -300,97 +298,95 @@ impl Shapes for ShapeRectangle {
             self.left.set_pos(left_saved + dpos);
             self.update_polygon();
         } else {
-            match (
-                tl_sel, tr_sel, br_sel, bl_sel, top_sel, right_sel, bottom_sel, left_sel,
-            ) {
-                (true, false, false, false, false, false, false, false) => {
+            let modified = match (tl_sel, tr_sel, br_sel, bl_sel) {
+                (true, false, false, false) => {
                     let mut tlpos = tl_saved + dpos;
                     tlpos.x = tlpos.x.min(tr_saved.x - MIN_SIZE);
                     tlpos.y = tlpos.y.min(bl_saved.y - MIN_SIZE);
                     self.tl.set_pos(tlpos);
                     self.bl.set_pos(Vec2::new(tlpos.x, bl_saved.y));
                     self.tr.set_pos(Vec2::new(tr_saved.x, tlpos.y));
-                    self.update_edges_positions();
-                    self.update_center();
-                    self.update_polygon();
+                    true
                 }
-                (false, true, false, false, false, false, false, false) => {
+                (false, true, false, false) => {
                     let mut trpos = tr_saved + dpos;
                     trpos.x = trpos.x.max(tl_saved.x + MIN_SIZE);
                     trpos.y = trpos.y.min(br_saved.y - MIN_SIZE);
                     self.tr.set_pos(trpos);
                     self.br.set_pos(Vec2::new(trpos.x, br_saved.y));
                     self.tl.set_pos(Vec2::new(tl_saved.x, trpos.y));
-                    self.update_edges_positions();
-                    self.update_center();
-                    self.update_polygon();
+                    true
                 }
-                (false, false, true, false, false, false, false, false) => {
+                (false, false, true, false) => {
                     let mut brpos = br_saved + dpos;
                     brpos.x = brpos.x.max(bl_saved.x + MIN_SIZE);
                     brpos.y = brpos.y.max(tr_saved.y + MIN_SIZE);
                     self.br.set_pos(brpos);
                     self.tr.set_pos(Vec2::new(brpos.x, tr_saved.y));
                     self.bl.set_pos(Vec2::new(bl_saved.x, brpos.y));
-                    self.update_edges_positions();
-                    self.update_center();
-                    self.update_polygon();
+                    true
                 }
-                (false, false, false, true, false, false, false, false) => {
+                (false, false, false, true) => {
                     let mut blpos = bl_saved + dpos;
                     blpos.x = blpos.x.min(br_saved.x - MIN_SIZE);
                     blpos.y = blpos.y.max(tl_saved.y + MIN_SIZE);
                     self.bl.set_pos(blpos);
                     self.tl.set_pos(Vec2::new(blpos.x, tl_saved.y));
                     self.br.set_pos(Vec2::new(br_saved.x, blpos.y));
-                    self.update_edges_positions();
-                    self.update_center();
-                    self.update_polygon();
+                    true
                 }
-                (false, false, false, false, true, false, false, false) => {
+                _ => false,
+            };
+            if modified {
+                self.update_edges_positions();
+                self.update_center();
+                self.update_polygon();
+                return;
+            }
+            let modified = match (top_sel, right_sel, bottom_sel, left_sel) {
+                (true, false, false, false) => {
                     let mut toppos = top_saved + dpos;
                     toppos.y = toppos.y.min(bottom_saved.y - MIN_SIZE);
                     self.top.set_pos(toppos);
                     self.tl.set_pos(Vec2::new(tl_saved.x, toppos.y));
                     self.tr.set_pos(Vec2::new(tr_saved.x, toppos.y));
-                    self.update_edges_positions();
-                    self.update_center();
-                    self.update_polygon();
+                    true
                 }
-                (false, false, false, false, false, true, false, false) => {
+                (false, true, false, false) => {
                     let mut rightpos = right_saved + dpos;
                     rightpos.x = rightpos.x.max(left_saved.x + MIN_SIZE);
                     self.right.set_pos(rightpos);
                     self.tr.set_pos(Vec2::new(rightpos.x, tr_saved.y));
                     self.br.set_pos(Vec2::new(rightpos.x, br_saved.y));
-                    self.update_edges_positions();
-                    self.update_center();
-                    self.update_polygon();
+                    true
                 }
-                (false, false, false, false, false, false, true, false) => {
+                (false, false, true, false) => {
                     let mut bottompos = bottom_saved + dpos;
                     bottompos.y = bottompos.y.max(top_saved.y + MIN_SIZE);
                     self.bottom.set_pos(bottompos);
                     self.br.set_pos(Vec2::new(br_saved.x, bottompos.y));
                     self.bl.set_pos(Vec2::new(bl_saved.x, bottompos.y));
-                    self.update_edges_positions();
-                    self.update_center();
-                    self.update_polygon();
+                    true
                 }
-                (false, false, false, false, false, false, false, true) => {
+                (false, false, false, true) => {
                     let mut leftpos = left_saved + dpos;
                     leftpos.x = leftpos.x.min(right_saved.x - MIN_SIZE);
                     self.left.set_pos(leftpos);
                     self.bl.set_pos(Vec2::new(leftpos.x, bl_saved.y));
                     self.tl.set_pos(Vec2::new(leftpos.x, tl_saved.y));
-                    self.update_edges_positions();
-                    self.update_center();
-                    self.update_polygon();
+                    true
                 }
-                _ => (),
+                _ => false,
+            };
+            if modified {
+                self.update_edges_positions();
+                self.update_center();
+                self.update_polygon();
+                return;
             }
         }
     }
+
     fn get_magnets_paths(&self) -> Vec<(BezPath, Pattern)> {
         vec![
             (

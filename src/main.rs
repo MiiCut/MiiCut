@@ -526,14 +526,16 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     avb.pool.select_all_connected();
                 }
                 avb.pool.save_positions();
+                avb.pool.recalc_full_segs();
                 Ok(())
             }
             MouseState::LeftDownMove(pos_dwn, cursor_pos) => {
-                avb.pool.move_selection(pos_dwn, cursor_pos);
+                let shift_pressed = avb.keys_states.shift_pressed;
+                avb.pool.move_selection(pos_dwn, cursor_pos, shift_pressed);
                 Ok(())
             }
             MouseState::LeftUp(_cursor_pos) => {
-                // avb.pool.set_hors(false, HighLightOrSelect::Select);
+                avb.pool.recalc_full_segs();
                 Ok(())
             }
             MouseState::LeftUpMove(_, cursor_pos) => {
@@ -563,6 +565,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                                 log!("Shape too small, deleting");
                                 avb.pool.delete_shape(cshid);
                             }
+                            avb.pool.recalc_full_segs();
                         }
                         avb.on_creation = None;
                         // go_to_arrow_tool(avb);
@@ -578,8 +581,13 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 MouseState::LeftDownMove(pos_dwn, cursor_pos)
                 | MouseState::LeftUpMove(pos_dwn, cursor_pos) => {
                     if let Some(cshid) = avb.on_creation {
-                        avb.pool
-                            .move_selection_from_shid(cshid, pos_dwn, cursor_pos);
+                        let shift_pressed = avb.keys_states.shift_pressed;
+                        avb.pool.move_selection_from_shid(
+                            cshid,
+                            pos_dwn,
+                            cursor_pos,
+                            shift_pressed,
+                        );
                     }
                     avb.draw_cursor = cursor_pos;
                     Ok(())
@@ -614,20 +622,20 @@ fn on_mouse_move(av: RefAV, event: Event) {
     let drawing_scale = pam.canvases.get_drawing_scale();
     let offset_start_x = get_element_width(&pam.left_panel);
     let offset_start_y = get_element_height(&pam.top_menu);
-    pam.mouse.update_mouse(
+    if pam.mouse.update_mouse(
         offset_start_x,
         offset_start_y,
         drawing_offset,
         drawing_scale,
         &event,
         SystemMouse::Move,
-    );
-
-    if let Some(e) = update(&mut pam).err() {
-        log!("ERROR: {}", e);
+    ) {
+        if let Some(e) = update(&mut pam).err() {
+            log!("ERROR: {}", e);
+        }
+        update_status_bar(&mut pam);
+        render_drawing(&mut pam);
     }
-    update_status_bar(&mut pam);
-    render_drawing(&mut pam);
     drop(pam);
 }
 fn on_mouse_down(av: RefAV, event: Event) {
@@ -838,6 +846,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
         }
         if keyboard_event.key() == "Delete" || keyboard_event.key() == "Backspace" {
             avb.pool.delete_objects_selected();
+            avb.pool.recalc_full_segs();
         }
         if keyboard_event.key() == "Escape" {
             avb.on_creation = None;
@@ -854,18 +863,21 @@ fn on_window_keydown(av: RefAV, event: Event) {
             if let Some(shid) = avb.on_creation {
                 if let Some(cshape) = avb.pool.get_shape_mut(shid) {
                     cshape.toggle_boolean_op();
+                    avb.pool.recalc_full_segs();
                 }
             } else {
-                let highlighted = avb.pool.get_center_hors(HighLightOrSelect::Highlight);
+                let highlighted = avb.pool.get_hors(HighLightOrSelect::Highlight);
                 if highlighted.len() == 1 {
                     if let Some(cshape) = avb.pool.get_shape_mut(highlighted[0]) {
                         cshape.toggle_boolean_op();
+                        avb.pool.recalc_full_segs();
                     }
                 } else {
-                    let selected = avb.pool.get_center_hors(HighLightOrSelect::Select);
+                    let selected = avb.pool.get_hors(HighLightOrSelect::Select);
                     if selected.len() == 1 {
                         if let Some(cshape) = avb.pool.get_shape_mut(selected[0]) {
                             cshape.toggle_boolean_op();
+                            avb.pool.recalc_full_segs();
                         }
                     }
                 }
@@ -984,10 +996,10 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     avb.canvases.clear_main_canvas();
 
     // Draw the segmented paths
-    let segs = avb.pool.get_full_segs();
+    let full_segs = avb.pool.get_full_segs();
     avb.canvases.draw_closed_path(
         &CanvasKind::Draw,
-        segs,
+        full_segs,
         Pattern::ComposedNormal(true),
         vec![],
     );

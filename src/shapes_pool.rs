@@ -1,4 +1,5 @@
 use crate::{
+    math::*,
     shape_disc::{HighLightOrSelect, ShapeDisc},
     shape_oblong::ShapeOblong,
     shape_rectangle::ShapeRectangle,
@@ -6,8 +7,8 @@ use crate::{
     shapes::{Shape, Shapes},
     IconsShapes,
 };
-use geo::{BooleanOps, HasDimensions, Intersects, MultiPolygon, OpType, Point, Polygon};
-use kurbo::{BezPath, PathEl, Vec2};
+use geo::{BooleanOps, Intersects, MultiPolygon, OpType, Polygon};
+use kurbo::{BezPath, Vec2};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt::Display,
@@ -66,12 +67,14 @@ impl CShapeBuilder {
 pub struct CSPool {
     shapes: HashMap<Shid, Shape>,
     shapes_selector: ShapeSelector,
+    full_segs: Vec<BezPath>,
 }
 impl CSPool {
     pub fn new() -> CSPool {
         CSPool {
             shapes: HashMap::new(),
             shapes_selector: ShapeSelector::new(),
+            full_segs: Vec::new(),
         }
     }
     pub fn add_shape(&mut self, cshape: Shape) {
@@ -100,13 +103,11 @@ impl CSPool {
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Shape> {
         self.shapes.values_mut()
     }
-
     pub fn save_positions(&mut self) {
         self.shapes.values_mut().for_each(|cs| {
             cs.save_pos();
         });
     }
-
     pub fn intersection_set(&self, shid: Shid) -> HashSet<Shid> {
         let mut result = HashSet::new();
         if let Some(shape) = self.get_shape(shid) {
@@ -122,36 +123,35 @@ impl CSPool {
         }
         result
     }
+    // BFS algorithm: https://en.wikipedia.org/wiki/Breadth-first_search
     pub fn connected_shapes(&self, start_shid: Shid) -> HashSet<Shid> {
-        let mut visited = HashSet::new(); // Tracks visited shapes
-        let mut to_visit = VecDeque::new(); // Queue for BFS
-
+        // Tracks visited shapes
+        let mut visited = HashSet::new();
+        // Queue for BFS
+        let mut to_visit = VecDeque::new();
         // Start with the initial shape
         to_visit.push_back(start_shid);
         visited.insert(start_shid);
-
         while let Some(current_shid) = to_visit.pop_front() {
             // Retrieve shapes intersecting the current shape
             let intersecting_shapes = self.intersection_set(current_shid);
-
             for neighbor in intersecting_shapes {
                 // If the neighbor hasn't been visited yet
                 if !visited.contains(&neighbor) {
-                    visited.insert(neighbor); // Mark it as visited
-                    to_visit.push_back(neighbor); // Add it to the queue for further exploration
+                    // Mark it as visited
+                    visited.insert(neighbor);
+                    // Add it to the queue for further exploration
+                    to_visit.push_back(neighbor);
                 }
             }
         }
-
         visited
     }
-
     pub fn select_all_connected(&mut self) -> bool {
         let mut res = false;
 
         if let Some(start_shid) = self.get_hors(HighLightOrSelect::Select).get(0).copied() {
             let connected_shids = self.connected_shapes(start_shid);
-            log!("Connected shapes: {:?}", connected_shids);
             connected_shids.iter().for_each(|shid| {
                 if let Some(cshape) = self.get_shape_mut(*shid) {
                     cshape.set_hors(true, HighLightOrSelect::Select);
@@ -162,11 +162,38 @@ impl CSPool {
         res
     }
     pub fn set_hors_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
-        let mut res = false;
-        self.shapes.values_mut().for_each(|cs| {
-            res |= cs.hors_from_pos(pos, hors);
-        });
-        res
+        use HighLightOrSelect::*;
+        if let Highlight = hors {
+            let mut res = false;
+            self.shapes.values_mut().for_each(|cs| {
+                res |= cs.hors_from_pos(pos, Highlight);
+            });
+            return res;
+        } else {
+            let mut overlapping_shapes = HashSet::new();
+            self.shapes.values_mut().for_each(|cs| {
+                if cs.hors_from_pos(pos, Select) {
+                    overlapping_shapes.insert(cs.get_id());
+                }
+            });
+            // Update the ShapeSelector with the overlapping shapes
+            self.shapes_selector.update_shapes(overlapping_shapes);
+
+            // Toggle to the next shape
+            self.shapes
+                .values_mut()
+                .for_each(|shape| shape.set_hors(false, Select));
+
+            if let Some(next_shid) = self.shapes_selector.next_selection() {
+                // Find and select the next shape
+                if let Some(shape) = self.shapes.get_mut(&next_shid) {
+                    log!("Selecting shapeee {}", next_shid);
+                    shape.set_hors(true, Select);
+                    return true;
+                }
+            }
+            false
+        }
     }
     pub fn get_hors(&self, hors: HighLightOrSelect) -> Vec<Shid> {
         let mut result = vec![];
@@ -186,7 +213,6 @@ impl CSPool {
         }
         result
     }
-
     pub fn set_center_hors_from_pos(
         &mut self,
         pos: Vec2,
@@ -226,106 +252,62 @@ impl CSPool {
             cs.set_hors_modifiers(value, hors);
         });
     }
-    pub fn move_selection(&mut self, pos_dwn: Vec2, cursor_pos: Vec2) {
+    pub fn move_selection(&mut self, pos_dwn: Vec2, cursor_pos: Vec2, shift_pressed: bool) {
         self.shapes.values_mut().for_each(|cs| {
-            cs.move_selection(pos_dwn, cursor_pos);
+            cs.move_selection(pos_dwn, cursor_pos, shift_pressed);
         });
     }
-    pub fn move_selection_from_shid(&mut self, cshid: Shid, pos_dwn: Vec2, cursor_pos: Vec2) {
+    pub fn move_selection_from_shid(
+        &mut self,
+        cshid: Shid,
+        pos_dwn: Vec2,
+        cursor_pos: Vec2,
+        shift_pressed: bool,
+    ) {
         if let Some(cshape) = self.get_shape_mut(cshid) {
-            cshape.move_selection(pos_dwn, cursor_pos);
+            cshape.move_selection(pos_dwn, cursor_pos, shift_pressed);
         }
     }
-
     pub fn delete_objects_selected(&mut self) {
         self.shapes
             .retain(|_, v| !v.get_hors(HighLightOrSelect::Select));
     }
+    pub fn recalc_full_segs(&mut self) {
+        // Sort shapes by OpType, prioritizing Union over Difference
 
-    pub fn get_full_segs(&mut self) -> Vec<BezPath> {
-        // Sort by OpType, prioritizing Union over Difference
-        let mut shapes = self.shapes.clone().into_values().collect::<Vec<_>>();
+        let mut shapes: Vec<_> = self.shapes.values().collect();
+
         shapes.sort_by(|a, b| match (a.get_boolean_op(), b.get_boolean_op()) {
             (OpType::Union, OpType::Difference) => std::cmp::Ordering::Less,
             (OpType::Difference, OpType::Union) => std::cmp::Ordering::Greater,
             _ => std::cmp::Ordering::Equal,
         });
 
+        // Convert shapes to polygons with their boolean operations
         let polygons: Vec<(Polygon, OpType)> = shapes
             .iter()
             .map(|cs| (cs.get_polygon(), cs.get_boolean_op()))
             .collect();
 
+        // Apply boolean operations iteratively
+
         let mut multi_polygon = MultiPolygon(vec![]);
-
-        for (idx, p) in polygons.iter().enumerate() {
+        for (idx, (polygon, op_type)) in polygons.iter().enumerate() {
             if idx == 0 {
-                multi_polygon = MultiPolygon(vec![p.0.clone()]);
+                multi_polygon = MultiPolygon(vec![polygon.clone()]);
             } else {
-                multi_polygon = multi_polygon.boolean_op(&p.0, p.1);
+                multi_polygon = multi_polygon.boolean_op(polygon, *op_type);
             }
         }
-        let mut multi_paths = Vec::new();
-        multi_polygon.iter().for_each(|p| {
-            multi_paths.extend(self.geo_polygon_to_bez_path(&p));
-        });
-        multi_paths
-    }
 
-    fn geo_polygon_to_bez_path(&self, polygon: &Polygon<f64>) -> Vec<BezPath> {
-        let mut vec_bez_path: Vec<BezPath> = vec![];
-        let mut bez_path = BezPath::new();
-        // Convert exterior ring to bezier path
-        let exterior = polygon.exterior();
-        if exterior.is_empty() {
-            return vec_bez_path; // Return None if the exterior is empty
-        }
-        let exterior_points: Vec<Point> = exterior
-            .coords()
-            .map(|coord| Point::new(coord.x, coord.y))
+        // Convert the resulting MultiPolygon to BezPath
+        self.full_segs = multi_polygon
+            .iter()
+            .flat_map(|polygon| geo_polygon_to_bez_path(polygon))
             .collect();
-        if exterior_points.len() < 2 {
-            return vec_bez_path; // Not enough points to form a path
-        }
-        // Add exterior points to path
-        bez_path.push(PathEl::MoveTo(kurbo::Point::new(
-            exterior_points[0].x(),
-            exterior_points[0].y(),
-        )));
-        for point in &exterior_points[1..] {
-            bez_path.push(PathEl::LineTo(kurbo::Point::new(point.x(), point.y())));
-        }
-        if exterior_points.first() == exterior_points.last() {
-            bez_path.push(PathEl::ClosePath);
-        }
-
-        vec_bez_path.push(bez_path);
-        bez_path = BezPath::new();
-
-        // Convert interior rings (holes) to bezier paths
-        for interior in polygon.interiors() {
-            let interior_points: Vec<Point> = interior
-                .coords()
-                .map(|coord| Point::new(coord.x, coord.y))
-                .collect();
-            if interior_points.len() < 2 {
-                continue; // Skip invalid rings
-            }
-            bez_path.push(PathEl::MoveTo(kurbo::Point::new(
-                interior_points[0].x(),
-                interior_points[0].y(),
-            )));
-            for point in &interior_points[1..] {
-                bez_path.push(PathEl::LineTo(kurbo::Point::new(point.x(), point.y())));
-            }
-            if interior_points.first() == interior_points.last() {
-                bez_path.push(PathEl::ClosePath);
-            }
-
-            vec_bez_path.push(bez_path);
-            bez_path = BezPath::new();
-        }
-        vec_bez_path
+    }
+    pub fn get_full_segs(&mut self) -> Vec<BezPath> {
+        self.full_segs.clone()
     }
 }
 

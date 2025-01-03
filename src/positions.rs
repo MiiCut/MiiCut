@@ -85,4 +85,7 @@ impl Position {
     pub fn is_magnet(&self) -> bool {
         self.magnet
     }
+    pub fn is_horizontal(&self) -> bool {
+        self.pos.y == self.saved_pos.y
+    }
 }

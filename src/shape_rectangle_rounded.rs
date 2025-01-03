@@ -448,7 +448,7 @@ impl Shapes for ShapeRectRounded {
     fn get_position(&self) -> Vec2 {
         self.center.get_pos()
     }
-    fn move_position(&mut self, pos_init: Vec2, pos: Vec2) {
+    fn move_position(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) {
         let tl_saved = self.tl.get_saved_pos();
         let tr_saved = self.tr.get_saved_pos();
         let br_saved = self.br.get_saved_pos();

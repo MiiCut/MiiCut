@@ -55,7 +55,7 @@ pub trait Shapes {
     fn is_center_hors(&self, hors: HighLightOrSelect) -> bool;
 
     fn get_position(&self) -> Vec2;
-    fn move_position(&mut self, pos_init: Vec2, pos: Vec2);
+    fn move_position(&mut self, pos_init: Vec2, pos: Vec2, shift_pressed: bool);
 
     fn get_paths_patterns(&self) -> Vec<(BezPath, Pattern)>;
     fn get_polygon(&self) -> Polygon<f64>;
@@ -198,13 +198,13 @@ impl Shape {
             Oblong(sh) => sh.is_center_hors(hors),
         }
     }
-    pub fn move_selection(&mut self, pos_init: Vec2, pos: Vec2) {
+    pub fn move_selection(&mut self, pos_init: Vec2, pos: Vec2, shift_pressed: bool) {
         use ShapeKind::*;
         match &mut self.cshape_kind {
-            Rectangle(sh) => sh.move_position(pos_init, pos),
-            RectangleRounded(sh) => sh.move_position(pos_init, pos),
-            Disc(sh) => sh.move_position(pos_init, pos),
-            Oblong(sh) => sh.move_position(pos_init, pos),
+            Rectangle(sh) => sh.move_position(pos_init, pos, shift_pressed),
+            RectangleRounded(sh) => sh.move_position(pos_init, pos, shift_pressed),
+            Disc(sh) => sh.move_position(pos_init, pos, shift_pressed),
+            Oblong(sh) => sh.move_position(pos_init, pos, shift_pressed),
         }
     }
 
