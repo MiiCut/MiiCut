@@ -10,7 +10,7 @@ use crate::{
     dimensions::{DimKind, Dimension},
     math::*,
     positions::Position,
-    prefab::magnet_path,
+    prefab::*,
     shape_disc::HighLightOrSelect,
     shapes::{ShapeKind, Shapes},
 };
@@ -33,7 +33,6 @@ pub struct ShapeRectRounded {
     rad_tr_center: Position,
     rad_br_center: Position,
     rad_bl_center: Position,
-    center: Position,
 
     highlighted: bool,
     selected: bool,
@@ -47,7 +46,7 @@ impl ShapeRectRounded {
 
     fn update_polygon(&mut self) {
         log!("calc rect rounded polygon");
-        self.segs = calc_segs(self.get_paths_patterns());
+        self.segs = calc_segs(self.get_paths_and_patterns());
         self.polygon = calc_polygon(&self.segs);
     }
     fn get_radii(&self) -> RoundedRectRadii {
@@ -63,7 +62,7 @@ impl ShapeRectRounded {
         let tr = self.tr.get_pos();
         let br = self.br.get_pos();
         let bl = self.bl.get_pos();
-        let center = self.center.get_pos();
+        let center = (tl + br) / 2.;
         (center.x - tl.x)
             .abs()
             .min((center.y - tl.y).abs())
@@ -149,12 +148,7 @@ impl ShapeRectRounded {
         );
         self.rad_bl_center.set_pos(rad_bl_center_pos);
     }
-    fn update_center(&mut self) {
-        self.center
-            .set_pos((self.tl.get_pos() + self.br.get_pos()) / 2.);
-    }
 }
-
 impl Display for ShapeRectRounded {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Rounded rectangle")
@@ -249,13 +243,13 @@ impl Shapes for ShapeRectRounded {
             rad_tr_center,
             rad_br_center,
             rad_bl_center,
-            center: Position::new((pos1 + pos2) / 2., true),
             highlighted: false,
             selected: false,
             segs: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
     }
+
     fn good_size(&self) -> bool {
         ((self.tl.get_pos().x - self.br.get_pos().x).abs() >= ShapeRectRounded::MIN_SIZE)
             && ((self.tl.get_pos().y - self.br.get_pos().y).abs() >= ShapeRectRounded::MIN_SIZE)
@@ -269,7 +263,6 @@ impl Shapes for ShapeRectRounded {
         self.right.save_pos();
         self.bottom.save_pos();
         self.left.save_pos();
-        self.center.save_pos();
 
         self.rad_tl_center.save_pos();
         self.rad_tr_center.save_pos();
@@ -278,19 +271,6 @@ impl Shapes for ShapeRectRounded {
     }
     fn toggle_prop(&mut self) {
         ()
-    }
-    fn get_paths_patterns(&self) -> Vec<(BezPath, Pattern)> {
-        if self.good_size() {
-            vec![(
-                self.get_rectangle_rounded().to_path(Self::TOLERANCE),
-                self.get_pattern(self.selected, self.highlighted),
-            )]
-        } else {
-            vec![(BezPath::new(), Pattern::BasicNormal)]
-        }
-    }
-    fn get_polygon(&self) -> Polygon<f64> {
-        self.polygon.clone()
     }
     fn hors_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
         match hors {
@@ -301,19 +281,6 @@ impl Shapes for ShapeRectRounded {
             HighLightOrSelect::Select => {
                 self.selected = self.contains(pos.to_point());
                 self.selected
-            }
-        }
-    }
-    fn hors_center_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
-        let center_hors = (pos - self.center.get_pos()).hypot() < Self::GRAB;
-        match hors {
-            HighLightOrSelect::Highlight => {
-                self.center.highlight(center_hors);
-                center_hors
-            }
-            HighLightOrSelect::Select => {
-                self.center.select(center_hors);
-                center_hors
             }
         }
     }
@@ -395,12 +362,6 @@ impl Shapes for ShapeRectRounded {
             HighLightOrSelect::Select => self.selected = value,
         }
     }
-    fn set_hors_center(&mut self, value: bool, hors: HighLightOrSelect) {
-        match hors {
-            HighLightOrSelect::Highlight => self.center.highlight(value),
-            HighLightOrSelect::Select => self.center.select(value),
-        }
-    }
     fn set_hors_modifiers(&mut self, value: bool, hors: HighLightOrSelect) {
         match hors {
             HighLightOrSelect::Highlight => {
@@ -439,14 +400,8 @@ impl Shapes for ShapeRectRounded {
             HighLightOrSelect::Select => self.selected,
         }
     }
-    fn is_center_hors(&self, hors: HighLightOrSelect) -> bool {
-        match hors {
-            HighLightOrSelect::Highlight => self.center.is_highlighted(),
-            HighLightOrSelect::Select => self.center.is_selected(),
-        }
-    }
     fn get_position(&self) -> Vec2 {
-        self.center.get_pos()
+        (self.tl.get_pos() + self.tr.get_pos()) / 2.
     }
     fn move_position(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) {
         let tl_saved = self.tl.get_saved_pos();
@@ -457,7 +412,6 @@ impl Shapes for ShapeRectRounded {
         let right_saved = self.right.get_saved_pos();
         let bottom_saved = self.bottom.get_saved_pos();
         let left_saved = self.left.get_saved_pos();
-        let center_saved = self.center.get_saved_pos();
         let rad_tl_center_saved = self.rad_tl_center.get_saved_pos();
         let rad_tr_center_saved = self.rad_tr_center.get_saved_pos();
         let rad_br_center_saved = self.rad_br_center.get_saved_pos();
@@ -481,7 +435,6 @@ impl Shapes for ShapeRectRounded {
         const RAD_MIN_SIZE: f64 = ShapeRectRounded::RAD_MIN_SIZE;
 
         if self.selected {
-            self.center.set_pos(center_saved + dpos);
             self.tl.set_pos(tl_saved + dpos);
             self.tr.set_pos(tr_saved + dpos);
             self.br.set_pos(br_saved + dpos);
@@ -535,7 +488,6 @@ impl Shapes for ShapeRectRounded {
             if modified {
                 self.update_edges_modifiers();
                 self.update_radii();
-                self.update_center();
                 self.update_polygon();
                 return;
             }
@@ -586,7 +538,6 @@ impl Shapes for ShapeRectRounded {
             if modified {
                 self.update_outer_modifiers();
                 self.update_radii();
-                self.update_center();
                 self.update_polygon();
                 return;
             }
@@ -596,7 +547,7 @@ impl Shapes for ShapeRectRounded {
                 (true, false, false, false) => {
                     let (mut proj, dir) = project_to_segment_with_direction(
                         self.tl.get_pos(),
-                        self.center.get_pos(),
+                        (self.tl.get_pos() + self.tr.get_pos()) / 2.,
                         dpos,
                     );
                     proj /= 2_f64.sqrt();
@@ -614,7 +565,7 @@ impl Shapes for ShapeRectRounded {
                 (false, true, false, false) => {
                     let (mut proj, dir) = project_to_segment_with_direction(
                         self.tr.get_pos(),
-                        self.center.get_pos(),
+                        (self.tl.get_pos() + self.tr.get_pos()) / 2.,
                         dpos,
                     );
                     proj /= 2_f64.sqrt();
@@ -632,7 +583,7 @@ impl Shapes for ShapeRectRounded {
                 (false, false, true, false) => {
                     let (mut proj, dir) = project_to_segment_with_direction(
                         self.br.get_pos(),
-                        self.center.get_pos(),
+                        (self.tl.get_pos() + self.tr.get_pos()) / 2.,
                         dpos,
                     );
                     proj /= 2_f64.sqrt();
@@ -650,7 +601,7 @@ impl Shapes for ShapeRectRounded {
                 (false, false, false, true) => {
                     let (mut proj, dir) = project_to_segment_with_direction(
                         self.bl.get_pos(),
-                        self.center.get_pos(),
+                        (self.tl.get_pos() + self.tr.get_pos()) / 2.,
                         dpos,
                     );
                     proj /= 2_f64.sqrt();
@@ -672,12 +623,12 @@ impl Shapes for ShapeRectRounded {
             }
         }
     }
-    fn get_magnets_paths(&self) -> Vec<(BezPath, Pattern)> {
+
+    fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)> {
         let tl = self.tl.get_pos();
         let tr = self.tr.get_pos();
         let br = self.br.get_pos();
         let bl = self.bl.get_pos();
-        let center = self.center.get_pos();
         let rad_tl_center = tl + self.rad_tl_center.get_pos();
         let rad_tr_center = tr + self.rad_tr_center.get_pos();
         let rad_br_center = br + self.rad_br_center.get_pos();
@@ -689,68 +640,72 @@ impl Shapes for ShapeRectRounded {
 
         vec![
             (
-                magnet_path(tl, 1., ShapeRectRounded::GRAB),
+                modifiers_path(tl, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(self.tl.is_selected(), self.tl.is_highlighted()),
             ),
             (
-                magnet_path(tr, 1., ShapeRectRounded::GRAB),
+                modifiers_path(tr, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(self.tr.is_selected(), self.tr.is_highlighted()),
             ),
             (
-                magnet_path(br, 1., ShapeRectRounded::GRAB),
+                modifiers_path(br, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(self.br.is_selected(), self.br.is_highlighted()),
             ),
             (
-                magnet_path(bl, 1., ShapeRectRounded::GRAB),
+                modifiers_path(bl, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(self.bl.is_selected(), self.bl.is_highlighted()),
             ),
             (
-                magnet_path(top, 1., ShapeRectRounded::GRAB),
+                modifiers_path(top, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(self.top.is_selected(), self.top.is_highlighted()),
             ),
             (
-                magnet_path(right, 1., ShapeRectRounded::GRAB),
+                modifiers_path(right, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(self.right.is_selected(), self.right.is_highlighted()),
             ),
             (
-                magnet_path(bottom, 1., ShapeRectRounded::GRAB),
+                modifiers_path(bottom, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(self.bottom.is_selected(), self.bottom.is_highlighted()),
             ),
             (
-                magnet_path(left, 1., ShapeRectRounded::GRAB),
+                modifiers_path(left, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(self.left.is_selected(), self.left.is_highlighted()),
             ),
             (
-                magnet_path(center, 1., ShapeRectRounded::GRAB),
-                self.get_pattern_modifiers(self.center.is_selected(), self.center.is_highlighted()),
-            ),
-            (
-                magnet_path(rad_tl_center, 1., ShapeRectRounded::GRAB),
+                modifiers_path(rad_tl_center, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(
                     self.rad_tl_center.is_selected(),
                     self.rad_tl_center.is_highlighted(),
                 ),
             ),
             (
-                magnet_path(rad_tr_center, 1., ShapeRectRounded::GRAB),
+                modifiers_path(rad_tr_center, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(
                     self.rad_tr_center.is_selected(),
                     self.rad_tr_center.is_highlighted(),
                 ),
             ),
             (
-                magnet_path(rad_br_center, 1., ShapeRectRounded::GRAB),
+                modifiers_path(rad_br_center, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(
                     self.rad_br_center.is_selected(),
                     self.rad_br_center.is_highlighted(),
                 ),
             ),
             (
-                magnet_path(rad_bl_center, 1., ShapeRectRounded::GRAB),
+                modifiers_path(rad_bl_center, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(
                     self.rad_bl_center.is_selected(),
                     self.rad_bl_center.is_highlighted(),
                 ),
+            ),
+            (
+                center_path(
+                    (self.tl.get_pos() + self.br.get_pos()) / 2.,
+                    1.,
+                    ShapeRectRounded::GRAB,
+                ),
+                self.get_pattern_modifiers(self.selected, self.highlighted),
             ),
         ]
     }
@@ -766,6 +721,21 @@ impl Shapes for ShapeRectRounded {
         paths.push(path);
         texts.push(text);
         (paths, texts)
+    }
+
+    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
+        if self.good_size() {
+            vec![(
+                self.get_rectangle_rounded().to_path(Self::TOLERANCE),
+                self.get_pattern(self.selected, self.highlighted),
+            )]
+        } else {
+            vec![(BezPath::new(), Pattern::BasicNormal)]
+        }
+    }
+
+    fn get_polygon(&self) -> Polygon<f64> {
+        self.polygon.clone()
     }
 }
 

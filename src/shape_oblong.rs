@@ -10,7 +10,7 @@ use crate::{
     dimensions::{DimKind, Dimension},
     math::*,
     positions::Position,
-    prefab::magnet_path,
+    prefab::{center_path, modifiers_path},
     shape_disc::HighLightOrSelect,
     shapes::{ShapeKind, Shapes},
 };
@@ -24,7 +24,6 @@ use std::{
 pub struct ShapeOblong {
     start: Position,
     end: Position,
-    center: Position,
     middle_up: Position,
     middle_down: Position,
 
@@ -40,7 +39,7 @@ impl ShapeOblong {
 
     fn update_polygon(&mut self) {
         log!("calc oblong polygon");
-        self.segs = calc_segs(self.get_paths_patterns());
+        self.segs = calc_segs(self.get_paths_and_patterns());
         self.polygon = calc_polygon(&self.segs);
     }
     fn get_width(&self) -> f64 {
@@ -80,18 +79,6 @@ impl ShapeOblong {
         } else {
             Line::new(end_arc_points.1.to_point(), start_arc_points.0.to_point())
         }
-    }
-    // fn get_segs_all(&self) -> BezPath {
-    //     let mut segs = BezPath::new();
-    //     segs.extend(self.get_segs(self.get_line(true).to_path(ShapeOblong::TOLERANCE)));
-    //     segs.extend(self.get_segs(self.get_arc(false).to_path(ShapeOblong::TOLERANCE)));
-    //     segs.extend(self.get_segs(self.get_line(false).to_path(ShapeOblong::TOLERANCE)));
-    //     segs.extend(self.get_segs(self.get_arc(true).to_path(ShapeOblong::TOLERANCE)));
-    //     segs
-    // }
-    fn update_center(&mut self) {
-        self.center
-            .set_pos((self.start.get_pos() + self.end.get_pos()) / 2.);
     }
 }
 impl Display for ShapeOblong {
@@ -151,7 +138,6 @@ impl Shapes for ShapeOblong {
         let start = Position::new(pos1, true);
         let mut end = Position::new(pos2, true);
         end.select(true);
-        let center = Position::new((pos1 + pos2) / 2., false);
         let width = 10.;
         let middle_up = Position::new(
             get_middle_from_start_end_positions(start.get_pos(), end.get_pos(), width, true),
@@ -165,7 +151,6 @@ impl Shapes for ShapeOblong {
         ShapeKind::Oblong(ShapeOblong {
             start,
             end,
-            center,
             middle_up,
             middle_down,
             highlighted: false,
@@ -174,6 +159,7 @@ impl Shapes for ShapeOblong {
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
     }
+
     fn good_size(&self) -> bool {
         self.get_width() >= ShapeOblong::MIN_WIDTH_SIZE - 0.1
             && self.get_length() >= ShapeOblong::MIN_LENGTH_SIZE - 0.1
@@ -181,36 +167,11 @@ impl Shapes for ShapeOblong {
     fn save_pos(&mut self) {
         self.start.save_pos();
         self.end.save_pos();
-        self.center.save_pos();
         self.middle_up.save_pos();
         self.middle_down.save_pos();
     }
     fn toggle_prop(&mut self) {
         ()
-    }
-    fn get_paths_patterns(&self) -> Vec<(BezPath, Pattern)> {
-        let mut paths: Vec<(BezPath, Pattern)> = vec![];
-        paths.push((
-            self.get_line(true).to_path(ShapeOblong::TOLERANCE),
-            self.get_pattern(self.selected, self.highlighted),
-        ));
-        paths.push((
-            self.get_arc(false).to_path(ShapeOblong::TOLERANCE),
-            self.get_pattern(self.selected, self.highlighted),
-        ));
-
-        paths.push((
-            self.get_line(false).to_path(ShapeOblong::TOLERANCE),
-            self.get_pattern(self.selected, self.highlighted),
-        ));
-        paths.push((
-            self.get_arc(true).to_path(ShapeOblong::TOLERANCE),
-            self.get_pattern(self.selected, self.highlighted),
-        ));
-        paths
-    }
-    fn get_polygon(&self) -> Polygon<f64> {
-        self.polygon.clone()
     }
     fn hors_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
         match hors {
@@ -224,23 +185,9 @@ impl Shapes for ShapeOblong {
             }
         }
     }
-    fn hors_center_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
-        let center_hors = (pos - self.center.get_pos()).hypot() < Self::GRAB;
-        match hors {
-            HighLightOrSelect::Highlight => {
-                self.center.highlight(center_hors);
-                center_hors
-            }
-            HighLightOrSelect::Select => {
-                self.center.select(center_hors);
-                center_hors
-            }
-        }
-    }
     fn hors_modifiers_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
         let start_hors = (pos - self.start.get_pos()).hypot() < Self::GRAB;
         let end_hors = (pos - self.end.get_pos()).hypot() < Self::GRAB;
-        let center_hors = (pos - self.center.get_pos()).hypot() < Self::GRAB;
         let middle_up_hors = (pos - self.middle_up.get_pos()).hypot() < Self::GRAB;
         let middle_down_hors = (pos - self.middle_down.get_pos()).hypot() < Self::GRAB;
 
@@ -248,24 +195,20 @@ impl Shapes for ShapeOblong {
             HighLightOrSelect::Highlight => {
                 self.start.highlight(start_hors);
                 self.end.highlight(end_hors);
-                self.center.highlight(center_hors);
                 self.middle_up.highlight(middle_up_hors);
                 self.middle_down.highlight(middle_down_hors);
                 self.start.is_highlighted()
                     || self.end.is_highlighted()
-                    || self.center.is_highlighted()
                     || self.middle_up.is_highlighted()
                     || self.middle_down.is_highlighted()
             }
             HighLightOrSelect::Select => {
                 self.start.select(start_hors);
                 self.end.select(end_hors);
-                self.center.select(center_hors);
                 self.middle_up.select(middle_up_hors);
                 self.middle_down.select(middle_down_hors);
                 self.start.is_selected()
                     || self.end.is_selected()
-                    || self.center.is_selected()
                     || self.middle_up.is_selected()
                     || self.middle_down.is_selected()
             }
@@ -275,12 +218,6 @@ impl Shapes for ShapeOblong {
         match hors {
             HighLightOrSelect::Highlight => self.highlighted = value,
             HighLightOrSelect::Select => self.selected = value,
-        }
-    }
-    fn set_hors_center(&mut self, value: bool, hors: HighLightOrSelect) {
-        match hors {
-            HighLightOrSelect::Highlight => self.center.highlight(value),
-            HighLightOrSelect::Select => self.center.select(value),
         }
     }
     fn set_hors_modifiers(&mut self, value: bool, hors: HighLightOrSelect) {
@@ -305,22 +242,15 @@ impl Shapes for ShapeOblong {
             HighLightOrSelect::Select => self.selected,
         }
     }
-    fn is_center_hors(&self, hors: HighLightOrSelect) -> bool {
-        match hors {
-            HighLightOrSelect::Highlight => self.center.is_highlighted(),
-            HighLightOrSelect::Select => self.center.is_selected(),
-        }
-    }
     fn get_position(&self) -> Vec2 {
-        self.center.get_pos()
+        (self.start.get_pos() + self.end.get_pos()) / 2.
     }
     fn move_position(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) {
         let start_saved = self.start.get_saved_pos();
         let end_saved = self.end.get_saved_pos();
-        let center_saved = self.center.get_saved_pos();
         let middle_up_saved = self.middle_up.get_saved_pos();
         let middle_down_saved = self.middle_down.get_saved_pos();
-
+        let center_saved = (start_saved + end_saved) / 2.;
         let start_sel = self.start.is_selected();
         let end_sel = self.end.is_selected();
         let middle_up_sel = self.middle_up.is_selected();
@@ -332,7 +262,6 @@ impl Shapes for ShapeOblong {
         if self.selected {
             self.start.set_pos(start_saved + dpos);
             self.end.set_pos(end_saved + dpos);
-            self.center.set_pos(center_saved + dpos);
             self.middle_up.set_pos(middle_up_saved + dpos);
             self.middle_down.set_pos(middle_down_saved + dpos);
             self.update_polygon();
@@ -357,7 +286,6 @@ impl Shapes for ShapeOblong {
                         );
                         self.middle_up.set_pos(middle_up);
                         self.middle_down.set_pos(middle_down);
-                        self.update_center();
                         self.update_polygon();
                     }
                 }
@@ -380,7 +308,6 @@ impl Shapes for ShapeOblong {
                         );
                         self.middle_up.set_pos(middle_up);
                         self.middle_down.set_pos(middle_down);
-                        self.update_center();
                         self.update_polygon();
                     }
                 }
@@ -403,7 +330,6 @@ impl Shapes for ShapeOblong {
                             end_saved,
                             middle_up,
                         ));
-                        self.update_center();
                         self.update_polygon();
                     }
                 }
@@ -429,7 +355,6 @@ impl Shapes for ShapeOblong {
                             end_saved,
                             middle_down,
                         ));
-                        self.update_center();
                         self.update_polygon();
                     }
                 }
@@ -437,46 +362,88 @@ impl Shapes for ShapeOblong {
             }
         }
     }
-    fn get_magnets_paths(&self) -> Vec<(BezPath, Pattern)> {
+
+    fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)> {
         vec![
             (
-                magnet_path(self.start.get_pos(), 1., ShapeOblong::GRAB),
+                modifiers_path(self.start.get_pos(), 1., ShapeOblong::GRAB),
                 self.get_pattern_modifiers(self.start.is_selected(), self.start.is_highlighted()),
             ),
             (
-                magnet_path(self.end.get_pos(), 1., ShapeOblong::GRAB),
+                modifiers_path(self.end.get_pos(), 1., ShapeOblong::GRAB),
                 self.get_pattern_modifiers(self.end.is_selected(), self.end.is_highlighted()),
             ),
             (
-                magnet_path(self.center.get_pos(), 1., ShapeOblong::GRAB),
-                self.get_pattern_modifiers(self.center.is_selected(), self.center.is_highlighted()),
-            ),
-            (
-                magnet_path(self.middle_up.get_pos(), 1., ShapeOblong::GRAB),
+                modifiers_path(self.middle_up.get_pos(), 1., ShapeOblong::GRAB),
                 self.get_pattern_modifiers(
                     self.middle_up.is_selected(),
                     self.middle_up.is_highlighted(),
                 ),
             ),
             (
-                magnet_path(self.middle_down.get_pos(), 1., ShapeOblong::GRAB),
+                modifiers_path(self.middle_down.get_pos(), 1., ShapeOblong::GRAB),
                 self.get_pattern_modifiers(
                     self.middle_down.is_selected(),
                     self.middle_down.is_highlighted(),
                 ),
+            ),
+            (
+                center_path(
+                    (self.start.get_pos() + self.end.get_pos()) / 2.,
+                    1.,
+                    ShapeOblong::GRAB,
+                ),
+                self.get_pattern_modifiers(self.selected, self.highlighted),
             ),
         ]
     }
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         let mut paths = vec![];
         let mut texts = vec![];
+
         let mut dim = Dimension::new(DimKind::Linear, self.start.get_pos(), self.end.get_pos());
         dim.set_dim_offset(self.get_width() / 2. + 10.);
         let (path, text) = dim.get_path();
-
         paths.push(path);
         texts.push(text);
+
+        let mut dim = Dimension::new(
+            DimKind::Linear,
+            self.middle_up.get_pos(),
+            self.middle_down.get_pos(),
+        );
+        dim.set_dim_offset(10.);
+        let (path, text) = dim.get_path();
+        paths.push(path);
+        texts.push(text);
+
         (paths, texts)
+    }
+
+    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
+        let mut paths: Vec<(BezPath, Pattern)> = vec![];
+        paths.push((
+            self.get_line(true).to_path(ShapeOblong::TOLERANCE),
+            self.get_pattern(self.selected, self.highlighted),
+        ));
+        paths.push((
+            self.get_arc(false).to_path(ShapeOblong::TOLERANCE),
+            self.get_pattern(self.selected, self.highlighted),
+        ));
+
+        paths.push((
+            self.get_line(false).to_path(ShapeOblong::TOLERANCE),
+            self.get_pattern(self.selected, self.highlighted),
+        ));
+        paths.push((
+            self.get_arc(true).to_path(ShapeOblong::TOLERANCE),
+            self.get_pattern(self.selected, self.highlighted),
+        ));
+        paths
+    }
+
+    fn get_polygon(&self) -> Polygon<f64> {
+        self.polygon.clone()
     }
 }
 #[doc(hidden)]

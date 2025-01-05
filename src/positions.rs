@@ -89,3 +89,29 @@ impl Position {
         self.pos.y == self.saved_pos.y
     }
 }
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Pointer {
+    pos: Position,
+    active: bool,
+}
+impl Pointer {
+    pub fn new() -> Pointer {
+        Pointer {
+            pos: Position::new(Vec2::ZERO, false),
+            active: false,
+        }
+    }
+    pub fn get_pos(&self) -> Vec2 {
+        self.pos.get_pos()
+    }
+    pub fn set_pos(&mut self, pos: Vec2) {
+        self.pos.set_pos(pos);
+    }
+    pub fn set_active(&mut self, value: bool) {
+        self.active = value;
+    }
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+}

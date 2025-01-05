@@ -10,7 +10,7 @@ use crate::{
     dimensions::{DimKind, Dimension},
     math::*,
     positions::Position,
-    prefab::magnet_path,
+    prefab::{center_path, modifiers_path},
     shape_disc::HighLightOrSelect,
     shapes::{ShapeKind, Shapes},
 };
@@ -27,7 +27,6 @@ pub struct ShapeRectangle {
     right: Position,
     bottom: Position,
     left: Position,
-    center: Position,
 
     highlighted: bool,
     selected: bool,
@@ -40,7 +39,7 @@ impl ShapeRectangle {
 
     fn update_polygon(&mut self) {
         log!("calc rect polygon");
-        self.segs = calc_segs(self.get_paths_patterns());
+        self.segs = calc_segs(self.get_paths_and_patterns());
         self.polygon = calc_polygon(&self.segs);
     }
     fn update_edges_positions(&mut self) {
@@ -52,10 +51,6 @@ impl ShapeRectangle {
             .set_pos((self.br.get_pos() + self.bl.get_pos()) / 2.);
         self.left
             .set_pos((self.bl.get_pos() + self.tl.get_pos()) / 2.);
-    }
-    fn update_center(&mut self) {
-        self.center
-            .set_pos((self.tl.get_pos() + self.br.get_pos()) / 2.);
     }
     fn get_rectangle(&self) -> Rect {
         let tl_pos = self.tl.get_pos();
@@ -117,13 +112,13 @@ impl Shapes for ShapeRectangle {
             right: Position::new((pos1 + pos2) / 2., true),
             bottom: Position::new((pos1 + pos2) / 2., true),
             left: Position::new((pos1 + pos2) / 2., true),
-            center: Position::new((pos1 + pos2) / 2., true),
             highlighted: false,
             selected: false,
             segs: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
     }
+
     fn good_size(&self) -> bool {
         (self.tl.get_pos().x - self.br.get_pos().x).abs() >= ShapeRectangle::MIN_SIZE
             && (self.tl.get_pos().y - self.br.get_pos().y).abs() >= ShapeRectangle::MIN_SIZE
@@ -137,11 +132,11 @@ impl Shapes for ShapeRectangle {
         self.right.save_pos();
         self.bottom.save_pos();
         self.left.save_pos();
-        self.center.save_pos();
     }
     fn toggle_prop(&mut self) {
         ()
     }
+
     fn hors_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
         match hors {
             HighLightOrSelect::Highlight => {
@@ -154,19 +149,7 @@ impl Shapes for ShapeRectangle {
             }
         }
     }
-    fn hors_center_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
-        let center_hors = (pos - self.center.get_pos()).hypot() < Self::GRAB;
-        match hors {
-            HighLightOrSelect::Highlight => {
-                self.center.highlight(center_hors);
-                self.center.is_highlighted()
-            }
-            HighLightOrSelect::Select => {
-                self.center.select(center_hors);
-                self.center.is_selected()
-            }
-        }
-    }
+
     fn hors_modifiers_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
         let tl_hors = (pos - self.tl.get_pos()).hypot() < Self::GRAB;
         let tr_hors = (pos - self.tr.get_pos()).hypot() < Self::GRAB;
@@ -221,12 +204,6 @@ impl Shapes for ShapeRectangle {
             HighLightOrSelect::Select => self.selected = value,
         }
     }
-    fn set_hors_center(&mut self, value: bool, hors: HighLightOrSelect) {
-        match hors {
-            HighLightOrSelect::Highlight => self.center.highlight(value),
-            HighLightOrSelect::Select => self.center.select(value),
-        }
-    }
     fn set_hors_modifiers(&mut self, value: bool, hors: HighLightOrSelect) {
         match hors {
             HighLightOrSelect::Highlight => {
@@ -257,14 +234,8 @@ impl Shapes for ShapeRectangle {
             HighLightOrSelect::Select => self.selected,
         }
     }
-    fn is_center_hors(&self, hors: HighLightOrSelect) -> bool {
-        match hors {
-            HighLightOrSelect::Highlight => self.center.is_highlighted(),
-            HighLightOrSelect::Select => self.center.is_selected(),
-        }
-    }
     fn get_position(&self) -> Vec2 {
-        self.center.get_pos()
+        (self.tl.get_pos() + self.br.get_pos()) / 2.
     }
     fn move_position(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) {
         let tl_saved = self.tl.get_saved_pos();
@@ -275,7 +246,6 @@ impl Shapes for ShapeRectangle {
         let right_saved = self.right.get_saved_pos();
         let bottom_saved = self.bottom.get_saved_pos();
         let left_saved = self.left.get_saved_pos();
-        let center_saved = self.center.get_saved_pos();
         let tl_sel = self.tl.is_selected();
         let tr_sel = self.tr.is_selected();
         let br_sel = self.br.is_selected();
@@ -287,7 +257,6 @@ impl Shapes for ShapeRectangle {
         let dpos = pos - pos_init;
         const MIN_SIZE: f64 = ShapeRectangle::MIN_SIZE;
         if self.selected {
-            self.center.set_pos(center_saved + dpos);
             self.tl.set_pos(tl_saved + dpos);
             self.tr.set_pos(tr_saved + dpos);
             self.br.set_pos(br_saved + dpos);
@@ -339,7 +308,6 @@ impl Shapes for ShapeRectangle {
             };
             if modified {
                 self.update_edges_positions();
-                self.update_center();
                 self.update_polygon();
                 return;
             }
@@ -380,50 +348,53 @@ impl Shapes for ShapeRectangle {
             };
             if modified {
                 self.update_edges_positions();
-                self.update_center();
                 self.update_polygon();
                 return;
             }
         }
     }
 
-    fn get_magnets_paths(&self) -> Vec<(BezPath, Pattern)> {
+    fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)> {
         vec![
             (
-                magnet_path(self.tl.get_pos(), 1., ShapeRectangle::GRAB),
+                modifiers_path(self.tl.get_pos(), 1., ShapeRectangle::GRAB),
                 self.get_pattern_modifiers(self.tl.is_selected(), self.tl.is_highlighted()),
             ),
             (
-                magnet_path(self.tr.get_pos(), 1., ShapeRectangle::GRAB),
+                modifiers_path(self.tr.get_pos(), 1., ShapeRectangle::GRAB),
                 self.get_pattern_modifiers(self.tr.is_selected(), self.tr.is_highlighted()),
             ),
             (
-                magnet_path(self.br.get_pos(), 1., ShapeRectangle::GRAB),
+                modifiers_path(self.br.get_pos(), 1., ShapeRectangle::GRAB),
                 self.get_pattern_modifiers(self.br.is_selected(), self.br.is_highlighted()),
             ),
             (
-                magnet_path(self.bl.get_pos(), 1., ShapeRectangle::GRAB),
+                modifiers_path(self.bl.get_pos(), 1., ShapeRectangle::GRAB),
                 self.get_pattern_modifiers(self.bl.is_selected(), self.bl.is_highlighted()),
             ),
             (
-                magnet_path(self.top.get_pos(), 1., ShapeRectangle::GRAB),
+                modifiers_path(self.top.get_pos(), 1., ShapeRectangle::GRAB),
                 self.get_pattern_modifiers(self.top.is_selected(), self.top.is_highlighted()),
             ),
             (
-                magnet_path(self.right.get_pos(), 1., ShapeRectangle::GRAB),
+                modifiers_path(self.right.get_pos(), 1., ShapeRectangle::GRAB),
                 self.get_pattern_modifiers(self.right.is_selected(), self.right.is_highlighted()),
             ),
             (
-                magnet_path(self.bottom.get_pos(), 1., ShapeRectangle::GRAB),
+                modifiers_path(self.bottom.get_pos(), 1., ShapeRectangle::GRAB),
                 self.get_pattern_modifiers(self.bottom.is_selected(), self.bottom.is_highlighted()),
             ),
             (
-                magnet_path(self.left.get_pos(), 1., ShapeRectangle::GRAB),
+                modifiers_path(self.left.get_pos(), 1., ShapeRectangle::GRAB),
                 self.get_pattern_modifiers(self.left.is_selected(), self.left.is_highlighted()),
             ),
             (
-                magnet_path(self.center.get_pos(), 1., ShapeRectangle::GRAB),
-                self.get_pattern_modifiers(self.center.is_selected(), self.center.is_highlighted()),
+                center_path(
+                    (self.tl.get_pos() + self.br.get_pos()) / 2.,
+                    1.,
+                    ShapeRectangle::GRAB,
+                ),
+                self.get_pattern_modifiers(self.selected, self.highlighted),
             ),
         ]
     }
@@ -440,23 +411,8 @@ impl Shapes for ShapeRectangle {
         texts.push(text);
         (paths, texts)
     }
-    fn get_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
-        match (selected, highlighted) {
-            (false, false) => Pattern::BasicNormal,
-            (false, true) => Pattern::BasicHighlighted,
-            (true, false) => Pattern::BasicSelected,
-            (true, true) => Pattern::BasicSelected,
-        }
-    }
-    fn get_pattern_modifiers(&self, selected: bool, highlighted: bool) -> Pattern {
-        match (selected, highlighted) {
-            (false, false) => Pattern::Modifiers,
-            (false, true) => Pattern::ModifiersHighlighted,
-            (true, false) => Pattern::ModifiersSelected,
-            (true, true) => Pattern::ModifiersSelected,
-        }
-    }
-    fn get_paths_patterns(&self) -> Vec<(BezPath, Pattern)> {
+
+    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
         if self.good_size() {
             vec![(
                 self.get_rectangle().to_path(Self::TOLERANCE),
@@ -466,6 +422,7 @@ impl Shapes for ShapeRectangle {
             vec![(BezPath::new(), Pattern::BasicNormal)]
         }
     }
+
     fn get_polygon(&self) -> Polygon<f64> {
         self.polygon.clone()
     }

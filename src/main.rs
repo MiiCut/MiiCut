@@ -24,9 +24,10 @@ use canvas::Pattern;
 use canvas::{CanvasKind, Canvases, DrawStyles};
 use geo::OpType;
 use kurbo::{Size, Vec2};
+use positions::Pointer;
 use shape_disc::HighLightOrSelect;
-use shapes_pool::CSPool;
 use shapes_pool::CShapeBuilder;
+use shapes_pool::ShapesPool;
 use shapes_pool::Shid;
 use std::collections::HashSet;
 use std::{
@@ -56,7 +57,7 @@ fn main() {
 
 #[allow(dead_code)]
 struct AppVars {
-    pool: CSPool,
+    pool: ShapesPool,
     on_creation: Option<Shid>,
 
     // DOM
@@ -79,7 +80,6 @@ struct AppVars {
     he_viewgrid_element: HtmlElement,
     he_snapgrid_element: HtmlElement,
 
-    // coords: Coords,
     magnet_angle: f64,
     grab_distance: f64,
     draw_cursor: Vec2,
@@ -88,6 +88,13 @@ struct AppVars {
     selection_area: Option<[Vec2; 2]>,
     keys_states: KeysStates,
     mouse: Mouse,
+
+    pointer: Pointer,
+
+    copied: Vec<Shid>,
+    to_paste: Vec<Shid>,
+
+    just_pasted: bool,
 
     styles: DrawStyles,
 }
@@ -191,7 +198,7 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     let styles = DrawStyles::build(styles)?;
 
     let app_vars = Rc::new(RefCell::new(AppVars {
-        pool: CSPool::new(),
+        pool: ShapesPool::new(),
         on_creation: None,
         window,
         document,
@@ -220,6 +227,12 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
         selection_area: None,
         keys_states: KeysStates::default(),
         mouse: Mouse::new(),
+
+        pointer: Pointer::new(),
+
+        copied: Vec::new(),
+        to_paste: Vec::new(),
+        just_pasted: false,
 
         styles,
     }));
@@ -499,30 +512,30 @@ fn hors_objects(
 ) {
     if avb.pool.set_hors_from_pos(cursor_pos, hors) {
         avb.pool.set_hors_modifiers(false, hors);
-        avb.pool.set_hors_centers(false, hors);
+        // avb.pool.set_hors_centers(false, hors);
     }
 
     if avb.pool.set_hors_modifiers_from_pos(cursor_pos, grab, hors) {
         avb.pool.set_hors(false, hors);
-        avb.pool.set_hors_centers(false, hors);
+        // avb.pool.set_hors_centers(false, hors);
     }
 
-    if avb.pool.set_center_hors_from_pos(cursor_pos, grab, hors) {
-        avb.pool.set_hors(false, hors);
-        avb.pool.set_hors_modifiers(false, hors);
-    }
+    // if avb.pool.set_center_hors_from_pos(cursor_pos, grab, hors) {
+    //     avb.pool.set_hors(false, hors);
+    //     avb.pool.set_hors_modifiers(false, hors);
+    // }
 }
 fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
     let grab = avb.grab_distance / avb.canvases.get_drawing_scale();
     let _magnet_angle = avb.magnet_angle;
     let icon_selected = avb.icon_selected.clone();
-
     match icon_selected {
         Icons::Arrow => match avb.mouse.get_mouse_state() {
             MouseState::LeftDown(cursor_pos) => {
+                avb.just_pasted = false;
                 avb.pool.set_hors(false, HighLightOrSelect::Select);
                 hors_objects(avb, cursor_pos, grab, HighLightOrSelect::Select);
-                if avb.keys_states.shift_pressed {
+                if avb.keys_states.crtl_pressed {
                     avb.pool.select_all_connected();
                 }
                 avb.pool.save_positions();
@@ -530,6 +543,8 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 Ok(())
             }
             MouseState::LeftDownMove(pos_dwn, cursor_pos) => {
+                avb.pointer.set_pos(cursor_pos);
+
                 let shift_pressed = avb.keys_states.shift_pressed;
                 avb.pool.move_selection(pos_dwn, cursor_pos, shift_pressed);
                 Ok(())
@@ -538,11 +553,29 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 avb.pool.recalc_full_segs();
                 Ok(())
             }
-            MouseState::LeftUpMove(_, cursor_pos) => {
-                hors_objects(avb, cursor_pos, grab, HighLightOrSelect::Highlight);
+            MouseState::LeftUpMove(pos_dwn, cursor_pos)
+            | MouseState::RightUpMove(pos_dwn, cursor_pos) => {
+                avb.pointer.set_pos(cursor_pos);
+                if avb.just_pasted {
+                    avb.pool.move_selection(pos_dwn, cursor_pos, false);
+                } else {
+                    hors_objects(avb, cursor_pos, grab, HighLightOrSelect::Highlight);
+                }
                 Ok(())
             }
-            MouseState::RightDown(_) => Ok(avb.canvases.save_drawing_offset()),
+            MouseState::RightDown(_) => {
+                if avb.just_pasted {
+                    let to_paste = avb.to_paste.clone();
+                    to_paste.into_iter().for_each(|shid| {
+                        avb.pool.delete_shape(shid.clone());
+                    });
+                    avb.to_paste.clear();
+                    avb.just_pasted = false;
+                    avb.pool.set_hors(false, HighLightOrSelect::Select);
+                }
+                avb.canvases.save_drawing_offset();
+                Ok(())
+            }
             MouseState::RightDownMove(pos_dwn, cursor_pos) => {
                 avb.canvases.move_drawing_offset(pos_dwn, cursor_pos);
                 draw_grid_and_rules(avb);
@@ -568,7 +601,6 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                             avb.pool.recalc_full_segs();
                         }
                         avb.on_creation = None;
-                        // go_to_arrow_tool(avb);
                         Ok(())
                     } else {
                         // B. We start drawing a new shape
@@ -579,7 +611,10 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     }
                 }
                 MouseState::LeftDownMove(pos_dwn, cursor_pos)
-                | MouseState::LeftUpMove(pos_dwn, cursor_pos) => {
+                | MouseState::LeftUpMove(pos_dwn, cursor_pos)
+                | MouseState::RightUpMove(pos_dwn, cursor_pos) => {
+                    avb.pointer.set_pos(cursor_pos);
+
                     if let Some(cshid) = avb.on_creation {
                         let shift_pressed = avb.keys_states.shift_pressed;
                         avb.pool.move_selection_from_shid(
@@ -622,20 +657,20 @@ fn on_mouse_move(av: RefAV, event: Event) {
     let drawing_scale = pam.canvases.get_drawing_scale();
     let offset_start_x = get_element_width(&pam.left_panel);
     let offset_start_y = get_element_height(&pam.top_menu);
-    if pam.mouse.update_mouse(
+    pam.mouse.update_mouse(
         offset_start_x,
         offset_start_y,
         drawing_offset,
         drawing_scale,
         &event,
         SystemMouse::Move,
-    ) {
-        if let Some(e) = update(&mut pam).err() {
-            log!("ERROR: {}", e);
-        }
-        update_status_bar(&mut pam);
-        render_drawing(&mut pam);
+    );
+    if let Some(e) = update(&mut pam).err() {
+        log!("ERROR: {}", e);
     }
+    update_status_bar(&mut pam);
+    render_drawing(&mut pam);
+
     drop(pam);
 }
 fn on_mouse_down(av: RefAV, event: Event) {
@@ -658,7 +693,7 @@ fn on_mouse_down(av: RefAV, event: Event) {
     if let Some(e) = update(&mut pam).err() {
         log!("ERROR: {}", e);
     }
-    update_status_bar(&mut pam);
+    // update_status_bar(&mut pam);
     render_drawing(&mut pam);
     drop(pam);
 }
@@ -719,51 +754,51 @@ fn on_mouse_wheel(av: RefAV, event: Event) {
     }
 }
 fn on_mouse_enter(av: RefAV, _event: Event) {
-    let mut _pam = av.borrow_mut();
-    // pam.mouse_state = MouseState::NoButton;
+    let mut avb = av.borrow_mut();
+    avb.pointer.set_active(true);
+    render_drawing(&mut avb);
+    drop(avb);
 }
 fn on_mouse_leave(av: RefAV, _event: Event) {
-    let mut _pam = av.borrow_mut();
-    // pam.mouse_state = MouseState::NoButton;
+    let mut avb = av.borrow_mut();
+    avb.pointer.set_active(false);
+    render_drawing(&mut avb);
+    drop(avb);
 }
 
-fn on_context_menu(av: RefAV, event: Event) {
+fn on_context_menu(_av: RefAV, event: Event) {
     // Prevent the default context menu from appearing
     event.prevent_default();
-    let mut pam = av.borrow_mut();
-    show_context_menu(&mut pam);
+    // let mut avb = av.borrow_mut();
 }
-fn show_context_menu(_avb: &mut RefMut<'_, AppVars>) {}
-fn _show_contex_menu_shape(pos: Vec2) {
-    // Display the context menu container
-    display_html_element(DOMElements::ContextMenuShape, true);
-    set_pos_html_element(DOMElements::ContextMenuShape, pos);
-
-    if let Some(_cm_shape) = DOMElements::ContextMenuShape.get_html_element() {
-        // Add a new context menu item
-        // add_menu_item_with_listener(&cm_shape, "cm-shape-new-item", "New Menu Item", || {
-        //     log!("New Menu Item clicked");
-        // });
-    }
-}
-/// Adds a new menu item to the context menu and attaches a click event listener
-fn _add_menu_item_with_listener<F>(menu: &web_sys::Element, id: &str, text: &str, callback: F)
-where
-    F: Fn() + 'static,
-{
-    let document = document();
-    // Create a new anchor element
-    let new_item = document.create_element("a").unwrap();
-    new_item.set_attribute("href", "#").unwrap();
-    new_item.set_id(id);
-    new_item.set_inner_html(text);
-
-    // Append the new item to the menu
-    menu.append_child(&new_item).unwrap();
-
-    // Add a click listener to the new item
-    add_click_listener(&new_item, callback);
-}
+// fn show_context_menu(_avb: &mut RefMut<'_, AppVars>) {}
+// fn _show_contex_menu_shape(pos: Vec2) {
+//     // Display the context menu container
+//     display_html_element(DOMElements::ContextMenuShape, true);
+//     set_pos_html_element(DOMElements::ContextMenuShape, pos);
+//     if let Some(_cm_shape) = DOMElements::ContextMenuShape.get_html_element() {
+//         // Add a new context menu item
+//         // add_menu_item_with_listener(&cm_shape, "cm-shape-new-item", "New Menu Item", || {
+//         //     log!("New Menu Item clicked");
+//         // });
+//     }
+// }
+// /// Adds a new menu item to the context menu and attaches a click event listener
+// fn _add_menu_item_with_listener<F>(menu: &web_sys::Element, id: &str, text: &str, callback: F)
+// where
+//     F: Fn() + 'static,
+// {
+//     let document = document();
+//     // Create a new anchor element
+//     let new_item = document.create_element("a").unwrap();
+//     new_item.set_attribute("href", "#").unwrap();
+//     new_item.set_id(id);
+//     new_item.set_inner_html(text);
+//     // Append the new item to the menu
+//     menu.append_child(&new_item).unwrap();
+//     // Add a click listener to the new item
+//     add_click_listener(&new_item, callback);
+// }
 
 ///////////////
 /// Settings panel events
@@ -853,12 +888,56 @@ fn on_window_keydown(av: RefAV, event: Event) {
             go_to_arrow_tool(&mut avb);
         }
         if keyboard_event.key() == "Control" || keyboard_event.key() == "Meta" {
+            log!("Control pressed");
             avb.keys_states.crtl_pressed = true;
         }
         if keyboard_event.key() == "Shift" {
             log!("Shift pressed");
             avb.keys_states.shift_pressed = true;
         }
+        if keyboard_event.key() == "Cmd" {
+            log!("Command pressed");
+            avb.keys_states.shift_pressed = true;
+        }
+        if keyboard_event.key() == "c" {
+            if avb.keys_states.crtl_pressed {
+                log!("ctrl-c pressed");
+                if let Icons::Arrow = avb.icon_selected.clone() {
+                    let selection = avb.pool.get_hors(HighLightOrSelect::Select);
+                    if selection.len() > 0 {
+                        avb.copied = selection;
+                    }
+                }
+            }
+        }
+        if keyboard_event.key() == "v" {
+            if avb.keys_states.crtl_pressed {
+                log!("ctrl-v pressed");
+                if let Icons::Arrow = avb.icon_selected.clone() {
+                    let shid_copied = avb.copied.clone();
+                    avb.to_paste.clear();
+                    shid_copied.into_iter().for_each(|shid_to_copy| {
+                        // Clone the copied shapes
+                        if let Some(cshape) = avb.pool.get_shape(shid_to_copy) {
+                            let (new_shid, cloned_shape) = CShapeBuilder::clone(cshape);
+                            avb.pool.add_shape(cloned_shape);
+                            avb.to_paste.push(new_shid);
+                        }
+                    });
+                    // Clear actual selection
+                    avb.pool.set_hors(false, HighLightOrSelect::Select);
+                    // Select the pasted shapes
+                    let to_paste = avb.to_paste.clone();
+                    to_paste.into_iter().for_each(|shid| {
+                        avb.pool
+                            .set_hors_from_shid(shid, true, HighLightOrSelect::Select);
+                    });
+                    // Tell update() that we just pasted
+                    avb.just_pasted = true;
+                }
+            }
+        }
+
         if keyboard_event.key() == "t" {
             if let Some(shid) = avb.on_creation {
                 if let Some(cshape) = avb.pool.get_shape_mut(shid) {
@@ -913,7 +992,7 @@ fn on_icon_click(av: RefAV, event: Event) {
                     avb.pool.set_hors(false, HighLightOrSelect::Select);
                     avb.pool
                         .set_hors_modifiers(false, HighLightOrSelect::Select);
-                    avb.pool.set_hors_centers(false, HighLightOrSelect::Select);
+                    // avb.pool.set_hors_centers(false, HighLightOrSelect::Select);
 
                     avb.user_icons
                         .iter()
@@ -1018,7 +1097,15 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
 
     // Draw dimensions
     for shape in avb.pool.values() {
-        let (path, texts) = shape.get_dimensions_paths();
-        avb.canvases.draw_path(&CanvasKind::Draw, path, texts);
+        if shape.get_hors(HighLightOrSelect::Select) || shape.get_hors(HighLightOrSelect::Highlight)
+        {
+            let (path, texts) = shape.get_dimensions_paths();
+            avb.canvases.draw_path(&CanvasKind::Draw, path, texts);
+        }
+    }
+
+    // Draw pointer
+    if avb.pointer.is_active() {
+        avb.canvases.draw_pointer(avb.pointer.get_pos());
     }
 }

@@ -172,10 +172,11 @@ impl Dimension {
     }
     fn get_radius_path(&self) -> ((BezPath, Pattern), CanvasText) {
         let mut path = kurbo::BezPath::new();
+        let end = self.end + (self.end - self.start).normalize() * 10.;
         let length = self.get_length();
         let text = CanvasText {
-            text: format!("{:.0}", length),
-            pos: Vec2::new(self.end.x + 2., self.end.y - 2.),
+            text: format!("{:.1}", length),
+            pos: Vec2::new(end.x + 2., end.y - 2.),
             pattern: Pattern::DimensionNormal,
             angle: 0.,
             align: Align::Left,
@@ -184,8 +185,9 @@ impl Dimension {
         };
 
         path.move_to(self.start.to_point());
-        path.line_to(self.end.to_point());
-        path.line_to(Vec2::new(self.end.x + 10., self.end.y).to_point());
+
+        path.line_to(end.to_point());
+        path.line_to(Vec2::new(end.x + 10., end.y).to_point());
 
         ((path, Pattern::DimensionNormal), text)
     }
@@ -197,7 +199,7 @@ impl Dimension {
         let unit_perp = unit_perpendicular(start, end, false);
         let unit_rot45 = rotate_vector(end - start, PI / 4.).normalize();
         let text = CanvasText {
-            text: format!("{:.1}", length),
+            text: format!("{:.2}", length),
             pos: self.get_center() + unit_perp * (self.dim_offset + 2.),
             pattern: Pattern::DimensionNormal,
             angle: self.get_text_angle(),

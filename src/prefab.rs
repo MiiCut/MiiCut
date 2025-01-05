@@ -51,18 +51,18 @@ pub fn arrow_down(pos: &Vec2, size: f64) -> BezPath {
     BezPath::from_vec(v)
 }
 
-pub fn cross(pos: &Vec2, size: f64) -> BezPath {
+pub fn center_path(pos: Vec2, _scale: f64, size: f64) -> BezPath {
     use PathEl::*;
     let v: Vec<PathEl> = vec![
-        MoveTo(pos.to_point() - (0., size / 2.)),
-        LineTo(pos.to_point() + (0., size / 2.)),
-        MoveTo(pos.to_point() - (size / 2., 0.)),
-        LineTo(pos.to_point() + (size / 2., 0.)),
+        MoveTo(pos.to_point() - (0., size)),
+        LineTo(pos.to_point() + (0., size)),
+        MoveTo(pos.to_point() - (size, 0.)),
+        LineTo(pos.to_point() + (size, 0.)),
     ];
     BezPath::from_vec(v)
 }
 
-pub fn magnet_path(pos: Vec2, scale: f64, size: f64) -> BezPath {
+pub fn modifiers_path(pos: Vec2, scale: f64, size: f64) -> BezPath {
     let tol = 0.01;
     let size = size;
     Circle::new(pos.to_point(), size / 2. / scale).to_path(tol)

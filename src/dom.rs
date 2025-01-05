@@ -226,8 +226,7 @@ impl Mouse {
         drawing_scale: f64,
         event: &Event,
         sys_mouse: SystemMouse,
-    ) -> bool {
-        let mut modified = false;
+    ) {
         if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
             if mouse_event.buttons() == JSMouseState::JSLeft as u16 {
                 self.mouse_button = MouseButton::Left;
@@ -248,7 +247,6 @@ impl Mouse {
             self.draw_pos = magnet_to_grid(&self.draw_pos);
             if self.draw_pos != self.last_draw_pos {
                 self.last_draw_pos = self.draw_pos;
-                modified = true;
             }
         }
 
@@ -265,7 +263,6 @@ impl Mouse {
                 self.moving = false;
             }
         }
-        modified
     }
 }
 

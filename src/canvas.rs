@@ -458,6 +458,32 @@ impl Canvases {
         }
     }
 
+    pub fn draw_pointer(&self, position: Vec2) {
+        let ctx = self.get_context(&CanvasKind::Draw);
+        let scale = self.get_drawing_scale();
+        let offset = self.get_drawing_offset();
+        let canvas_size = self.get_canvas_size();
+        let pos_canvas = to_canvas(position, scale, offset);
+
+        let (stroke_style, stroke_width, _) = self.styles.get_styles(Pattern::Rules);
+        ctx.set_line_dash(stroke_style).unwrap();
+        ctx.set_line_width(stroke_width);
+        let (fill_color, stroke_color) = self.styles.get_colors(Pattern::Rules);
+        ctx.set_stroke_style_str(stroke_color);
+        ctx.set_fill_style_str(fill_color);
+
+        ctx.set_font("14px Orbitron");
+        ctx.begin_path();
+
+        ctx.move_to(0., pos_canvas.y);
+        ctx.line_to(canvas_size.width, pos_canvas.y);
+        ctx.move_to(pos_canvas.x, 0.);
+        ctx.line_to(pos_canvas.x, canvas_size.height);
+        ctx.close_path();
+
+        ctx.stroke();
+    }
+
     pub fn get_main_canvas(&self) -> &HtmlCanvasElement {
         &self.c_main
     }
