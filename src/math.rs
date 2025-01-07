@@ -1022,16 +1022,11 @@ pub fn project_to_perpendicular_with_direction(p1: Vec2, p2: Vec2, q: Vec2) -> (
     (projection.hypot(), direction)
 }
 
-pub fn get_middle_from_start_end_positions(start: Vec2, end: Vec2, width: f64, up: bool) -> Vec2 {
+pub fn get_middle_from_start_end_positions(start: Vec2, end: Vec2, width: f64) -> Vec2 {
     let middle = (start + end) / 2.;
     let radius = width / 2.;
     let angle = (end - start).atan2();
-    let middle = if up {
-        middle + Vec2::from_angle(angle + FRAC_PI_2) * radius
-    } else {
-        middle + Vec2::from_angle(angle - FRAC_PI_2) * radius
-    };
-    middle
+    middle + Vec2::from_angle(angle + FRAC_PI_2) * radius
 }
 
 pub fn bez_path_to_geo_polygon(bez_path: &BezPath) -> Polygon<f64> {

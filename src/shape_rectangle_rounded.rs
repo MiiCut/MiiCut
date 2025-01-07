@@ -9,31 +9,33 @@ use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
-    positions::Position,
+    positions::{Modifier, Position, Value, HS},
     prefab::*,
-    shape_disc::HighLightOrSelect,
-    shapes::{ShapeKind, Shapes},
+    shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars, Shapes},
 };
 use geo::{LineString, Polygon};
 use kurbo::{
     BezPath, PathEl, Point, Rect, RoundedRect, RoundedRectPathIter, RoundedRectRadii, Shape, Vec2,
 };
 use std::fmt::Display;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeRectRounded {
     tl: Position,
-    tr: Position,
     br: Position,
-    bl: Position,
-    top: Position,
-    right: Position,
-    bottom: Position,
-    left: Position,
-    rad_tl_center: Position,
-    rad_tr_center: Position,
-    rad_br_center: Position,
-    rad_bl_center: Position,
+    radius_tl: Value,
+    radius_tr: Value,
+    radius_br: Value,
+    radius_bl: Value,
 
+    tr: Modifier,
+    bl: Modifier,
+    top: Modifier,
+    right: Modifier,
+    bottom: Modifier,
+    left: Modifier,
+
+    on_create: bool,
     highlighted: bool,
     selected: bool,
 
@@ -51,102 +53,74 @@ impl ShapeRectRounded {
     }
     fn get_radii(&self) -> RoundedRectRadii {
         RoundedRectRadii {
-            top_left: (self.rad_tl_center.get_pos()).hypot() / 2_f64.sqrt(),
-            top_right: (self.rad_tr_center.get_pos()).hypot() / 2_f64.sqrt(),
-            bottom_right: (self.rad_br_center.get_pos()).hypot() / 2_f64.sqrt(),
-            bottom_left: (self.rad_bl_center.get_pos()).hypot() / 2_f64.sqrt(),
+            top_left: self.radius_tl.get_val(),
+            top_right: self.radius_tr.get_val(),
+            bottom_right: self.radius_br.get_val(),
+            bottom_left: self.radius_bl.get_val(),
         }
     }
     fn get_max_radius_size(&self) -> f64 {
-        let tl = self.tl.get_pos();
-        let tr = self.tr.get_pos();
-        let br = self.br.get_pos();
-        let bl = self.bl.get_pos();
-        let center = (tl + br) / 2.;
-        (center.x - tl.x)
-            .abs()
-            .min((center.y - tl.y).abs())
-            .min((center.x - tr.x).abs())
-            .min((center.y - tr.y).abs())
-            .min((center.x - br.x).abs())
-            .min((center.y - br.y).abs())
-            .min((center.x - bl.x).abs())
-            .min((center.y - bl.y).abs())
+        self.radius_tl
+            .get_val()
+            .max(self.radius_tr.get_val())
+            .max(self.radius_br.get_val())
+            .max(self.radius_bl.get_val())
     }
     fn get_rectangle_rounded(&self) -> RoundedRect {
         let (tl_pos, br_pos) = (self.tl.get_pos(), self.br.get_pos());
         RoundedRect::new(tl_pos.x, tl_pos.y, br_pos.x, br_pos.y, self.get_radii())
     }
-    fn update_edges_modifiers(&mut self) {
-        self.top.set_pos(Vec2::new(
-            (self.tl.get_pos().x + self.tr.get_pos().x) / 2.,
-            self.tl.get_pos().y,
-        ));
-        self.left.set_pos(Vec2::new(
-            self.tl.get_pos().x,
-            (self.tl.get_pos().y + self.bl.get_pos().y) / 2.,
-        ));
-        self.bottom.set_pos(Vec2::new(
-            (self.bl.get_pos().x + self.br.get_pos().x) / 2.,
-            self.bl.get_pos().y,
-        ));
-        self.right.set_pos(Vec2::new(
-            self.br.get_pos().x,
-            (self.br.get_pos().y + self.tr.get_pos().y) / 2.,
-        ));
+
+    fn update_radii_from_outers(&mut self) {
+        let tl = self.tl.get_pos();
+        let tr = self.get_tr_modifier();
+        let br = self.br.get_pos();
+        let radius = (tl - tr).hypot().min((tr - br).hypot()) / 5.;
+
+        self.radius_tl.set_val(radius);
+        self.radius_tr.set_val(radius);
+        self.radius_br.set_val(radius);
+        self.radius_bl.set_val(radius);
     }
-    fn update_outer_modifiers(&mut self) {
-        self.tl
-            .set_pos(Vec2::new(self.left.get_pos().x, self.top.get_pos().y));
-        self.tr
-            .set_pos(Vec2::new(self.right.get_pos().x, self.top.get_pos().y));
-        self.br
-            .set_pos(Vec2::new(self.right.get_pos().x, self.bottom.get_pos().y));
-        self.bl
-            .set_pos(Vec2::new(self.left.get_pos().x, self.bottom.get_pos().y));
+
+    fn get_tr_modifier(&self) -> Vec2 {
+        Vec2::new(self.br.get_pos().x, self.tl.get_pos().y)
     }
-    fn update_radii(&mut self) {
-        let max_radius_size = self.get_max_radius_size();
+    fn get_bl_modifier(&self) -> Vec2 {
+        Vec2::new(self.tl.get_pos().x, self.br.get_pos().y)
+    }
 
-        let rad_tl_center_pos = Vec2::new(
-            (self.rad_tl_center.get_pos().x)
-                .min(max_radius_size)
-                .max(ShapeRectRounded::RAD_MIN_SIZE),
-            (self.rad_tl_center.get_pos().y)
-                .min(max_radius_size)
-                .max(ShapeRectRounded::RAD_MIN_SIZE),
-        );
-        self.rad_tl_center.set_pos(rad_tl_center_pos);
+    fn get_top_modifier(&self) -> Vec2 {
+        (self.tl.get_pos() + self.get_tr_modifier()) / 2.
+    }
+    fn get_right_modifier(&self) -> Vec2 {
+        (self.get_tr_modifier() + self.br.get_pos()) / 2.
+    }
+    fn get_bottom_modifier(&self) -> Vec2 {
+        (self.br.get_pos() + self.get_bl_modifier()) / 2.
+    }
+    fn get_left_modifier(&self) -> Vec2 {
+        (self.get_bl_modifier() + self.tl.get_pos()) / 2.
+    }
 
-        let rad_tr_center_pos = Vec2::new(
-            (self.rad_tr_center.get_pos().x)
-                .max(-max_radius_size)
-                .min(-ShapeRectRounded::RAD_MIN_SIZE),
-            (self.rad_tr_center.get_pos().y)
-                .min(max_radius_size)
-                .max(ShapeRectRounded::RAD_MIN_SIZE),
-        );
-        self.rad_tr_center.set_pos(rad_tr_center_pos);
+    fn get_tr_saved_modifier(&self) -> Vec2 {
+        Vec2::new(self.br.get_saved_pos().x, self.tl.get_saved_pos().y)
+    }
+    fn get_bl_saved_modifier(&self) -> Vec2 {
+        Vec2::new(self.tl.get_saved_pos().x, self.br.get_saved_pos().y)
+    }
 
-        let rad_br_center_pos = Vec2::new(
-            (self.rad_br_center.get_pos().x)
-                .max(-max_radius_size)
-                .min(-ShapeRectRounded::RAD_MIN_SIZE),
-            (self.rad_br_center.get_pos().y)
-                .max(-max_radius_size)
-                .min(-ShapeRectRounded::RAD_MIN_SIZE),
-        );
-        self.rad_br_center.set_pos(rad_br_center_pos);
-
-        let rad_bl_center_pos = Vec2::new(
-            (self.rad_bl_center.get_pos().x)
-                .min(max_radius_size)
-                .max(ShapeRectRounded::RAD_MIN_SIZE),
-            (self.rad_bl_center.get_pos().y)
-                .max(-max_radius_size)
-                .min(-ShapeRectRounded::RAD_MIN_SIZE),
-        );
-        self.rad_bl_center.set_pos(rad_bl_center_pos);
+    fn get_top_saved_modifier(&self) -> Vec2 {
+        (self.tl.get_saved_pos() + self.get_tr_saved_modifier()) / 2.
+    }
+    fn get_right_saved_modifier(&self) -> Vec2 {
+        (self.get_tr_saved_modifier() + self.br.get_saved_pos()) / 2.
+    }
+    fn get_bottom_saved_modifier(&self) -> Vec2 {
+        (self.br.get_saved_pos() + self.get_bl_saved_modifier()) / 2.
+    }
+    fn get_left_saved_modifier(&self) -> Vec2 {
+        (self.get_bl_saved_modifier() + self.tl.get_saved_pos()) / 2.
     }
 }
 impl Display for ShapeRectRounded {
@@ -192,125 +166,121 @@ impl Shapes for ShapeRectRounded {
     const GRAB: f64 = 2.;
 
     fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
-        let tl = Position::new(pos1, true);
-        let tr = Position::new(Vec2::new(pos2.x, pos1.y), true);
         let mut br = Position::new(pos2, true);
         br.select(true);
-        let bl = Position::new(Vec2::new(pos1.x, pos2.y), true);
-        let top = Position::new(Vec2::new((pos1.x + pos2.x) / 2., pos1.y), true);
-        let right = Position::new(Vec2::new(pos2.x, (pos1.y + pos2.y) / 2.), true);
-        let bottom = Position::new(Vec2::new((pos1.x + pos2.x) / 2., pos2.y), true);
-        let left = Position::new(Vec2::new(pos1.x, (pos1.y + pos2.y) / 2.), true);
-        let rad_tl_center = Position::new(
-            Vec2::new(
-                ShapeRectRounded::RAD_MIN_SIZE,
-                ShapeRectRounded::RAD_MIN_SIZE,
-            ),
-            true,
-        );
-        let rad_tr_center = Position::new(
-            Vec2::new(
-                -ShapeRectRounded::RAD_MIN_SIZE,
-                ShapeRectRounded::RAD_MIN_SIZE,
-            ),
-            true,
-        );
-        let rad_br_center = Position::new(
-            Vec2::new(
-                -ShapeRectRounded::RAD_MIN_SIZE,
-                -ShapeRectRounded::RAD_MIN_SIZE,
-            ),
-            true,
-        );
-        let rad_bl_center = Position::new(
-            Vec2::new(
-                ShapeRectRounded::RAD_MIN_SIZE,
-                -ShapeRectRounded::RAD_MIN_SIZE,
-            ),
-            true,
-        );
-
+        let tl = Position::new(pos1, true);
         ShapeKind::RectangleRounded(ShapeRectRounded {
             tl,
-            tr,
             br,
-            bl,
-            top,
-            right,
-            bottom,
-            left,
-            rad_tl_center,
-            rad_tr_center,
-            rad_br_center,
-            rad_bl_center,
+            radius_tl: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
+            radius_tr: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
+            radius_br: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
+            radius_bl: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
+            tr: Modifier::new(),
+            bl: Modifier::new(),
+            top: Modifier::new(),
+            right: Modifier::new(),
+            bottom: Modifier::new(),
+            left: Modifier::new(),
+            on_create: true,
             highlighted: false,
             selected: false,
             segs: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
     }
-
+}
+impl ShapeKindFuncs for ShapeRectRounded {
+    fn save_vars(&mut self) {
+        self.tl.save_pos();
+        self.br.save_pos();
+    }
+    fn restore_saved(&mut self) {
+        self.tl.restore_saved();
+        self.br.restore_saved();
+        self.update_polygon();
+    }
+    fn get_vars(&self) -> ShapeKindvars {
+        ShapeKindvars::RectangleRounded(
+            self.tl,
+            self.br,
+            self.radius_tl,
+            self.radius_tr,
+            self.radius_br,
+            self.radius_bl,
+        )
+    }
+    fn set_vars(&mut self, vars: &ShapeKindvars) {
+        if let ShapeKindvars::RectangleRounded(tl, br, radius_tl, radius_tr, radius_br, radius_bl) =
+            vars
+        {
+            self.tl = tl.clone();
+            self.br = br.clone();
+            self.radius_tl = radius_tl.clone();
+            self.radius_tr = radius_tr.clone();
+            self.radius_br = radius_br.clone();
+            self.radius_bl = radius_bl.clone();
+            self.update_polygon();
+        }
+    }
     fn good_size(&self) -> bool {
         ((self.tl.get_pos().x - self.br.get_pos().x).abs() >= ShapeRectRounded::MIN_SIZE)
             && ((self.tl.get_pos().y - self.br.get_pos().y).abs() >= ShapeRectRounded::MIN_SIZE)
     }
-    fn save_pos(&mut self) {
-        self.tl.save_pos();
-        self.tr.save_pos();
-        self.br.save_pos();
-        self.bl.save_pos();
-        self.top.save_pos();
-        self.right.save_pos();
-        self.bottom.save_pos();
-        self.left.save_pos();
 
-        self.rad_tl_center.save_pos();
-        self.rad_tr_center.save_pos();
-        self.rad_br_center.save_pos();
-        self.rad_bl_center.save_pos();
-    }
-    fn toggle_prop(&mut self) {
-        ()
-    }
-    fn hors_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
+    fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
         match hors {
-            HighLightOrSelect::Highlight => {
+            HS::Highlight => {
                 self.highlighted = self.contains(pos.to_point());
                 self.highlighted
             }
-            HighLightOrSelect::Select => {
+            HS::Select => {
                 self.selected = self.contains(pos.to_point());
                 self.selected
             }
         }
     }
-    fn hors_modifiers_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
+    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
+        self.on_create = false;
         let tl_hors = (pos - self.tl.get_pos()).hypot() < Self::GRAB;
-        let tr_hors = (pos - self.tr.get_pos()).hypot() < Self::GRAB;
+        let tr_hors = (pos - self.get_tr_modifier()).hypot() < Self::GRAB;
         let br_hors = (pos - self.br.get_pos()).hypot() < Self::GRAB;
-        let bl_hors = (pos - self.bl.get_pos()).hypot() < Self::GRAB;
-        let rad_tl_hors =
-            (pos - (self.rad_tl_center.get_pos() + self.tl.get_pos())).hypot() < Self::GRAB;
-        let rad_tr_hors =
-            (pos - (self.rad_tr_center.get_pos() + self.tr.get_pos())).hypot() < Self::GRAB;
-        let rad_br_hors =
-            (pos - (self.rad_br_center.get_pos() + self.br.get_pos())).hypot() < Self::GRAB;
-        let rad_bl_hors =
-            (pos - (self.rad_bl_center.get_pos() + self.bl.get_pos())).hypot() < Self::GRAB;
-        let top_hors = (pos - self.top.get_pos()).hypot() < Self::GRAB;
-        let right_hors = (pos - self.right.get_pos()).hypot() < Self::GRAB;
-        let bottom_hors = (pos - self.bottom.get_pos()).hypot() < Self::GRAB;
-        let left_hors = (pos - self.left.get_pos()).hypot() < Self::GRAB;
+        let bl_hors = (pos - self.get_bl_modifier()).hypot() < Self::GRAB;
+        let rad_tl_hors = (pos
+            - (self.tl.get_pos() + Vec2::new(self.radius_tl.get_val(), self.radius_tl.get_val())))
+        .hypot()
+            < Self::GRAB;
+        let rad_tr_hors = (pos
+            - (self.get_tr_modifier()
+                + Vec2::new(-self.radius_tr.get_val(), self.radius_tr.get_val())))
+        .hypot()
+            < Self::GRAB;
+        let rad_br_hors = (pos
+            - (self.br.get_pos()
+                + Vec2::new(-self.radius_br.get_val(), -self.radius_br.get_val())))
+        .hypot()
+            < Self::GRAB;
+        let rad_bl_hors = (pos
+            - (self.get_bl_modifier()
+                + Vec2::new(self.radius_bl.get_val(), -self.radius_bl.get_val())))
+        .hypot()
+            < Self::GRAB;
+        let top_hors = (pos - self.get_top_modifier()).hypot() < Self::GRAB;
+        let right_hors = (pos - self.get_right_modifier()).hypot() < Self::GRAB;
+        let bottom_hors = (pos - self.get_bottom_modifier()).hypot() < Self::GRAB;
+        let left_hors = (pos - self.get_left_modifier()).hypot() < Self::GRAB;
+
         match hors {
-            HighLightOrSelect::Highlight => {
+            HS::Highlight => {
                 self.tl.highlight(tl_hors);
                 self.tr.highlight(tr_hors);
                 self.br.highlight(br_hors);
                 self.bl.highlight(bl_hors);
-                self.rad_tl_center.highlight(rad_tl_hors);
-                self.rad_tr_center.highlight(rad_tr_hors);
-                self.rad_br_center.highlight(rad_br_hors);
-                self.rad_bl_center.highlight(rad_bl_hors);
+                self.radius_tl.highlight(rad_tl_hors);
+                self.radius_tr.highlight(rad_tr_hors);
+                self.radius_br.highlight(rad_br_hors);
+                self.radius_bl.highlight(rad_bl_hors);
+
                 self.top.highlight(top_hors);
                 self.right.highlight(right_hors);
                 self.bottom.highlight(bottom_hors);
@@ -319,24 +289,25 @@ impl Shapes for ShapeRectRounded {
                     || self.tr.is_highlighted()
                     || self.br.is_highlighted()
                     || self.bl.is_highlighted()
-                    || self.rad_tl_center.is_highlighted()
-                    || self.rad_tr_center.is_highlighted()
-                    || self.rad_br_center.is_highlighted()
-                    || self.rad_bl_center.is_highlighted()
+                    || self.radius_tl.is_highlighted()
+                    || self.radius_tr.is_highlighted()
+                    || self.radius_br.is_highlighted()
+                    || self.radius_bl.is_highlighted()
                     || self.top.is_highlighted()
                     || self.right.is_highlighted()
                     || self.bottom.is_highlighted()
                     || self.left.is_highlighted()
             }
-            HighLightOrSelect::Select => {
+            HS::Select => {
+                log!("set_hors_modifiers_from_pos");
                 self.tl.select(tl_hors);
                 self.tr.select(tr_hors);
                 self.br.select(br_hors);
                 self.bl.select(bl_hors);
-                self.rad_tl_center.select(rad_tl_hors);
-                self.rad_tr_center.select(rad_tr_hors);
-                self.rad_br_center.select(rad_br_hors);
-                self.rad_bl_center.select(rad_bl_hors);
+                self.radius_tl.select(rad_tl_hors);
+                self.radius_tr.select(rad_tr_hors);
+                self.radius_br.select(rad_br_hors);
+                self.radius_bl.select(rad_bl_hors);
                 self.top.select(top_hors);
                 self.right.select(right_hors);
                 self.bottom.select(bottom_hors);
@@ -345,10 +316,10 @@ impl Shapes for ShapeRectRounded {
                     || self.tr.is_selected()
                     || self.br.is_selected()
                     || self.bl.is_selected()
-                    || self.rad_tl_center.is_selected()
-                    || self.rad_tr_center.is_selected()
-                    || self.rad_br_center.is_selected()
-                    || self.rad_bl_center.is_selected()
+                    || self.radius_tl.is_selected()
+                    || self.radius_tr.is_selected()
+                    || self.radius_br.is_selected()
+                    || self.radius_bl.is_selected()
                     || self.top.is_selected()
                     || self.right.is_selected()
                     || self.bottom.is_selected()
@@ -356,15 +327,15 @@ impl Shapes for ShapeRectRounded {
             }
         }
     }
-    fn set_hors(&mut self, value: bool, hors: HighLightOrSelect) {
+    fn set_hs(&mut self, value: bool, hors: HS) {
         match hors {
-            HighLightOrSelect::Highlight => self.highlighted = value,
-            HighLightOrSelect::Select => self.selected = value,
+            HS::Highlight => self.highlighted = value,
+            HS::Select => self.selected = value,
         }
     }
-    fn set_hors_modifiers(&mut self, value: bool, hors: HighLightOrSelect) {
+    fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
         match hors {
-            HighLightOrSelect::Highlight => {
+            HS::Highlight => {
                 self.tl.highlight(value);
                 self.tr.highlight(value);
                 self.br.highlight(value);
@@ -373,12 +344,12 @@ impl Shapes for ShapeRectRounded {
                 self.right.highlight(value);
                 self.bottom.highlight(value);
                 self.left.highlight(value);
-                self.rad_tl_center.highlight(value);
-                self.rad_tr_center.highlight(value);
-                self.rad_br_center.highlight(value);
-                self.rad_bl_center.highlight(value);
+                self.radius_tl.highlight(value);
+                self.radius_tr.highlight(value);
+                self.radius_br.highlight(value);
+                self.radius_bl.highlight(value);
             }
-            HighLightOrSelect::Select => {
+            HS::Select => {
                 self.tl.select(value);
                 self.tr.select(value);
                 self.br.select(value);
@@ -387,35 +358,74 @@ impl Shapes for ShapeRectRounded {
                 self.right.select(value);
                 self.bottom.select(value);
                 self.left.select(value);
-                self.rad_tl_center.select(value);
-                self.rad_tr_center.select(value);
-                self.rad_br_center.select(value);
-                self.rad_bl_center.select(value);
+                self.radius_tl.select(value);
+                self.radius_tr.select(value);
+                self.radius_br.select(value);
+                self.radius_bl.select(value);
             }
         }
     }
-    fn is_hors(&self, hors: HighLightOrSelect) -> bool {
+    fn get_hs(&self, hors: HS) -> bool {
         match hors {
-            HighLightOrSelect::Highlight => self.highlighted,
-            HighLightOrSelect::Select => self.selected,
+            HS::Highlight => self.highlighted,
+            HS::Select => self.selected,
         }
     }
-    fn get_position(&self) -> Vec2 {
-        (self.tl.get_pos() + self.tr.get_pos()) / 2.
+    fn get_hs_modifiers(&self, hors: HS) -> bool {
+        match hors {
+            HS::Highlight => {
+                self.tl.is_highlighted()
+                    || self.tr.is_highlighted()
+                    || self.br.is_highlighted()
+                    || self.bl.is_highlighted()
+                    || self.top.is_highlighted()
+                    || self.right.is_highlighted()
+                    || self.bottom.is_highlighted()
+                    || self.left.is_highlighted()
+                    || self.radius_tl.is_highlighted()
+                    || self.radius_tr.is_highlighted()
+                    || self.radius_br.is_highlighted()
+                    || self.radius_bl.is_highlighted()
+            }
+            HS::Select => {
+                self.tl.is_selected()
+                    || self.tr.is_selected()
+                    || self.br.is_selected()
+                    || self.bl.is_selected()
+                    || self.top.is_selected()
+                    || self.right.is_selected()
+                    || self.bottom.is_selected()
+                    || self.left.is_selected()
+                    || self.radius_tl.is_selected()
+                    || self.radius_tr.is_selected()
+                    || self.radius_br.is_selected()
+                    || self.radius_bl.is_selected()
+            }
+        }
     }
-    fn move_position(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) {
+
+    fn toggle_prop(&mut self) {
+        ()
+    }
+
+    fn move_position(&mut self, dpos: Vec2) {
+        self.tl.set_pos(self.tl.get_saved_pos() + dpos);
+        self.br.set_pos(self.br.get_saved_pos() + dpos);
+        self.update_polygon();
+    }
+    fn move_modifier(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) -> bool {
         let tl_saved = self.tl.get_saved_pos();
-        let tr_saved = self.tr.get_saved_pos();
         let br_saved = self.br.get_saved_pos();
-        let bl_saved = self.bl.get_saved_pos();
-        let top_saved = self.top.get_saved_pos();
-        let right_saved = self.right.get_saved_pos();
-        let bottom_saved = self.bottom.get_saved_pos();
-        let left_saved = self.left.get_saved_pos();
-        let rad_tl_center_saved = self.rad_tl_center.get_saved_pos();
-        let rad_tr_center_saved = self.rad_tr_center.get_saved_pos();
-        let rad_br_center_saved = self.rad_br_center.get_saved_pos();
-        let rad_bl_center_saved = self.rad_bl_center.get_saved_pos();
+        let tr_saved = self.get_tr_saved_modifier();
+        let bl_saved = self.get_bl_saved_modifier();
+        let top_saved = self.get_top_saved_modifier();
+        let right_saved = self.get_right_saved_modifier();
+        let bottom_saved = self.get_bottom_saved_modifier();
+        let left_saved = self.get_left_saved_modifier();
+        let radius_tl_saved = self.radius_tl.get_saved_val();
+        let radius_tr_saved = self.radius_tr.get_saved_val();
+        let radius_br_saved = self.radius_br.get_saved_val();
+        let radius_bl_saved = self.radius_bl.get_saved_val();
 
         let tl_sel = self.tl.is_selected();
         let tr_sel = self.tr.is_selected();
@@ -425,218 +435,173 @@ impl Shapes for ShapeRectRounded {
         let right_sel = self.right.is_selected();
         let bottom_sel = self.bottom.is_selected();
         let left_sel = self.left.is_selected();
-        let rad_tl_sel = self.rad_tl_center.is_selected();
-        let rad_tr_sel = self.rad_tr_center.is_selected();
-        let rad_br_sel = self.rad_br_center.is_selected();
-        let rad_bl_sel = self.rad_bl_center.is_selected();
+        let rad_tl_sel = self.radius_tl.is_selected();
+        let rad_tr_sel = self.radius_tr.is_selected();
+        let rad_br_sel = self.radius_br.is_selected();
+        let rad_bl_sel = self.radius_bl.is_selected();
 
         let dpos = pos - pos_init;
         const MIN_SIZE: f64 = ShapeRectRounded::MIN_SIZE;
         const RAD_MIN_SIZE: f64 = ShapeRectRounded::RAD_MIN_SIZE;
 
-        if self.selected {
-            self.tl.set_pos(tl_saved + dpos);
-            self.tr.set_pos(tr_saved + dpos);
-            self.br.set_pos(br_saved + dpos);
-            self.bl.set_pos(bl_saved + dpos);
-            self.top.set_pos(top_saved + dpos);
-            self.right.set_pos(right_saved + dpos);
-            self.bottom.set_pos(bottom_saved + dpos);
-            self.left.set_pos(left_saved + dpos);
+        let modified = match (tl_sel, tr_sel, br_sel, bl_sel) {
+            (true, false, false, false) => {
+                let mut tlpos = tl_saved + dpos;
+                tlpos.x = tlpos.x.min(tr_saved.x - MIN_SIZE);
+                tlpos.y = tlpos.y.min(bl_saved.y - MIN_SIZE);
+                self.tl.set_pos(tlpos);
+                true
+            }
+            (false, true, false, false) => {
+                let mut trpos = tr_saved + dpos;
+                trpos.x = trpos.x.max(tl_saved.x + MIN_SIZE);
+                trpos.y = trpos.y.min(br_saved.y - MIN_SIZE);
+                self.br.set_pos(Vec2::new(trpos.x, br_saved.y));
+                self.tl.set_pos(Vec2::new(tl_saved.x, trpos.y));
+                true
+            }
+            (false, false, true, false) => {
+                let mut brpos = br_saved + dpos;
+                brpos.x = brpos.x.max(bl_saved.x + MIN_SIZE);
+                brpos.y = brpos.y.max(tr_saved.y + MIN_SIZE);
+                self.br.set_pos(brpos);
+                true
+            }
+            (false, false, false, true) => {
+                let mut blpos = bl_saved + dpos;
+                blpos.x = blpos.x.min(br_saved.x - MIN_SIZE);
+                blpos.y = blpos.y.max(tl_saved.y + MIN_SIZE);
+                self.tl.set_pos(Vec2::new(blpos.x, tl_saved.y));
+                self.br.set_pos(Vec2::new(br_saved.x, blpos.y));
+                true
+            }
+            _ => false,
+        };
+
+        if modified {
+            if self.on_create && br_sel {
+                self.update_radii_from_outers();
+            }
             self.update_polygon();
-        } else {
-            let modified = match (tl_sel, tr_sel, br_sel, bl_sel) {
-                (true, false, false, false) => {
-                    let mut tlpos = tl_saved + dpos;
-                    tlpos.x = tlpos.x.min(tr_saved.x - MIN_SIZE);
-                    tlpos.y = tlpos.y.min(bl_saved.y - MIN_SIZE);
-                    self.tl.set_pos(tlpos);
-                    self.bl.set_pos(Vec2::new(tlpos.x, bl_saved.y));
-                    self.tr.set_pos(Vec2::new(tr_saved.x, tlpos.y));
-                    true
-                }
-                (false, true, false, false) => {
-                    let mut trpos = tr_saved + dpos;
-                    trpos.x = trpos.x.max(tl_saved.x + MIN_SIZE);
-                    trpos.y = trpos.y.min(br_saved.y - MIN_SIZE);
-                    self.tr.set_pos(trpos);
-                    self.br.set_pos(Vec2::new(trpos.x, br_saved.y));
-                    self.tl.set_pos(Vec2::new(tl_saved.x, trpos.y));
-                    true
-                }
-                (false, false, true, false) => {
-                    let mut brpos = br_saved + dpos;
-                    brpos.x = brpos.x.max(bl_saved.x + MIN_SIZE);
-                    brpos.y = brpos.y.max(tr_saved.y + MIN_SIZE);
-                    self.br.set_pos(brpos);
-                    self.tr.set_pos(Vec2::new(brpos.x, tr_saved.y));
-                    self.bl.set_pos(Vec2::new(bl_saved.x, brpos.y));
-                    true
-                }
-                (false, false, false, true) => {
-                    let mut blpos = bl_saved + dpos;
-                    blpos.x = blpos.x.min(br_saved.x - MIN_SIZE);
-                    blpos.y = blpos.y.max(tl_saved.y + MIN_SIZE);
-                    self.bl.set_pos(blpos);
-                    self.tl.set_pos(Vec2::new(blpos.x, tl_saved.y));
-                    self.br.set_pos(Vec2::new(br_saved.x, blpos.y));
-                    true
-                }
-                _ => false,
-            };
-
-            if modified {
-                self.update_edges_modifiers();
-                self.update_radii();
-                self.update_polygon();
-                return;
-            }
-
-            let modified = match (top_sel, right_sel, bottom_sel, left_sel) {
-                (true, false, false, false) => {
-                    let mut top_pos = top_saved + Vec2::new(0., dpos.y);
-                    top_pos.y = top_pos.y.min(bottom_saved.y - MIN_SIZE);
-                    self.top.set_pos(top_pos);
-                    self.left
-                        .set_pos(Vec2::new(left_saved.x, (top_pos.y + bottom_saved.y) / 2.));
-                    self.right
-                        .set_pos(Vec2::new(right_saved.x, (top_pos.y + bottom_saved.y) / 2.));
-                    true
-                }
-                (false, true, false, false) => {
-                    let mut right_pos = right_saved + Vec2::new(dpos.x, 0.);
-                    right_pos.x = right_pos.x.max(left_saved.x + MIN_SIZE);
-                    self.right.set_pos(right_pos);
-                    self.top
-                        .set_pos(Vec2::new((left_saved.x + right_pos.x) / 2., top_saved.y));
-                    self.bottom
-                        .set_pos(Vec2::new((left_saved.x + right_pos.x) / 2., bottom_saved.y));
-                    true
-                }
-                (false, false, true, false) => {
-                    let mut bottom_pos = bottom_saved + Vec2::new(0., dpos.y);
-                    bottom_pos.y = bottom_pos.y.max(top_saved.y + MIN_SIZE);
-                    self.bottom.set_pos(bottom_pos);
-                    self.left
-                        .set_pos(Vec2::new(left_saved.x, (top_saved.y + bottom_pos.y) / 2.));
-                    self.right
-                        .set_pos(Vec2::new(right_saved.x, (top_saved.y + bottom_pos.y) / 2.));
-                    true
-                }
-                (false, false, false, true) => {
-                    let mut left_pos = left_saved + Vec2::new(dpos.x, 0.);
-                    left_pos.x = left_pos.x.min(right_saved.x - MIN_SIZE);
-                    self.left.set_pos(left_pos);
-                    self.top
-                        .set_pos(Vec2::new((left_pos.x + right_saved.x) / 2., top_saved.y));
-                    self.bottom
-                        .set_pos(Vec2::new((left_pos.x + right_saved.x) / 2., bottom_saved.y));
-                    true
-                }
-                _ => false,
-            };
-            if modified {
-                self.update_outer_modifiers();
-                self.update_radii();
-                self.update_polygon();
-                return;
-            }
-
-            let max_radius_size = self.get_max_radius_size();
-            let modified = match (rad_tl_sel, rad_tr_sel, rad_br_sel, rad_bl_sel) {
-                (true, false, false, false) => {
-                    let (mut proj, dir) = project_to_segment_with_direction(
-                        self.tl.get_pos(),
-                        (self.tl.get_pos() + self.tr.get_pos()) / 2.,
-                        dpos,
-                    );
-                    proj /= 2_f64.sqrt();
-                    let rad_tl_center_pos = Vec2::new(
-                        (rad_tl_center_saved.x + proj * dir)
-                            .max(RAD_MIN_SIZE)
-                            .min(max_radius_size),
-                        (rad_tl_center_saved.y + proj * dir)
-                            .max(RAD_MIN_SIZE)
-                            .min(max_radius_size),
-                    );
-                    self.rad_tl_center.set_pos(rad_tl_center_pos);
-                    true
-                }
-                (false, true, false, false) => {
-                    let (mut proj, dir) = project_to_segment_with_direction(
-                        self.tr.get_pos(),
-                        (self.tl.get_pos() + self.tr.get_pos()) / 2.,
-                        dpos,
-                    );
-                    proj /= 2_f64.sqrt();
-                    let rad_tr_center_pos = Vec2::new(
-                        (rad_tr_center_saved.x - proj * dir)
-                            .min(-RAD_MIN_SIZE)
-                            .max(-max_radius_size),
-                        (rad_tr_center_saved.y + proj * dir)
-                            .max(RAD_MIN_SIZE)
-                            .min(max_radius_size),
-                    );
-                    self.rad_tr_center.set_pos(rad_tr_center_pos);
-                    true
-                }
-                (false, false, true, false) => {
-                    let (mut proj, dir) = project_to_segment_with_direction(
-                        self.br.get_pos(),
-                        (self.tl.get_pos() + self.tr.get_pos()) / 2.,
-                        dpos,
-                    );
-                    proj /= 2_f64.sqrt();
-                    let rad_br_center_pos = Vec2::new(
-                        (rad_br_center_saved.x - proj * dir)
-                            .min(-RAD_MIN_SIZE)
-                            .max(-max_radius_size),
-                        (rad_br_center_saved.y - proj * dir)
-                            .min(-RAD_MIN_SIZE)
-                            .max(-max_radius_size),
-                    );
-                    self.rad_br_center.set_pos(rad_br_center_pos);
-                    true
-                }
-                (false, false, false, true) => {
-                    let (mut proj, dir) = project_to_segment_with_direction(
-                        self.bl.get_pos(),
-                        (self.tl.get_pos() + self.tr.get_pos()) / 2.,
-                        dpos,
-                    );
-                    proj /= 2_f64.sqrt();
-                    let rad_bl_center_pos = Vec2::new(
-                        (rad_bl_center_saved.x + proj * dir)
-                            .max(RAD_MIN_SIZE)
-                            .min(max_radius_size),
-                        (rad_bl_center_saved.y - proj * dir)
-                            .min(-RAD_MIN_SIZE)
-                            .max(-max_radius_size),
-                    );
-                    self.rad_bl_center.set_pos(rad_bl_center_pos);
-                    true
-                }
-                _ => false,
-            };
-            if modified {
-                self.update_polygon();
-            }
+            return true;
         }
+
+        let modified = match (top_sel, right_sel, bottom_sel, left_sel) {
+            (true, false, false, false) => {
+                let mut toppos = top_saved + dpos;
+                toppos.y = toppos.y.min(bottom_saved.y - MIN_SIZE);
+                self.tl.set_pos(Vec2::new(tl_saved.x, toppos.y));
+                true
+            }
+            (false, true, false, false) => {
+                let mut rightpos = right_saved + dpos;
+                rightpos.x = rightpos.x.max(left_saved.x + MIN_SIZE);
+                self.br.set_pos(Vec2::new(rightpos.x, br_saved.y));
+                true
+            }
+            (false, false, true, false) => {
+                let mut bottompos = bottom_saved + dpos;
+                bottompos.y = bottompos.y.max(top_saved.y + MIN_SIZE);
+                self.br.set_pos(Vec2::new(br_saved.x, bottompos.y));
+                true
+            }
+            (false, false, false, true) => {
+                let mut leftpos = left_saved + dpos;
+                leftpos.x = leftpos.x.min(right_saved.x - MIN_SIZE);
+                self.tl.set_pos(Vec2::new(leftpos.x, tl_saved.y));
+                true
+            }
+            _ => false,
+        };
+        if modified {
+            self.update_polygon();
+            return true;
+        }
+
+        let max_radius_size = self.get_max_radius_size();
+        let modified = match (rad_tl_sel, rad_tr_sel, rad_br_sel, rad_bl_sel) {
+            (true, false, false, false) => {
+                let (mut proj, dir) = project_to_segment_with_direction(
+                    self.tl.get_pos(),
+                    (self.tl.get_pos() + self.get_tr_modifier()) / 2.,
+                    dpos,
+                );
+                proj /= 2_f64.sqrt();
+                self.radius_tl.set_val(
+                    (radius_tl_saved + proj * dir)
+                        .max(RAD_MIN_SIZE)
+                        .min(max_radius_size),
+                );
+                true
+            }
+            (false, true, false, false) => {
+                let (mut proj, dir) = project_to_segment_with_direction(
+                    self.get_tr_modifier(),
+                    (self.tl.get_pos() + self.get_tr_modifier()) / 2.,
+                    dpos,
+                );
+                proj /= 2_f64.sqrt();
+                self.radius_tr.set_val(
+                    (radius_tr_saved + proj * dir)
+                        .max(RAD_MIN_SIZE)
+                        .min(max_radius_size),
+                );
+                true
+            }
+            (false, false, true, false) => {
+                let (mut proj, dir) = project_to_segment_with_direction(
+                    self.br.get_pos(),
+                    (self.br.get_pos() + self.get_bl_modifier()) / 2.,
+                    dpos,
+                );
+                proj /= 2_f64.sqrt();
+                self.radius_br.set_val(
+                    (radius_br_saved + proj * dir)
+                        .max(RAD_MIN_SIZE)
+                        .min(max_radius_size),
+                );
+                true
+            }
+            (false, false, false, true) => {
+                let (mut proj, dir) = project_to_segment_with_direction(
+                    self.get_bl_modifier(),
+                    (self.br.get_pos() + self.get_bl_modifier()) / 2.,
+                    dpos,
+                );
+                proj /= 2_f64.sqrt();
+                self.radius_bl.set_val(
+                    (radius_bl_saved + proj * dir)
+                        .max(RAD_MIN_SIZE)
+                        .min(max_radius_size),
+                );
+                true
+            }
+            _ => false,
+        };
+        if modified {
+            self.update_polygon();
+            return true;
+        }
+        false
+    }
+    fn get_position(&self) -> Vec2 {
+        (self.tl.get_pos() + self.br.get_pos()) / 2.
     }
 
     fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)> {
         let tl = self.tl.get_pos();
-        let tr = self.tr.get_pos();
+        let tr = self.get_tr_modifier();
         let br = self.br.get_pos();
-        let bl = self.bl.get_pos();
-        let rad_tl_center = tl + self.rad_tl_center.get_pos();
-        let rad_tr_center = tr + self.rad_tr_center.get_pos();
-        let rad_br_center = br + self.rad_br_center.get_pos();
-        let rad_bl_center = bl + self.rad_bl_center.get_pos();
-        let top = self.top.get_pos();
-        let right = self.right.get_pos();
-        let bottom = self.bottom.get_pos();
-        let left = self.left.get_pos();
+        let bl = self.get_bl_modifier();
+
+        let rad_tl_center = tl + Vec2::new(self.radius_tl.get_val(), self.radius_tl.get_val());
+        let rad_tr_center = tr + Vec2::new(-self.radius_tr.get_val(), self.radius_tr.get_val());
+        let rad_br_center = br + Vec2::new(-self.radius_br.get_val(), -self.radius_br.get_val());
+        let rad_bl_center = bl + Vec2::new(self.radius_bl.get_val(), -self.radius_bl.get_val());
+        let top = self.get_top_modifier();
+        let right = self.get_right_modifier();
+        let bottom = self.get_bottom_modifier();
+        let left = self.get_left_modifier();
 
         vec![
             (
@@ -674,29 +639,29 @@ impl Shapes for ShapeRectRounded {
             (
                 modifiers_path(rad_tl_center, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(
-                    self.rad_tl_center.is_selected(),
-                    self.rad_tl_center.is_highlighted(),
+                    self.radius_tl.is_selected(),
+                    self.radius_tl.is_highlighted(),
                 ),
             ),
             (
                 modifiers_path(rad_tr_center, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(
-                    self.rad_tr_center.is_selected(),
-                    self.rad_tr_center.is_highlighted(),
+                    self.radius_tr.is_selected(),
+                    self.radius_tr.is_highlighted(),
                 ),
             ),
             (
                 modifiers_path(rad_br_center, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(
-                    self.rad_br_center.is_selected(),
-                    self.rad_br_center.is_highlighted(),
+                    self.radius_br.is_selected(),
+                    self.radius_br.is_highlighted(),
                 ),
             ),
             (
                 modifiers_path(rad_bl_center, 1., ShapeRectRounded::GRAB),
                 self.get_pattern_modifiers(
-                    self.rad_bl_center.is_selected(),
-                    self.rad_bl_center.is_highlighted(),
+                    self.radius_bl.is_selected(),
+                    self.radius_bl.is_highlighted(),
                 ),
             ),
             (
@@ -712,17 +677,20 @@ impl Shapes for ShapeRectRounded {
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         let mut paths = vec![];
         let mut texts = vec![];
-        let (path, text) =
-            Dimension::new(DimKind::Horizontal, self.tl.get_pos(), self.tr.get_pos()).get_path();
+        let (path, text) = Dimension::new(
+            DimKind::Horizontal,
+            self.tl.get_pos(),
+            self.get_tr_modifier(),
+        )
+        .get_path();
         paths.push(path);
         texts.push(text);
         let (path, text) =
-            Dimension::new(DimKind::Vertical, self.bl.get_pos(), self.tl.get_pos()).get_path();
+            Dimension::new(DimKind::Vertical, self.get_bl_modifier(), self.tl.get_pos()).get_path();
         paths.push(path);
         texts.push(text);
         (paths, texts)
     }
-
     fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
         if self.good_size() {
             vec![(
@@ -733,7 +701,6 @@ impl Shapes for ShapeRectRounded {
             vec![(BezPath::new(), Pattern::BasicNormal)]
         }
     }
-
     fn get_polygon(&self) -> Polygon<f64> {
         self.polygon.clone()
     }

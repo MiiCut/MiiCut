@@ -9,10 +9,9 @@ use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
-    positions::Position,
+    positions::{Position, Value, HS},
     prefab::{center_path, modifiers_path},
-    shape_disc::HighLightOrSelect,
-    shapes::{ShapeKind, Shapes},
+    shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars, Shapes},
 };
 use geo::{LineString, Polygon};
 use kurbo::{Arc, ArcAppendIter, BezPath, Line, LinePathIter, PathEl, Point, Rect, Shape, Vec2};
@@ -20,12 +19,45 @@ use std::{
     f64::consts::{FRAC_PI_2, PI},
     fmt::Display,
 };
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShapeOblongVars {
+    start: Position,
+    end: Position,
+    width: Value,
+}
+impl ShapeOblongVars {
+    pub fn save(&mut self) {
+        self.start.save_pos();
+        self.end.save_pos();
+        self.width.save_val();
+    }
+    pub fn restore_saved(&mut self) {
+        self.start.restore_saved();
+        self.end.restore_saved();
+        self.width.restore_saved();
+    }
+    pub fn highlight(&mut self, value: bool) {
+        self.start.highlight(value);
+        self.end.highlight(value);
+        self.width.highlight(value);
+    }
+    pub fn select(&mut self, value: bool) {
+        self.start.select(value);
+        self.end.select(value);
+        self.width.select(value);
+    }
+    pub fn move_position(&mut self, dpos: Vec2) {
+        self.start.set_pos(self.start.get_saved_pos() + dpos);
+        self.end.set_pos(self.end.get_saved_pos() + dpos);
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeOblong {
     start: Position,
     end: Position,
-    middle_up: Position,
-    middle_down: Position,
+    width: Value,
 
     highlighted: bool,
     selected: bool,
@@ -43,13 +75,16 @@ impl ShapeOblong {
         self.polygon = calc_polygon(&self.segs);
     }
     fn get_width(&self) -> f64 {
-        (self.middle_up.get_pos() - self.middle_down.get_pos()).hypot()
+        self.width.get_val()
+    }
+    fn get_saved_width(&self) -> f64 {
+        self.width.get_saved_val()
     }
     fn get_length(&self) -> f64 {
         (self.start.get_pos() - self.end.get_pos()).hypot()
     }
     fn get_arc(&self, start_arc: bool) -> Arc {
-        let width = (self.middle_up.get_pos() - self.middle_down.get_pos()).hypot();
+        let width = self.get_width();
         let (start, end, width) = (self.start.get_pos(), self.end.get_pos(), width);
         let radius = width / 2.;
         let angle = (end - start).atan2();
@@ -79,6 +114,20 @@ impl ShapeOblong {
         } else {
             Line::new(end_arc_points.1.to_point(), start_arc_points.0.to_point())
         }
+    }
+    fn get_middle_modifier(&self) -> Vec2 {
+        get_middle_from_start_end_positions(
+            self.start.get_pos(),
+            self.end.get_pos(),
+            self.get_width(),
+        )
+    }
+    fn get_middle_modifier_saved(&self) -> Vec2 {
+        get_middle_from_start_end_positions(
+            self.start.get_saved_pos(),
+            self.end.get_saved_pos(),
+            self.get_saved_width(),
+        )
     }
 }
 impl Display for ShapeOblong {
@@ -138,229 +187,179 @@ impl Shapes for ShapeOblong {
         let start = Position::new(pos1, true);
         let mut end = Position::new(pos2, true);
         end.select(true);
-        let width = 10.;
-        let middle_up = Position::new(
-            get_middle_from_start_end_positions(start.get_pos(), end.get_pos(), width, true),
-            true,
-        );
-        let middle_down = Position::new(
-            get_middle_from_start_end_positions(start.get_pos(), end.get_pos(), width, false),
-            true,
-        );
-
+        let width = Value::new(10.);
         ShapeKind::Oblong(ShapeOblong {
             start,
             end,
-            middle_up,
-            middle_down,
+            width,
             highlighted: false,
             selected: false,
             segs: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
     }
+}
+impl ShapeKindFuncs for ShapeOblong {
+    fn save_vars(&mut self) {
+        self.start.save_pos();
+        self.end.save_pos();
+        self.width.save_val();
+    }
+    fn restore_saved(&mut self) {
+        self.start.restore_saved();
+        self.end.restore_saved();
+        self.width.restore_saved();
+        self.update_polygon();
+    }
+    fn get_vars(&self) -> ShapeKindvars {
+        ShapeKindvars::Oblong(self.start, self.end, self.width)
+    }
+    fn set_vars(&mut self, vars: &ShapeKindvars) {
+        if let ShapeKindvars::Oblong(start, end, width) = vars {
+            self.start = start.clone();
+            self.end = end.clone();
+            self.width = width.clone();
+            self.update_polygon();
+        }
+    }
 
     fn good_size(&self) -> bool {
         self.get_width() >= ShapeOblong::MIN_WIDTH_SIZE - 0.1
             && self.get_length() >= ShapeOblong::MIN_LENGTH_SIZE - 0.1
     }
-    fn save_pos(&mut self) {
-        self.start.save_pos();
-        self.end.save_pos();
-        self.middle_up.save_pos();
-        self.middle_down.save_pos();
-    }
-    fn toggle_prop(&mut self) {
-        ()
-    }
-    fn hors_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
+
+    fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
         match hors {
-            HighLightOrSelect::Highlight => {
+            HS::Highlight => {
                 self.highlighted = self.contains(pos.to_point());
                 self.highlighted
             }
-            HighLightOrSelect::Select => {
+            HS::Select => {
                 self.selected = self.contains(pos.to_point());
                 self.selected
             }
         }
     }
-    fn hors_modifiers_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
+    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
         let start_hors = (pos - self.start.get_pos()).hypot() < Self::GRAB;
         let end_hors = (pos - self.end.get_pos()).hypot() < Self::GRAB;
-        let middle_up_hors = (pos - self.middle_up.get_pos()).hypot() < Self::GRAB;
-        let middle_down_hors = (pos - self.middle_down.get_pos()).hypot() < Self::GRAB;
-
+        let middle_hors = (pos - self.get_middle_modifier()).hypot() < Self::GRAB;
         match hors {
-            HighLightOrSelect::Highlight => {
+            HS::Highlight => {
                 self.start.highlight(start_hors);
                 self.end.highlight(end_hors);
-                self.middle_up.highlight(middle_up_hors);
-                self.middle_down.highlight(middle_down_hors);
+                self.width.highlight(middle_hors);
                 self.start.is_highlighted()
                     || self.end.is_highlighted()
-                    || self.middle_up.is_highlighted()
-                    || self.middle_down.is_highlighted()
+                    || self.width.is_highlighted()
             }
-            HighLightOrSelect::Select => {
+            HS::Select => {
                 self.start.select(start_hors);
                 self.end.select(end_hors);
-                self.middle_up.select(middle_up_hors);
-                self.middle_down.select(middle_down_hors);
-                self.start.is_selected()
-                    || self.end.is_selected()
-                    || self.middle_up.is_selected()
-                    || self.middle_down.is_selected()
+                self.width.select(middle_hors);
+                self.start.is_selected() || self.end.is_selected() || self.width.is_selected()
             }
         }
     }
-    fn set_hors(&mut self, value: bool, hors: HighLightOrSelect) {
+    fn set_hs(&mut self, value: bool, hors: HS) {
         match hors {
-            HighLightOrSelect::Highlight => self.highlighted = value,
-            HighLightOrSelect::Select => self.selected = value,
+            HS::Highlight => self.highlighted = value,
+            HS::Select => self.selected = value,
         }
     }
-    fn set_hors_modifiers(&mut self, value: bool, hors: HighLightOrSelect) {
+    fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
         match hors {
-            HighLightOrSelect::Highlight => {
+            HS::Highlight => {
                 self.start.highlight(value);
                 self.end.highlight(value);
-                self.middle_up.highlight(value);
-                self.middle_down.highlight(value);
+                self.width.highlight(value);
             }
-            HighLightOrSelect::Select => {
+            HS::Select => {
                 self.start.select(value);
                 self.end.select(value);
-                self.middle_up.select(value);
-                self.middle_down.select(value);
+                self.width.select(value);
             }
         }
     }
-    fn is_hors(&self, hors: HighLightOrSelect) -> bool {
+    fn get_hs(&self, hors: HS) -> bool {
         match hors {
-            HighLightOrSelect::Highlight => self.highlighted,
-            HighLightOrSelect::Select => self.selected,
+            HS::Highlight => self.highlighted,
+            HS::Select => self.selected,
         }
     }
-    fn get_position(&self) -> Vec2 {
-        (self.start.get_pos() + self.end.get_pos()) / 2.
+    fn get_hs_modifiers(&self, hors: HS) -> bool {
+        match hors {
+            HS::Highlight => {
+                self.start.is_highlighted()
+                    || self.end.is_highlighted()
+                    || self.width.is_highlighted()
+            }
+            HS::Select => {
+                self.start.is_selected() || self.end.is_selected() || self.width.is_selected()
+            }
+        }
     }
-    fn move_position(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) {
+
+    fn toggle_prop(&mut self) {
+        ()
+    }
+
+    fn move_position(&mut self, dpos: Vec2) {
+        self.start.set_pos(self.start.get_saved_pos() + dpos);
+        self.end.set_pos(self.end.get_saved_pos() + dpos);
+        self.update_polygon();
+    }
+    fn move_modifier(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) -> bool {
         let start_saved = self.start.get_saved_pos();
         let end_saved = self.end.get_saved_pos();
-        let middle_up_saved = self.middle_up.get_saved_pos();
-        let middle_down_saved = self.middle_down.get_saved_pos();
+        let middle_saved = self.get_middle_modifier_saved();
         let center_saved = (start_saved + end_saved) / 2.;
+
         let start_sel = self.start.is_selected();
         let end_sel = self.end.is_selected();
-        let middle_up_sel = self.middle_up.is_selected();
-        let middle_down_sel = self.middle_down.is_selected();
+        let width_sel = self.width.is_selected();
 
         let dpos = pos - pos_init;
         let (dpos_proj, _) = project_to_perpendicular(start_saved, end_saved, dpos);
 
-        if self.selected {
-            self.start.set_pos(start_saved + dpos);
-            self.end.set_pos(end_saved + dpos);
-            self.middle_up.set_pos(middle_up_saved + dpos);
-            self.middle_down.set_pos(middle_down_saved + dpos);
-            self.update_polygon();
-        } else {
-            match (start_sel, end_sel, middle_up_sel, middle_down_sel) {
-                (true, false, false, false) => {
-                    let start = start_saved + dpos;
-                    if (start - end_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
-                        self.start.set_pos(start);
-                        let width = self.get_width();
-                        let middle_up = get_middle_from_start_end_positions(
-                            self.start.get_pos(),
-                            self.end.get_pos(),
-                            width,
-                            true,
-                        );
-                        let middle_down = get_middle_from_start_end_positions(
-                            self.start.get_pos(),
-                            self.end.get_pos(),
-                            width,
-                            false,
-                        );
-                        self.middle_up.set_pos(middle_up);
-                        self.middle_down.set_pos(middle_down);
-                        self.update_polygon();
-                    }
+        match (start_sel, end_sel, width_sel) {
+            (true, false, false) => {
+                let start = start_saved + dpos;
+                if (start - end_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
+                    self.start.set_pos(start);
+                    self.update_polygon();
+                    return true;
                 }
-                (false, true, false, false) => {
-                    let end = end_saved + dpos;
-                    if (end - start_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
-                        self.end.set_pos(end);
-                        let width = self.get_width();
-                        let middle_up = get_middle_from_start_end_positions(
-                            self.start.get_pos(),
-                            self.end.get_pos(),
-                            width,
-                            true,
-                        );
-                        let middle_down = get_middle_from_start_end_positions(
-                            self.start.get_pos(),
-                            self.end.get_pos(),
-                            width,
-                            false,
-                        );
-                        self.middle_up.set_pos(middle_up);
-                        self.middle_down.set_pos(middle_down);
-                        self.update_polygon();
-                    }
-                }
-                (false, false, true, false) => {
-                    let (_, dir1) = project_to_perpendicular(
-                        start_saved,
-                        end_saved,
-                        middle_up_saved - center_saved,
-                    );
-                    let middle_up = middle_up_saved + dpos_proj;
-                    let (_, dir2) =
-                        project_to_perpendicular(start_saved, end_saved, middle_up - center_saved);
-
-                    if (middle_up - center_saved).hypot() >= ShapeOblong::MIN_WIDTH_SIZE / 2.
-                        && dir1 * dir2 > 0.
-                    {
-                        self.middle_up.set_pos(middle_up);
-                        self.middle_down.set_pos(symmetric_point_to_segment(
-                            start_saved,
-                            end_saved,
-                            middle_up,
-                        ));
-                        self.update_polygon();
-                    }
-                }
-                (false, false, false, true) => {
-                    let (_, dir1) = project_to_perpendicular(
-                        start_saved,
-                        end_saved,
-                        middle_down_saved - center_saved,
-                    );
-                    let middle_down = middle_down_saved + dpos_proj;
-                    let (_, dir2) = project_to_perpendicular(
-                        start_saved,
-                        end_saved,
-                        middle_down - center_saved,
-                    );
-
-                    if (middle_down - center_saved).hypot() >= ShapeOblong::MIN_WIDTH_SIZE / 2.
-                        && dir1 * dir2 > 0.
-                    {
-                        self.middle_down.set_pos(middle_down);
-                        self.middle_up.set_pos(symmetric_point_to_segment(
-                            start_saved,
-                            end_saved,
-                            middle_down,
-                        ));
-                        self.update_polygon();
-                    }
-                }
-                _ => (),
             }
+            (false, true, false) => {
+                let end = end_saved + dpos;
+                if (end - start_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
+                    self.end.set_pos(end);
+                    self.update_polygon();
+                    return true;
+                }
+            }
+            (false, false, true) => {
+                let (_, dir1) =
+                    project_to_perpendicular(start_saved, end_saved, middle_saved - center_saved);
+                let middle = middle_saved + dpos_proj;
+                let (_, dir2) =
+                    project_to_perpendicular(start_saved, end_saved, middle - center_saved);
+
+                if (middle - center_saved).hypot() >= ShapeOblong::MIN_WIDTH_SIZE / 2.
+                    && dir1 * dir2 > 0.
+                {
+                    self.width.set_val((middle - center_saved).hypot() * 2.);
+                    self.update_polygon();
+                    return true;
+                }
+            }
+            _ => (),
         }
+        false
+    }
+    fn get_position(&self) -> Vec2 {
+        (self.start.get_pos() + self.end.get_pos()) / 2.
     }
 
     fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)> {
@@ -374,18 +373,8 @@ impl Shapes for ShapeOblong {
                 self.get_pattern_modifiers(self.end.is_selected(), self.end.is_highlighted()),
             ),
             (
-                modifiers_path(self.middle_up.get_pos(), 1., ShapeOblong::GRAB),
-                self.get_pattern_modifiers(
-                    self.middle_up.is_selected(),
-                    self.middle_up.is_highlighted(),
-                ),
-            ),
-            (
-                modifiers_path(self.middle_down.get_pos(), 1., ShapeOblong::GRAB),
-                self.get_pattern_modifiers(
-                    self.middle_down.is_selected(),
-                    self.middle_down.is_highlighted(),
-                ),
+                modifiers_path(self.get_middle_modifier(), 1., ShapeOblong::GRAB),
+                self.get_pattern_modifiers(self.width.is_selected(), self.width.is_highlighted()),
             ),
             (
                 center_path(
@@ -409,8 +398,12 @@ impl Shapes for ShapeOblong {
 
         let mut dim = Dimension::new(
             DimKind::Linear,
-            self.middle_up.get_pos(),
-            self.middle_down.get_pos(),
+            self.get_middle_modifier(),
+            symmetric_point_to_segment(
+                self.start.get_pos(),
+                self.end.get_pos(),
+                self.get_middle_modifier(),
+            ),
         );
         dim.set_dim_offset(10.);
         let (path, text) = dim.get_path();
@@ -419,7 +412,6 @@ impl Shapes for ShapeOblong {
 
         (paths, texts)
     }
-
     fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
         let mut paths: Vec<(BezPath, Pattern)> = vec![];
         paths.push((
@@ -441,11 +433,11 @@ impl Shapes for ShapeOblong {
         ));
         paths
     }
-
     fn get_polygon(&self) -> Polygon<f64> {
         self.polygon.clone()
     }
 }
+
 #[doc(hidden)]
 pub struct CShapeOblongIter {
     idx: usize,

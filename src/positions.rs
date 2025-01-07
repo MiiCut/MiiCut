@@ -1,10 +1,43 @@
 use kurbo::Vec2;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
+pub enum HS {
+    Highlight,
+    Select,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Modifier {
+    highlighted: bool,
+    selected: bool,
+}
+impl Modifier {
+    pub fn new() -> Self {
+        Self {
+            highlighted: false,
+            selected: false,
+        }
+    }
+    pub fn highlight(&mut self, value: bool) {
+        self.highlighted = value;
+    }
+    pub fn is_highlighted(&self) -> bool {
+        self.highlighted
+    }
+    pub fn select(&mut self, value: bool) {
+        self.selected = value;
+    }
+    pub fn is_selected(&self) -> bool {
+        self.selected
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Value {
     saved_val: f64,
     last_val: f64,
     val: f64,
+    modifier: Modifier,
 }
 impl Value {
     pub fn new(val: f64) -> Self {
@@ -12,6 +45,7 @@ impl Value {
             saved_val: val,
             last_val: val,
             val,
+            modifier: Modifier::new(),
         }
     }
     pub fn get_val(&self) -> f64 {
@@ -31,6 +65,22 @@ impl Value {
         self.saved_val = self.val;
         self.last_val = self.val;
     }
+    pub fn restore_saved(&mut self) {
+        self.val = self.saved_val;
+        self.last_val = self.val;
+    }
+    pub fn highlight(&mut self, value: bool) {
+        self.modifier.highlighted = value;
+    }
+    pub fn is_highlighted(&self) -> bool {
+        self.modifier.highlighted
+    }
+    pub fn select(&mut self, value: bool) {
+        self.modifier.selected = value;
+    }
+    pub fn is_selected(&self) -> bool {
+        self.modifier.selected
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -38,8 +88,7 @@ pub struct Position {
     saved_pos: Vec2,
     last_pos: Vec2,
     pos: Vec2,
-    highlighted: bool,
-    selected: bool,
+    modifier: Modifier,
     magnet: bool,
 }
 impl Position {
@@ -48,8 +97,7 @@ impl Position {
             saved_pos: pos,
             last_pos: pos,
             pos,
-            highlighted: false,
-            selected: false,
+            modifier: Modifier::new(),
             magnet,
         }
     }
@@ -70,17 +118,21 @@ impl Position {
         self.saved_pos = self.pos;
         self.last_pos = self.pos;
     }
+    pub fn restore_saved(&mut self) {
+        self.pos = self.saved_pos;
+        self.last_pos = self.pos;
+    }
     pub fn highlight(&mut self, value: bool) {
-        self.highlighted = value;
+        self.modifier.highlighted = value;
     }
     pub fn is_highlighted(&self) -> bool {
-        self.highlighted
+        self.modifier.highlighted
     }
     pub fn select(&mut self, value: bool) {
-        self.selected = value;
+        self.modifier.selected = value;
     }
     pub fn is_selected(&self) -> bool {
-        self.selected
+        self.modifier.selected
     }
     pub fn is_magnet(&self) -> bool {
         self.magnet

@@ -1,10 +1,12 @@
 use crate::{
     math::*,
-    shape_disc::{HighLightOrSelect, ShapeDisc},
+    positions::HS,
+    shape_disc::ShapeDisc,
     shape_oblong::ShapeOblong,
     shape_rectangle::ShapeRectangle,
     shape_rectangle_rounded::ShapeRectRounded,
-    shapes::{Shape, Shapes},
+    shapes::{Shape, ShapeKindFuncs, ShapeKindvars, Shapes},
+    undo_redo::Action,
     IconsShapes,
 };
 use geo::{BooleanOps, Intersects, MultiPolygon, OpType, Polygon};
@@ -17,41 +19,55 @@ use std::{
     vec,
 };
 
-#[derive(Clone, Debug, PartialEq)]
-struct ShapeSelector {
-    selectable_shapes: Vec<Shid>, // IDs of selectable shapes
-    current_index: usize,         // Current index in the list
+pub struct AddShapeAction {
+    pub shape: Shape,
 }
-impl ShapeSelector {
-    pub fn new() -> Self {
-        Self {
-            selectable_shapes: Vec::new(),
-            current_index: 0,
-        }
+impl Action for AddShapeAction {
+    fn undo(&self, pool: &mut ShapesPool) {
+        log!("Undoing shape creation: {:?}", self.shape.get_id());
+        pool.delete_shape(self.shape.get_id());
     }
-    pub fn update_shapes(&mut self, new_shapes: HashSet<Shid>) {
-        let current_set: HashSet<_> = self.selectable_shapes.iter().cloned().collect();
-        // Compare the sets, ignoring order
-        if current_set != new_shapes {
-            // Reset if the set of shapes changes
-            self.selectable_shapes = new_shapes.into_iter().collect();
-            self.current_index = 0;
-        }
+
+    fn redo(&self, pool: &mut ShapesPool) {
+        log!("Redoing shape creation: {:?}", self.shape.get_id());
+        pool.add_shape(self.shape.clone());
     }
-    pub fn next_selection(&mut self) -> Option<Shid> {
-        if self.selectable_shapes.is_empty() {
-            return None;
-        }
-        // Select the current shape and move to the next
-        let selected = self.selectable_shapes[self.current_index];
-        self.current_index = (self.current_index + 1) % self.selectable_shapes.len();
-        Some(selected)
+}
+pub struct RemoveShapeAction {
+    pub shapes: Vec<Shape>,
+}
+impl Action for RemoveShapeAction {
+    fn undo(&self, pool: &mut ShapesPool) {
+        log!("Undoing shapes creation");
+        self.shapes.iter().for_each(|shape| {
+            pool.add_shape(shape.clone());
+        });
+    }
+
+    fn redo(&self, pool: &mut ShapesPool) {
+        log!("Redoing shapes creation");
+        self.shapes.iter().for_each(|shape| {
+            pool.delete_shape(shape.get_id());
+        });
     }
 }
 
-pub struct CShapeBuilder;
-impl CShapeBuilder {
-    pub fn new(icon_shape: IconsShapes, pos1: Vec2, pos2: Vec2, boolean_op: OpType) -> Shape {
+#[derive(Clone, Debug)]
+pub struct ShapesPool {
+    shapes: HashMap<Shid, Shape>,
+    shapes_selector: ShapeSelector,
+    full_segs: Vec<BezPath>,
+}
+impl ShapesPool {
+    // Static methods
+    pub fn new() -> ShapesPool {
+        ShapesPool {
+            shapes: HashMap::new(),
+            shapes_selector: ShapeSelector::new(),
+            full_segs: Vec::new(),
+        }
+    }
+    pub fn new_shape(icon_shape: IconsShapes, pos1: Vec2, pos2: Vec2, boolean_op: OpType) -> Shape {
         let shid = Shid::new();
         let shape_kind = match icon_shape {
             IconsShapes::Rectangle => ShapeRectangle::new(pos1, pos2),
@@ -61,31 +77,15 @@ impl CShapeBuilder {
         };
         Shape::new(shid, shape_kind, boolean_op)
     }
-    // Clone an existing shape
-    pub fn clone(cshape: &Shape) -> (Shid, Shape) {
+    pub fn new_shape_cloned_from(shape: &Shape) -> Shape {
         let shid = Shid::new();
-        let shape_kind = cshape.clone();
-        (shid, Shape::new(shid, shape_kind, cshape.get_boolean_op()))
+        let shape_kind = shape.clone_kind();
+        Shape::new(shid, shape_kind, shape.get_boolean_op())
     }
-}
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct ShapesPool {
-    shapes: HashMap<Shid, Shape>,
-    shapes_selector: ShapeSelector,
-    full_segs: Vec<BezPath>,
-}
-impl ShapesPool {
-    pub fn new() -> ShapesPool {
-        ShapesPool {
-            shapes: HashMap::new(),
-            shapes_selector: ShapeSelector::new(),
-            full_segs: Vec::new(),
-        }
-    }
-    pub fn add_shape(&mut self, cshape: Shape) {
-        let shid = cshape.get_id();
-        self.shapes.insert(shid, cshape);
+    // Methods
+    pub fn add_shape(&mut self, shape: Shape) {
+        self.shapes.insert(shape.get_id(), shape);
     }
     pub fn delete_shape(&mut self, shid: Shid) -> Option<Shape> {
         self.shapes.remove(&shid)
@@ -111,8 +111,8 @@ impl ShapesPool {
     }
 
     pub fn save_positions(&mut self) {
-        self.shapes.values_mut().for_each(|cs| {
-            cs.save_positions();
+        self.shapes.values_mut().for_each(|shape| {
+            shape.kind_mut().save_vars();
         });
     }
     pub fn intersection_set(&self, shid: Shid) -> HashSet<Shid> {
@@ -123,7 +123,11 @@ impl ShapesPool {
                     // result.insert(*k);
                     continue;
                 }
-                if shape.get_polygon().intersects(&v.get_polygon()) {
+                if shape
+                    .kind()
+                    .get_polygon()
+                    .intersects(&v.kind().get_polygon())
+                {
                     result.insert(*k);
                 }
             }
@@ -157,11 +161,11 @@ impl ShapesPool {
     pub fn select_all_connected(&mut self) -> bool {
         let mut res = false;
 
-        if let Some(start_shid) = self.get_hors(HighLightOrSelect::Select).get(0).copied() {
+        if let Some(start_shid) = self.get_hs(HS::Select).get(0).copied() {
             let connected_shids = self.connected_shapes(start_shid);
             connected_shids.iter().for_each(|shid| {
-                if let Some(cshape) = self.shapes.get_mut(shid) {
-                    cshape.set_hors(true, HighLightOrSelect::Select);
+                if let Some(shape) = self.shapes.get_mut(shid) {
+                    shape.kind_mut().set_hs(true, HS::Select);
                     res = true;
                 }
             });
@@ -169,19 +173,19 @@ impl ShapesPool {
         res
     }
 
-    pub fn set_hors_from_pos(&mut self, pos: Vec2, hors: HighLightOrSelect) -> bool {
-        use HighLightOrSelect::*;
+    pub fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
+        use HS::*;
         if let Highlight = hors {
             let mut res = false;
-            self.shapes.values_mut().for_each(|cs| {
-                res |= cs.set_hors_from_pos(pos, Highlight);
+            self.shapes.values_mut().for_each(|shape| {
+                res |= shape.kind_mut().set_hs_from_pos(pos, Highlight);
             });
             return res;
         } else {
             let mut overlapping_shapes = HashSet::new();
-            self.shapes.values_mut().for_each(|cs| {
-                if cs.set_hors_from_pos(pos, Select) {
-                    overlapping_shapes.insert(cs.get_id());
+            self.shapes.values_mut().for_each(|shape| {
+                if shape.kind_mut().set_hs_from_pos(pos, Select) {
+                    overlapping_shapes.insert(shape.get_id());
                 }
             });
             // Update the ShapeSelector with the overlapping shapes
@@ -190,82 +194,100 @@ impl ShapesPool {
             // Toggle to the next shape
             self.shapes
                 .values_mut()
-                .for_each(|shape| shape.set_hors(false, Select));
+                .for_each(|shape| shape.kind_mut().set_hs(false, Select));
 
             if let Some(next_shid) = self.shapes_selector.next_selection() {
                 // Find and select the next shape
                 if let Some(shape) = self.shapes.get_mut(&next_shid) {
-                    log!("Selecting shapeee {}", next_shid);
-                    shape.set_hors(true, Select);
+                    shape.kind_mut().set_hs(true, Select);
                     return true;
                 }
             }
             false
         }
     }
-    pub fn set_hors_modifiers_from_pos(
-        &mut self,
-        pos: Vec2,
-        _precision: f64,
-        hors: HighLightOrSelect,
-    ) -> bool {
-        let mut setted = false;
-        self.shapes.values_mut().for_each(|cs| {
-            setted |= cs.set_hors_modifiers_from_pos(pos, hors);
-        });
-        setted
-    }
-    pub fn set_hors(&mut self, value: bool, hors: HighLightOrSelect) {
-        self.shapes.values_mut().for_each(|cs| {
-            cs.set_hors(value, hors);
-        });
-    }
-    pub fn set_hors_modifiers(&mut self, value: bool, hors: HighLightOrSelect) {
-        self.shapes.values_mut().for_each(|cs| {
-            cs.set_hors_modifiers(value, hors);
+    pub fn set_hs(&mut self, value: bool, hors: HS) {
+        self.shapes.values_mut().for_each(|shape| {
+            shape.kind_mut().set_hs(value, hors);
         });
     }
 
-    pub fn get_hors(&self, hors: HighLightOrSelect) -> Vec<Shid> {
+    pub fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _precision: f64, hors: HS) -> bool {
+        let mut setted = false;
+        self.shapes.values_mut().for_each(|shape| {
+            setted |= shape.kind_mut().set_hs_modifiers_from_pos(pos, hors);
+        });
+        setted
+    }
+    pub fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
+        self.shapes.values_mut().for_each(|shape| {
+            shape.kind_mut().set_hs_modifiers(value, hors);
+        });
+    }
+
+    pub fn move_positions(
+        &mut self,
+        shid_sel: Vec<Shid>,
+        pos_init: Vec2,
+        pos: Vec2,
+        _shift_pressed: bool,
+    ) {
+        shid_sel.into_iter().for_each(|shid| {
+            if let Some(shape) = self.shapes.get_mut(&shid) {
+                shape.kind_mut().move_position(pos - pos_init);
+            }
+        });
+    }
+    pub fn move_modifier(&mut self, shid: Shid, pos_init: Vec2, pos: Vec2, shift_pressed: bool) {
+        if let Some(shape) = self.shapes.get_mut(&shid) {
+            shape.kind_mut().move_modifier(pos_init, pos, shift_pressed);
+        }
+    }
+    pub fn get_hs(&self, hors: HS) -> Vec<Shid> {
         let mut result = vec![];
-        for cshape in self.shapes.values() {
-            if cshape.get_hors(hors) {
-                result.push(cshape.get_id());
+        for shape in self.shapes.values() {
+            if shape.kind().get_hs(hors) {
+                result.push(shape.get_id());
             }
         }
         result
     }
-    pub fn set_hors_from_shid(&mut self, shid: Shid, value: bool, hors: HighLightOrSelect) {
+    pub fn get_hs_vars(&self, hors: HS) -> Vec<(Shid, ShapeKindvars)> {
+        let mut result = vec![];
+        for shape in self.shapes.values() {
+            if shape.kind().get_hs(hors) {
+                result.push((shape.get_id(), shape.kind().get_vars()));
+            }
+        }
+        result
+    }
+    pub fn get_first_selected_modifier(&self) -> Option<Shid> {
+        for shape in self.shapes.values() {
+            if shape.kind().get_hs_modifiers(HS::Select) {
+                return Some(shape.get_id());
+            }
+        }
+        None
+    }
+    pub fn set_hs_from_shid(&mut self, shid: Shid, value: bool, hors: HS) {
         if let Some(shape) = self.shapes.get_mut(&shid) {
-            shape.set_hors(value, hors);
+            shape.kind_mut().set_hs(value, hors);
         }
     }
 
-    pub fn move_selection(&mut self, pos_dwn: Vec2, cursor_pos: Vec2, shift_pressed: bool) {
-        self.shapes.values_mut().for_each(|shape| {
-            shape.move_selection(pos_dwn, cursor_pos, shift_pressed);
-        });
-    }
-    pub fn move_selection_from_shid(
-        &mut self,
-        shid: Shid,
-        pos_dwn: Vec2,
-        cursor_pos: Vec2,
-        shift_pressed: bool,
-    ) {
-        if let Some(shape) = self.shapes.get_mut(&shid) {
-            shape.move_selection(pos_dwn, cursor_pos, shift_pressed);
-        }
-    }
-
-    pub fn delete_objects_selected(&mut self) {
-        self.shapes
-            .retain(|_, v| !v.get_hors(HighLightOrSelect::Select));
+    pub fn delete_shapes_selected(&mut self) -> Vec<Shape> {
+        let shapes_deleted: Vec<Shape> = self
+            .shapes
+            .iter()
+            .filter(|(_, shape)| shape.kind().get_hs(HS::Select))
+            .map(|(_, shape)| shape.clone())
+            .collect();
+        self.shapes.retain(|_, v| !v.kind().get_hs(HS::Select));
+        shapes_deleted
     }
 
     pub fn recalc_full_segs(&mut self) {
         // Sort shapes by OpType, prioritizing Union over Difference
-
         let mut shapes: Vec<_> = self.shapes.values().collect();
 
         shapes.sort_by(|a, b| match (a.get_boolean_op(), b.get_boolean_op()) {
@@ -277,11 +299,10 @@ impl ShapesPool {
         // Convert shapes to polygons with their boolean operations
         let polygons: Vec<(Polygon, OpType)> = shapes
             .iter()
-            .map(|cs| (cs.get_polygon(), cs.get_boolean_op()))
+            .map(|shape| (shape.kind().get_polygon(), shape.get_boolean_op()))
             .collect();
 
         // Apply boolean operations iteratively
-
         let mut multi_polygon = MultiPolygon(vec![]);
         for (idx, (polygon, op_type)) in polygons.iter().enumerate() {
             if idx == 0 {
@@ -328,5 +349,37 @@ impl Shid {
         Shid {
             id: COUNTER_SHAPES.fetch_add(1, Ordering::Relaxed),
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ShapeSelector {
+    selectable_shapes: Vec<Shid>, // IDs of selectable shapes
+    current_index: usize,         // Current index in the list
+}
+impl ShapeSelector {
+    pub fn new() -> Self {
+        Self {
+            selectable_shapes: Vec::new(),
+            current_index: 0,
+        }
+    }
+    pub fn update_shapes(&mut self, new_shapes: HashSet<Shid>) {
+        let current_set: HashSet<_> = self.selectable_shapes.iter().cloned().collect();
+        // Compare the sets, ignoring order
+        if current_set != new_shapes {
+            // Reset if the set of shapes changes
+            self.selectable_shapes = new_shapes.into_iter().collect();
+            self.current_index = 0;
+        }
+    }
+    pub fn next_selection(&mut self) -> Option<Shid> {
+        if self.selectable_shapes.is_empty() {
+            return None;
+        }
+        // Select the current shape and move to the next
+        let selected = self.selectable_shapes[self.current_index];
+        self.current_index = (self.current_index + 1) % self.selectable_shapes.len();
+        Some(selected)
     }
 }
