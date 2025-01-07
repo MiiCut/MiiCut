@@ -5,11 +5,11 @@ use crate::{
     shape_oblong::ShapeOblong,
     shape_rectangle::ShapeRectangle,
     shape_rectangle_rounded::ShapeRectRounded,
-    shapes::{Shape, ShapeKindFuncs, ShapeKindvars, Shapes},
+    shapes::{BoolOps, Shape, ShapeKindFuncs, ShapeKindvars, Shapes},
     undo_redo::Action,
     IconsShapes,
 };
-use geo::{BooleanOps, Intersects, MultiPolygon, OpType, Polygon};
+use geo::{BooleanOps, Intersects, MultiPolygon, Polygon};
 use kurbo::{BezPath, Vec2};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -67,7 +67,12 @@ impl ShapesPool {
             full_segs: Vec::new(),
         }
     }
-    pub fn new_shape(icon_shape: IconsShapes, pos1: Vec2, pos2: Vec2, boolean_op: OpType) -> Shape {
+    pub fn new_shape(
+        icon_shape: IconsShapes,
+        pos1: Vec2,
+        pos2: Vec2,
+        boolean_op: BoolOps,
+    ) -> Shape {
         let shid = Shid::new();
         let shape_kind = match icon_shape {
             IconsShapes::Rectangle => ShapeRectangle::new(pos1, pos2),
@@ -290,14 +295,18 @@ impl ShapesPool {
         // Sort shapes by OpType, prioritizing Union over Difference
         let mut shapes: Vec<_> = self.shapes.values().collect();
 
-        shapes.sort_by(|a, b| match (a.get_boolean_op(), b.get_boolean_op()) {
-            (OpType::Union, OpType::Difference) => std::cmp::Ordering::Less,
-            (OpType::Difference, OpType::Union) => std::cmp::Ordering::Greater,
-            _ => std::cmp::Ordering::Equal,
+        shapes.sort_by(|a, b| {
+            let priority = |op: &BoolOps| match op {
+                BoolOps::Union => 0,
+                BoolOps::Difference => 1,
+                BoolOps::UnionForced => 2,
+            };
+
+            priority(&a.get_boolean_op()).cmp(&priority(&b.get_boolean_op()))
         });
 
         // Convert shapes to polygons with their boolean operations
-        let polygons: Vec<(Polygon, OpType)> = shapes
+        let polygons: Vec<(Polygon, BoolOps)> = shapes
             .iter()
             .map(|shape| (shape.kind().get_polygon(), shape.get_boolean_op()))
             .collect();
@@ -308,7 +317,7 @@ impl ShapesPool {
             if idx == 0 {
                 multi_polygon = MultiPolygon(vec![polygon.clone()]);
             } else {
-                multi_polygon = multi_polygon.boolean_op(polygon, *op_type);
+                multi_polygon = multi_polygon.boolean_op(polygon, op_type.get_op());
             }
         }
 

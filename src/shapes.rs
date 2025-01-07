@@ -23,7 +23,6 @@ use std::fmt::Display;
 pub struct MoveShapesAction {
     pub shids_vars: Vec<(Shid, ShapeKindvars)>,
 }
-
 impl Action for MoveShapesAction {
     fn undo(&self, pool: &mut ShapesPool) {
         log!("Undoing last shapes move");
@@ -45,19 +44,38 @@ impl Action for MoveShapesAction {
     }
 }
 
+pub struct ToogleBoolOpsShapesAction {
+    pub shid_toogle: (Shid, BoolOps),
+}
+impl Action for ToogleBoolOpsShapesAction {
+    fn undo(&self, pool: &mut ShapesPool) {
+        log!("Undoing last shapes toogle");
+        if let Some(shape) = pool.get_shape_mut(self.shid_toogle.0) {
+            shape.set_boolean_op(self.shid_toogle.1);
+        }
+    }
+
+    fn redo(&self, pool: &mut ShapesPool) {
+        log!("Redoing last shapes toogle");
+        if let Some(shape) = pool.get_shape_mut(self.shid_toogle.0) {
+            shape.set_boolean_op(self.shid_toogle.1);
+        }
+    }
+}
+
 pub enum ShapeKindvars {
     Rectangle(Position, Position),
     RectangleRounded(Position, Position, Value, Value, Value, Value),
     Disc(Position, Value),
     Oblong(Position, Position, Value),
 }
+
 pub trait Shapes {
     const TOLERANCE: f64;
     const GRAB: f64;
 
     fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind;
 }
-
 pub trait ShapeKindFuncs: Debug + Clone {
     fn save_vars(&mut self);
     fn restore_saved(&mut self);
@@ -297,14 +315,46 @@ impl ShapeKindFuncs for ShapeKind {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum BoolOps {
+    Union,
+    UnionForced,
+    Difference,
+}
+impl BoolOps {
+    pub fn toggle(&mut self) {
+        match self {
+            BoolOps::Union => *self = BoolOps::UnionForced,
+            BoolOps::UnionForced => *self = BoolOps::Difference,
+            BoolOps::Difference => *self = BoolOps::Union,
+        }
+    }
+    pub fn union(&mut self) {
+        *self = BoolOps::Union;
+    }
+    pub fn force_union(&mut self) {
+        *self = BoolOps::UnionForced;
+    }
+    pub fn difference(&mut self) {
+        *self = BoolOps::Difference;
+    }
+    pub fn get_op(&self) -> OpType {
+        match self {
+            BoolOps::Union => OpType::Union,
+            BoolOps::Difference => OpType::Difference,
+            BoolOps::UnionForced => OpType::Union,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Shape {
     shid: Shid,
     shape_kind: ShapeKind,
-    boolean_op: OpType,
+    boolean_op: BoolOps,
 }
 impl Shape {
-    pub fn new(cshid: Shid, shape_kind: ShapeKind, boolean_op: OpType) -> Shape {
+    pub fn new(cshid: Shid, shape_kind: ShapeKind, boolean_op: BoolOps) -> Shape {
         Shape {
             shid: cshid,
             shape_kind,
@@ -318,14 +368,13 @@ impl Shape {
         self.shid
     }
     pub fn toggle_boolean_op(&mut self) {
-        if self.boolean_op == OpType::Union {
-            self.boolean_op = OpType::Difference
-        } else {
-            self.boolean_op = OpType::Union
-        }
+        self.boolean_op.toggle();
     }
-    pub fn get_boolean_op(&self) -> OpType {
+    pub fn get_boolean_op(&self) -> BoolOps {
         self.boolean_op
+    }
+    pub fn set_boolean_op(&mut self, bool_ops: BoolOps) {
+        self.boolean_op = bool_ops;
     }
     pub fn kind(&self) -> &ShapeKind {
         &self.shape_kind

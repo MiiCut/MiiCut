@@ -30,9 +30,11 @@ use geo::OpType;
 use kurbo::{Size, Vec2};
 use positions::Pointer;
 use positions::HS;
+use shapes::BoolOps;
 use shapes::MoveShapesAction;
 use shapes::Shape;
 use shapes::ShapeKindFuncs;
+use shapes::ToogleBoolOpsShapesAction;
 use shapes_pool::AddShapeAction;
 use shapes_pool::RemoveShapeAction;
 use shapes_pool::ShapesPool;
@@ -629,7 +631,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                         Ok(())
                     } else {
                         // B. We start drawing a new shape
-                        let shape = ShapesPool::new_shape(ishape, pos, pos, OpType::Union);
+                        let shape = ShapesPool::new_shape(ishape, pos, pos, BoolOps::Union);
                         avb.on_creation = Some(shape);
                         Ok(())
                     }
@@ -974,23 +976,31 @@ fn on_window_keydown(av: RefAV, event: Event) {
 
         // Toggle boolean operation
         if keyboard_event.key() == "t" {
-            if let Some(shape) = &mut avb.on_creation {
-                shape.toggle_boolean_op();
-            } else {
+            if avb.on_creation.is_none() {
+                let mut o_shid = None;
                 let highlighted = avb.pool.get_hs(HS::Highlight);
                 if highlighted.len() == 1 {
-                    if let Some(cshape) = avb.pool.get_shape_mut(highlighted[0]) {
-                        cshape.toggle_boolean_op();
-                        avb.pool.recalc_full_segs();
+                    if let Some(shape) = avb.pool.get_shape_mut(highlighted[0]) {
+                        o_shid = Some((highlighted[0], shape.get_boolean_op()));
                     }
                 } else {
                     let selected = avb.pool.get_hs(HS::Select);
                     if selected.len() == 1 {
-                        if let Some(cshape) = avb.pool.get_shape_mut(selected[0]) {
-                            cshape.toggle_boolean_op();
-                            avb.pool.recalc_full_segs();
+                        if let Some(shape) = avb.pool.get_shape_mut(selected[0]) {
+                            o_shid = Some((selected[0], shape.get_boolean_op()));
                         }
                     }
+                }
+                if let Some((shid, bool_ops)) = o_shid {
+                    // Push the ToogleBoolOpsShapesAction to the undo/redo system
+                    avb.undo_redo.push(Box::new(ToogleBoolOpsShapesAction {
+                        shid_toogle: (shid, bool_ops),
+                    }));
+                    if let Some(shape) = avb.pool.get_shape_mut(shid) {
+                        // Do the actual toogle
+                        shape.toggle_boolean_op();
+                    }
+                    avb.pool.recalc_full_segs();
                 }
             }
         }
