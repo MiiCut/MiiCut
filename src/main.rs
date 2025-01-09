@@ -7,36 +7,35 @@ macro_rules! log {
 }
 pub mod canvas;
 pub mod clipboard;
-// pub mod copy_paste;
 pub mod dimensions;
 pub mod dom;
-pub mod draw_helpers;
+pub mod helpers;
 pub mod math;
+pub mod pools;
 pub mod positions;
 pub mod prefab;
 pub mod shapes;
-
-use draw_helpers::helpers_pool::HelpersPool;
-use svg::node::element::path::Data;
-use svg::read;
-use wasm_bindgen::closure::Closure;
-use wasm_bindgen::JsCast;
-
+pub mod traits;
 use crate::dom::*;
 use crate::math::*;
 use canvas::{CanvasKind, Canvases, DrawStyles, Pattern};
 use clipboard::*;
-// use copy_paste::*;
 use kurbo::{Size, Vec2};
+use pools::{DrawObjects, Pools};
 use positions::*;
-use shapes::shapes::{BoolOps, MoveShapesAction, Shape, ShapeKindFuncs, ToogleBoolOpsShapesAction};
+use shapes::shapes::{BoolOps, MoveShapesAction, ToogleBoolOpsShapesAction};
 use shapes::shapes_pool::{AddShapeAction, RemoveShapeAction, ShapesPool};
 use std::collections::HashSet;
 use std::{
     cell::{RefCell, RefMut},
     rc::Rc,
 };
+use svg::node::element::path::Data;
+use svg::read;
+use traits::*;
+use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 use web_sys::{
     window, Document, Element, Event, FileList, FileReader, HtmlCanvasElement, HtmlElement,
     HtmlInputElement, KeyboardEvent, MouseEvent, WheelEvent, Window,
@@ -51,18 +50,6 @@ struct KeysStates {
     shift_pressed: bool,
 }
 
-pub struct Pools {
-    pub sh: ShapesPool,
-    pub hp: HelpersPool,
-}
-impl Pools {
-    fn new() -> Self {
-        Self {
-            sh: ShapesPool::new(),
-            hp: HelpersPool::new(),
-        }
-    }
-}
 fn main() {
     console_error_panic_hook::set_once();
     let window = window().expect("no global `window` exists");
@@ -72,7 +59,7 @@ fn main() {
 #[allow(dead_code)]
 struct AppVars {
     pools: Pools,
-    on_creation: Option<Shape>,
+    on_creation: DrawObjects, // Shape or Helper
 
     //
     clipboard: Clipboard,
@@ -208,7 +195,7 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
 
     let app_vars = Rc::new(RefCell::new(AppVars {
         pools: Pools::new(),
-        on_creation: None,
+        on_creation: DrawObjects::Nope,
         clipboard: Clipboard::new(),
         undo_redo: UndoRedo::new(),
         window,
@@ -254,11 +241,6 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     let mut avb = av.borrow_mut();
     update_status_bar(&mut avb);
     render_drawing(&mut avb);
-    log!(
-        "canvas offset: {}, size: {}",
-        avb.canvases.get_canvas_offset(),
-        avb.canvases.get_canvas_size()
-    );
 
     Ok(())
 }
@@ -359,7 +341,6 @@ fn init_icons(av: RefAV) -> Result<(), JsValue> {
     Ok(())
 }
 fn init_canvas(av: RefAV) -> Result<(), JsValue> {
-    log!("init_canvas");
     let pam = av.borrow_mut();
     let c_draw = pam.canvases.get_main_canvas();
     set_callback(
@@ -597,19 +578,7 @@ fn convert_svg_to_shapes(_av: RefAV, svg_data: String) {
     }
 }
 
-fn set_hs_objects_from_pos(avb: &mut RefMut<'_, AppVars>, cursor_pos: Vec2, grab: f64, hors: HS) {
-    if avb.pools.sh.set_hs_from_pos(cursor_pos, hors) {
-        avb.pools.sh.set_hs_modifiers(false, hors);
-    }
-
-    if avb
-        .pools
-        .sh
-        .set_hs_modifiers_from_pos(cursor_pos, grab, hors)
-    {
-        avb.pools.sh.set_hs(false, hors);
-    }
-}
+#[allow(unused_variables)]
 fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
     use MouseState::*;
     let grab = avb.grab_distance / avb.canvases.get_drawing_scale();
@@ -618,26 +587,24 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
 
     let pointer_pos = avb.mouse.get_draw_pos();
     avb.pointer.set_pos(pointer_pos);
+    let shift_pressed = avb.keys_states.shift_pressed;
 
     match icon_selected {
         Icons::Arrow => match avb.mouse.get_mouse_state() {
             LeftDown(cursor_pos) => {
-                log!("LeftDown");
                 // Always clear selection before proceeding
-                avb.pools.sh.set_hs(false, HS::Select);
-                avb.pools.sh.set_hs_modifiers(false, HS::Select);
+                avb.pools.clear_all_hs();
 
                 if avb.clipboard.is_paste_empty() {
-                    set_hs_objects_from_pos(avb, cursor_pos, grab, HS::Select);
+                    avb.pools.hs_objects_in_order(cursor_pos, grab, HS::Select);
                     if avb.keys_states.crtl_pressed {
-                        avb.pools.sh.select_all_connected();
+                        avb.pools.select_all_shapes_connected();
                     }
                 } else {
-                    // Add the pasted shapes to the pool
+                    // Add the pasted object to the pool
                     if let Some(clip_item) = avb.clipboard.get_paste().cloned() {
                         match &clip_item {
                             ClipboardItem::Shapes((shapes, ..)) => {
-                                log!("Pasting shapes");
                                 let new_shapes = avb.pools.sh.duplicate_shapes(shapes.clone());
                                 // Push the PasteAction to the undo/redo system
                                 avb.undo_redo.push(Box::new(PasteAction {
@@ -645,7 +612,6 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                                 }));
                             }
                             ClipboardItem::Helpers((helpers, ..)) => {
-                                log!("Pasting helpers");
                                 let new_helpers = avb.pools.hp.duplicate_helpers(helpers.clone());
                                 // Push the PasteAction to the undo/redo system
                                 avb.undo_redo.push(Box::new(PasteAction {
@@ -653,17 +619,13 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                                 }));
                             }
                         }
-
                         avb.clipboard.clear_paste();
                     }
                 }
-                avb.pools.sh.save_vars();
+                avb.pools.save_vars();
                 Ok(())
             }
             LeftDownMove(pos_dwn, cursor_pos) => {
-                // avb.pointer.set_pos(cursor_pos);
-                let shift_pressed = avb.keys_states.shift_pressed;
-
                 let shapes_selected = avb.pools.sh.get_hs(HS::Select);
                 if shapes_selected.len() > 0 {
                     avb.pools.sh.move_positions(
@@ -679,7 +641,6 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                             .move_modifier(shid, pos_dwn, cursor_pos, shift_pressed);
                     }
                 }
-
                 Ok(())
             }
             LeftUp(_cursor_pos) => {
@@ -696,16 +657,15 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                         }));
                     }
                 }
-
                 avb.pools.sh.recalc_full_segs();
                 Ok(())
             }
             LeftUpMove(_, cursor_pos) | RightUpMove(_, cursor_pos) => {
-                // avb.pointer.set_pos(cursor_pos);
                 if !avb.clipboard.is_paste_empty() {
                     avb.clipboard.move_paste(cursor_pos);
                 } else {
-                    set_hs_objects_from_pos(avb, cursor_pos, grab, HS::Highlight);
+                    avb.pools
+                        .hs_objects_in_order(cursor_pos, grab, HS::Highlight);
                 }
                 Ok(())
             }
@@ -725,7 +685,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
         Icons::IShapes(ishape) => {
             match avb.mouse.get_mouse_state() {
                 LeftDown(pos) => {
-                    if let Some(mut shape) = avb.on_creation.clone() {
+                    if let Some(mut shape) = avb.on_creation.get_shape_into() {
                         // Minimum size was not reached
                         if !shape.get_kind().good_size() {
                             log!("Shape too small");
@@ -739,23 +699,25 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                                 shape: shape.clone(),
                             }));
                             //
-                            avb.on_creation = None;
+                            avb.on_creation = DrawObjects::Nope;
                             avb.pools.sh.recalc_full_segs();
                         }
                         Ok(())
                     } else {
                         // B. We start drawing a new shape
-                        let shape = ShapesPool::new_shape(ishape, pos, pos, BoolOps::Union);
-                        avb.on_creation = Some(shape);
+                        avb.on_creation.set_shape(ShapesPool::new_shape(
+                            ishape,
+                            pos,
+                            pos,
+                            BoolOps::Union,
+                        ));
                         Ok(())
                     }
                 }
                 LeftDownMove(pos_dwn, cursor_pos)
                 | LeftUpMove(pos_dwn, cursor_pos)
                 | RightUpMove(pos_dwn, cursor_pos) => {
-                    // avb.pointer.set_pos(cursor_pos);
-
-                    if let Some(shape) = &mut avb.on_creation {
+                    if let Some(shape) = avb.on_creation.get_shape_mut() {
                         if shape.get_kind().get_hs_modifiers(HS::Select) {
                             shape
                                 .get_kind_mut()
@@ -765,7 +727,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     Ok(())
                 }
                 RightDown(_) => {
-                    avb.on_creation = None;
+                    avb.on_creation = DrawObjects::Nope;
                     go_to_arrow_tool(avb);
                     Ok(())
                 }
@@ -777,7 +739,11 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
             LeftDownMove(pos_dwn, cursor_pos)
             | LeftUpMove(pos_dwn, cursor_pos)
             | RightUpMove(pos_dwn, cursor_pos) => Ok(()),
-            RightDown(_) => Ok(()),
+            RightDown(_) => {
+                avb.on_creation = DrawObjects::Nope;
+                go_to_arrow_tool(avb);
+                Ok(())
+            }
             _ => Ok(()),
         },
         _ => Ok(()),
@@ -879,13 +845,6 @@ fn on_mouse_wheel(av: RefAV, event: Event) {
         let old_draw_offset_rel = canvas_pos - old_draw_offset;
         let new_draw_offset = canvas_pos - old_draw_offset_rel * (new_scale / old_draw_scale);
 
-        // log!("new_draw_offset: {:?}", new_draw_offset);
-        // if new_draw_offset.x < 0. {
-        //     new_draw_offset.x = 0.;
-        // }
-        // if new_draw_offset.y < 0. {
-        //     new_draw_offset.y = 0.;
-        // }
         pam.canvases.set_drawing_offset(new_draw_offset);
 
         draw_grid_and_rules(&mut pam);
@@ -1033,7 +992,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
             avb.pools.sh.recalc_full_segs();
         }
         if keyboard_event.key() == "Escape" {
-            avb.on_creation = None;
+            avb.on_creation = DrawObjects::Nope;
             go_to_arrow_tool(&mut avb);
         }
 
@@ -1042,7 +1001,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
             if avb.keys_states.crtl_pressed {
                 log!("ctrl-c pressed");
                 if let Icons::Arrow = avb.icon_selected.clone() {
-                    if avb.on_creation.is_none() {
+                    if let DrawObjects::Nope = avb.on_creation {
                         let cursor_pos = avb.mouse.get_draw_pos();
                         let shapes_selected = avb.pools.sh.get_hs(HS::Select);
                         let helpers_selected = avb.pools.hp.get_hs(HS::Select);
@@ -1114,7 +1073,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
 
         // Toggle boolean operation
         if keyboard_event.key() == "t" {
-            if avb.on_creation.is_none() {
+            if let DrawObjects::Nope = avb.on_creation {
                 let mut o_shid = None;
                 // let highlighted = avb.pool.get_hs(HS::Highlight);
                 // if highlighted.len() == 1 {
@@ -1164,14 +1123,13 @@ fn on_window_keyup(av: RefAV, event: Event) {
 ///////////////
 // Icons events
 fn on_icon_click(av: RefAV, event: Event) {
-    log!("icon cliick");
     let mut avb = av.borrow_mut();
     if let Some(target) = event.target() {
         if let Some(element) = wasm_bindgen::JsCast::dyn_ref::<Element>(&target) {
             if let Some(id) = element.get_attribute("id") {
                 if let Some(icon) = avb.user_icons.iter().find(|&&k| k.id() == id).cloned() {
                     avb.icon_selected = icon;
-                    avb.on_creation = None;
+                    avb.on_creation = DrawObjects::Nope;
                     avb.pools.sh.set_hs(false, HS::Select);
                     avb.pools.sh.set_hs_modifiers(false, HS::Select);
                     // avb.pool.set_hors_centers(false, HighLightOrSelect::Select);
@@ -1251,7 +1209,6 @@ fn html_deselect_icons(icon: Icons) {
 fn draw_grid_and_rules(avb: &mut RefMut<'_, AppVars>) {
     avb.canvases.draw_grid_and_rules();
 }
-
 fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     // Get the Performance API
     // let performance = window().unwrap().performance().unwrap();
@@ -1264,6 +1221,15 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     if avb.pointer.is_active() {
         avb.canvases.draw_pointer(avb.pointer.get_pos());
     }
+
+    // Draw the final contour shapes
+    let full_segs = avb.pools.sh.get_full_segs();
+    avb.canvases.draw_closed_path(
+        &CanvasKind::Draw,
+        full_segs,
+        Pattern::ComposedNormal(true),
+        vec![],
+    );
 
     // SHAPES: Draw the outline of every shape
     for shape in avb.pools.sh.values() {
@@ -1303,7 +1269,6 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
         match item {
             ClipboardItem::Shapes((shapes, _)) => {
                 for shape in shapes {
-                    log!("Draw shape @ {:?}", shape.get_kind().get_position());
                     avb.canvases.draw_path(
                         &CanvasKind::Draw,
                         shape.get_paths_and_patterns(),
@@ -1323,23 +1288,20 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
         }
     }
 
-    // Draw the on_creation shape if any
-    if let Some(shape) = &avb.on_creation {
+    // Draw the on_creation object if any
+    if let Some(shape) = &avb.on_creation.get_shape_into() {
         avb.canvases
             .draw_path(&CanvasKind::Draw, shape.get_paths_and_patterns(), vec![]);
         // With dimensions
         let (path, texts) = shape.get_kind().get_dimensions_paths();
         avb.canvases.draw_path(&CanvasKind::Draw, path, texts);
+    } else {
+        if let Some(helper) = &avb.on_creation.get_helper() {
+            avb.canvases
+                .draw_path(&CanvasKind::Draw, helper.get_paths_and_patterns(), vec![]);
+        }
     }
 
-    // Draw the final contour shapes
-    let full_segs = avb.pools.sh.get_full_segs();
-    avb.canvases.draw_closed_path(
-        &CanvasKind::Draw,
-        full_segs,
-        Pattern::ComposedNormal(true),
-        vec![],
-    );
     // let end_time = performance.now();
     // log!("Rendering time: {:.2} ms", end_time - start_time);
 }

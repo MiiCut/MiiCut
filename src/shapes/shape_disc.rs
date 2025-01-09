@@ -4,18 +4,18 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
+use super::shapes::{BSKind, BSKindvars};
 use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
     positions::{Position, Value, HS},
     prefab::{center_path, modifiers_path},
+    traits::*,
 };
 use geo::{LineString, Polygon};
 use kurbo::{BezPath, Circle, CirclePathIter, Point, Rect, Shape, Vec2};
 use std::fmt::Display;
-
-use super::shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeDisc {
@@ -31,12 +31,12 @@ pub struct ShapeDisc {
 impl ShapeDisc {
     const MIN_RADIUS: f64 = 2.;
 
-    pub fn new(center: Vec2, _pos2: Vec2) -> ShapeKind {
+    pub fn new(center: Vec2, _pos2: Vec2) -> BSKind {
         let center = Position::new(center, false);
         let mut radius = Value::new(ShapeDisc::MIN_RADIUS);
         radius.select(true);
 
-        ShapeKind::Disc(ShapeDisc {
+        BSKind::Disc(ShapeDisc {
             center,
             radius,
             highlighted: false,
@@ -45,6 +45,10 @@ impl ShapeDisc {
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
     }
+    pub fn get_polygon(&self) -> Polygon<f64> {
+        self.polygon.clone()
+    }
+
     fn update_polygon(&mut self) {
         self.segs = calc_segs(self.get_paths());
         self.polygon = calc_polygon(&self.segs);
@@ -97,10 +101,10 @@ impl Shape for ShapeDisc {
         self.get_circle().contains(pt)
     }
 }
-
-impl ShapeKindFuncs for ShapeDisc {
+impl ObjectsFuncs for ShapeDisc {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
+    type Kindvars = BSKindvars;
 
     fn save_vars(&mut self) {
         self.center.save_pos();
@@ -111,11 +115,11 @@ impl ShapeKindFuncs for ShapeDisc {
         self.radius.restore_saved();
         self.update_polygon();
     }
-    fn get_vars(&self) -> ShapeKindvars {
-        ShapeKindvars::Disc(self.center, self.radius)
+    fn get_vars(&self) -> BSKindvars {
+        BSKindvars::Disc(self.center, self.radius)
     }
-    fn set_vars(&mut self, vars: &ShapeKindvars) {
-        if let ShapeKindvars::Disc(center, radius) = vars {
+    fn set_vars(&mut self, vars: &BSKindvars) {
+        if let BSKindvars::Disc(center, radius) = vars {
             self.center = center.clone();
             self.radius = radius.clone();
         }
@@ -231,8 +235,5 @@ impl ShapeKindFuncs for ShapeDisc {
     }
     fn get_paths(&self) -> Vec<BezPath> {
         vec![self.get_circle().to_path(Self::TOLERANCE)]
-    }
-    fn get_polygon(&self) -> Polygon<f64> {
-        self.polygon.clone()
     }
 }

@@ -4,13 +4,14 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
-use super::shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars};
+use super::shapes::{BSKind, BSKindvars};
 use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
     positions::{Position, HS},
     prefab::{center_path, modifiers_path},
+    traits::*,
     Modifier,
 };
 use geo::{LineString, Polygon};
@@ -38,12 +39,12 @@ pub struct ShapeRectangle {
 impl ShapeRectangle {
     const MIN_SIZE: f64 = 10.;
 
-    pub fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
+    pub fn new(pos1: Vec2, pos2: Vec2) -> BSKind {
         let mut br = Position::new(pos2, true);
         br.select(true);
         let tl = Position::new(pos1, true);
 
-        ShapeKind::Rectangle(ShapeRectangle {
+        BSKind::Rectangle(ShapeRectangle {
             tl,
             br,
             tr: Modifier::new(),
@@ -58,6 +59,10 @@ impl ShapeRectangle {
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
     }
+    pub fn get_polygon(&self) -> Polygon<f64> {
+        self.polygon.clone()
+    }
+
     fn update_polygon(&mut self) {
         self.segs = calc_segs(self.get_paths());
         self.polygon = calc_polygon(&self.segs);
@@ -115,10 +120,10 @@ impl Display for ShapeRectangle {
     }
 }
 impl Shape for ShapeRectangle {
-    type PathElementsIter<'iter> = CShapeRectangleIter;
+    type PathElementsIter<'iter> = ShapeRectangleIter;
 
-    fn path_elements(&self, tolerance: f64) -> CShapeRectangleIter {
-        CShapeRectangleIter {
+    fn path_elements(&self, tolerance: f64) -> ShapeRectangleIter {
+        ShapeRectangleIter {
             rect_path_iter: self.get_rectangle().path_elements(tolerance),
         }
     }
@@ -148,9 +153,10 @@ impl Shape for ShapeRectangle {
     }
 }
 
-impl ShapeKindFuncs for ShapeRectangle {
+impl ObjectsFuncs for ShapeRectangle {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
+    type Kindvars = BSKindvars;
 
     fn save_vars(&mut self) {
         self.tl.save_pos();
@@ -161,11 +167,11 @@ impl ShapeKindFuncs for ShapeRectangle {
         self.br.restore_saved();
         self.update_polygon();
     }
-    fn get_vars(&self) -> ShapeKindvars {
-        ShapeKindvars::Rectangle(self.tl, self.br)
+    fn get_vars(&self) -> BSKindvars {
+        BSKindvars::Rectangle(self.tl, self.br)
     }
-    fn set_vars(&mut self, vars: &ShapeKindvars) {
-        if let ShapeKindvars::Rectangle(tl, br) = vars {
+    fn set_vars(&mut self, vars: &BSKindvars) {
+        if let BSKindvars::Rectangle(tl, br) = vars {
             self.tl = tl.clone();
             self.br = br.clone();
             self.update_polygon();
@@ -204,6 +210,7 @@ impl ShapeKindFuncs for ShapeRectangle {
     fn get_hhss(&self) -> (bool, bool) {
         (self.selected, self.highlighted)
     }
+
     fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
         let tl_hors = (pos - self.tl.get_pos()).hypot() < Self::GRAB;
         let tr_hors = (pos - self.get_tr_modifier()).hypot() < Self::GRAB;
@@ -474,15 +481,12 @@ impl ShapeKindFuncs for ShapeRectangle {
             vec![BezPath::new()]
         }
     }
-    fn get_polygon(&self) -> Polygon<f64> {
-        self.polygon.clone()
-    }
 }
 
-pub struct CShapeRectangleIter {
+pub struct ShapeRectangleIter {
     rect_path_iter: RectPathIter,
 }
-impl Iterator for CShapeRectangleIter {
+impl Iterator for ShapeRectangleIter {
     type Item = PathEl;
 
     fn next(&mut self) -> Option<PathEl> {

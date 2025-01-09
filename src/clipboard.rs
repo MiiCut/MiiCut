@@ -1,12 +1,13 @@
 use kurbo::Vec2;
 
-use crate::draw_helpers::helpers::{Helper, HelperKindFuncs};
-use crate::shapes::shapes::{Shape, ShapeKindFuncs};
-use crate::Pools;
+use crate::helpers::helpers::Helper;
+use crate::pools::Pools;
+use crate::shapes::shapes::BasicShape;
+use crate::traits::*;
 
 #[derive(Clone, Debug)]
 pub enum ClipboardItem {
-    Shapes((Vec<Shape>, Vec2)),
+    Shapes((Vec<BasicShape>, Vec2)),
     Helpers((Vec<Helper>, Vec2)),
 }
 
@@ -23,7 +24,7 @@ impl Clipboard {
         }
     }
 
-    pub fn copy_shapes(&mut self, shapes: Vec<Shape>, cursor_pos: Vec2) {
+    pub fn copy_shapes(&mut self, shapes: Vec<BasicShape>, cursor_pos: Vec2) {
         self.item_copy = Some(ClipboardItem::Shapes((shapes, cursor_pos)));
         self.item_paste = None;
     }
@@ -58,13 +59,11 @@ impl Clipboard {
                     shapes.iter_mut().for_each(|shape| {
                         shape.get_kind_mut().move_position(cursor_pos - *pos_copy);
                     });
-                    // *pos_copy = Vec2::ZERO;
                 }
                 ClipboardItem::Helpers((helpers, pos_copy)) => {
                     helpers.iter_mut().for_each(|helper| {
                         helper.get_kind_mut().move_position(cursor_pos - *pos_copy);
                     });
-                    // *pos_copy = Vec2::ZERO;
                 }
             }
             self.item_paste = Some(item_paste);
@@ -132,7 +131,6 @@ impl Action for PasteAction {
     }
 }
 
-// Integrating Clipboard with UndoRedo
 pub struct UndoRedo {
     undo_stack: Vec<Box<dyn Action>>,
     redo_stack: Vec<Box<dyn Action>>,
@@ -164,10 +162,6 @@ impl UndoRedo {
             self.undo_stack.push(action);
         }
     }
-
-    // pub fn copy_shapes(&mut self, clipboard: &mut Clipboard, shapes: Vec<Shape>, cursor_pos: Vec2) {
-    //     clipboard.copy_shapes(shapes, cursor_pos);
-    // }
 
     pub fn push(&mut self, action: Box<dyn Action>) {
         self.undo_stack.push(action);

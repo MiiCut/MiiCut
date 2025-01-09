@@ -6,23 +6,33 @@
 // }
 use super::shape_disc::ShapeDisc;
 use super::shape_oblong::ShapeOblong;
+use super::shape_oblong::ShapeOblongIter;
 use super::shape_rectangle::ShapeRectangle;
+use super::shape_rectangle::ShapeRectangleIter;
 use super::shape_rectangle_rounded::ShapeRectRounded;
-use super::shapes_pool::Shid;
+use super::shape_rectangle_rounded::ShapeRectRoundedIter;
+use super::shapes_pool::BSid;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
+use crate::pools::Pools;
+use crate::traits::*;
 use crate::Action;
-use crate::Pools;
 use crate::Position;
 use crate::Value;
 use crate::HS;
 use geo::{OpType, Polygon};
+use kurbo::Circle;
+use kurbo::CirclePathIter;
+use kurbo::PathEl;
+use kurbo::Point;
+use kurbo::Rect;
+use kurbo::Shape;
 use kurbo::{BezPath, Vec2};
 use std::fmt::Debug;
 use std::fmt::Display;
 
 pub struct MoveShapesAction {
-    pub shids_vars: Vec<(Shid, ShapeKindvars)>,
+    pub shids_vars: Vec<(BSid, BSKindvars)>,
 }
 impl Action for MoveShapesAction {
     fn undo(&self, pools: &mut Pools) {
@@ -46,7 +56,7 @@ impl Action for MoveShapesAction {
 }
 
 pub struct ToogleBoolOpsShapesAction {
-    pub shid_toogle: (Shid, BoolOps),
+    pub shid_toogle: (BSid, BoolOps),
 }
 impl Action for ToogleBoolOpsShapesAction {
     fn undo(&self, pools: &mut Pools) {
@@ -66,63 +76,34 @@ impl Action for ToogleBoolOpsShapesAction {
     }
 }
 
-pub enum ShapeKindvars {
+pub enum BSKindvars {
     Rectangle(Position, Position),
     RectangleRounded(Position, Position, Value, Value, Value, Value),
     Disc(Position, Value),
     Oblong(Position, Position, Value),
 }
 
-pub trait ShapeKindFuncs: Debug + Clone {
-    const TOLERANCE: f64;
-    const GRAB: f64;
-
-    fn save_vars(&mut self);
-    fn restore_saved(&mut self);
-    fn get_vars(&self) -> ShapeKindvars;
-    fn set_vars(&mut self, vars: &ShapeKindvars);
-    fn good_size(&self) -> bool;
-
-    fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool;
-    fn set_hs(&mut self, value: bool, hors: HS);
-    fn get_hs(&self, hors: HS) -> bool;
-    fn get_hhss(&self) -> (bool, bool);
-
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool;
-    fn set_hs_modifiers(&mut self, value: bool, hors: HS);
-    fn get_hs_modifiers(&self, hors: HS) -> bool;
-
-    fn toggle_prop(&mut self);
-
-    fn move_position(&mut self, dpos: Vec2);
-    fn move_modifier(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) -> bool;
-    fn get_position(&self) -> Vec2;
-
-    fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)>;
-    fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>);
-    fn get_paths(&self) -> Vec<BezPath>;
-
-    fn get_polygon(&self) -> Polygon<f64>;
-    fn get_pattern_modifiers(&self, selected: bool, highlighted: bool) -> Pattern {
-        match (selected, highlighted) {
-            (false, false) => Pattern::Modifiers,
-            (false, true) => Pattern::ModifiersHighlighted,
-            (true, false) => Pattern::ModifiersSelected,
-            (true, true) => Pattern::ModifiersSelected,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
-pub enum ShapeKind {
+pub enum BSKind {
     Rectangle(ShapeRectangle),
     RectangleRounded(ShapeRectRounded),
     Disc(ShapeDisc),
     Oblong(ShapeOblong),
 }
-impl Display for ShapeKind {
+impl BSKind {
+    pub fn get_polygon(&self) -> Polygon<f64> {
+        use BSKind::*;
+        match self {
+            Rectangle(sh) => sh.get_polygon(),
+            RectangleRounded(sh) => sh.get_polygon(),
+            Disc(sh) => sh.get_polygon(),
+            Oblong(sh) => sh.get_polygon(),
+        }
+    }
+}
+impl Display for BSKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => write!(f, "{sh}"),
             RectangleRounded(sh) => write!(f, "{sh}"),
@@ -131,13 +112,13 @@ impl Display for ShapeKind {
         }
     }
 }
-
-impl ShapeKindFuncs for ShapeKind {
+impl ObjectsFuncs for BSKind {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
+    type Kindvars = BSKindvars;
 
     fn save_vars(&mut self) {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.save_vars(),
             RectangleRounded(sh) => sh.save_vars(),
@@ -146,7 +127,7 @@ impl ShapeKindFuncs for ShapeKind {
         }
     }
     fn restore_saved(&mut self) {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.restore_saved(),
             RectangleRounded(sh) => sh.restore_saved(),
@@ -154,8 +135,8 @@ impl ShapeKindFuncs for ShapeKind {
             Oblong(sh) => sh.restore_saved(),
         }
     }
-    fn get_vars(&self) -> ShapeKindvars {
-        use ShapeKind::*;
+    fn get_vars(&self) -> BSKindvars {
+        use BSKind::*;
         match &self {
             Rectangle(sh) => sh.get_vars(),
             RectangleRounded(sh) => sh.get_vars(),
@@ -163,8 +144,8 @@ impl ShapeKindFuncs for ShapeKind {
             Oblong(sh) => sh.get_vars(),
         }
     }
-    fn set_vars(&mut self, vars: &ShapeKindvars) {
-        use ShapeKind::*;
+    fn set_vars(&mut self, vars: &BSKindvars) {
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.set_vars(vars),
             RectangleRounded(sh) => sh.set_vars(vars),
@@ -173,7 +154,7 @@ impl ShapeKindFuncs for ShapeKind {
         }
     }
     fn good_size(&self) -> bool {
-        use ShapeKind::*;
+        use BSKind::*;
         match &self {
             Rectangle(sh) => sh.good_size(),
             RectangleRounded(sh) => sh.good_size(),
@@ -183,7 +164,7 @@ impl ShapeKindFuncs for ShapeKind {
     }
 
     fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.set_hs_from_pos(pos, hors),
             RectangleRounded(sh) => sh.set_hs_from_pos(pos, hors),
@@ -192,7 +173,7 @@ impl ShapeKindFuncs for ShapeKind {
         }
     }
     fn set_hs(&mut self, value: bool, hors: HS) {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.set_hs(value, hors),
             RectangleRounded(sh) => sh.set_hs(value, hors),
@@ -201,7 +182,7 @@ impl ShapeKindFuncs for ShapeKind {
         }
     }
     fn get_hs(&self, hors: HS) -> bool {
-        use ShapeKind::*;
+        use BSKind::*;
         match &self {
             Rectangle(sh) => sh.get_hs(hors),
             RectangleRounded(sh) => sh.get_hs(hors),
@@ -210,7 +191,7 @@ impl ShapeKindFuncs for ShapeKind {
         }
     }
     fn get_hhss(&self) -> (bool, bool) {
-        use ShapeKind::*;
+        use BSKind::*;
         match &self {
             Rectangle(sh) => sh.get_hhss(),
             RectangleRounded(sh) => sh.get_hhss(),
@@ -220,7 +201,7 @@ impl ShapeKindFuncs for ShapeKind {
     }
 
     fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.set_hs_modifiers_from_pos(pos, hors),
             RectangleRounded(sh) => sh.set_hs_modifiers_from_pos(pos, hors),
@@ -229,7 +210,7 @@ impl ShapeKindFuncs for ShapeKind {
         }
     }
     fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.set_hs_modifiers(value, hors),
             RectangleRounded(sh) => sh.set_hs_modifiers(value, hors),
@@ -238,7 +219,7 @@ impl ShapeKindFuncs for ShapeKind {
         }
     }
     fn get_hs_modifiers(&self, hors: HS) -> bool {
-        use ShapeKind::*;
+        use BSKind::*;
         match &self {
             Rectangle(sh) => sh.get_hs_modifiers(hors),
             RectangleRounded(sh) => sh.get_hs_modifiers(hors),
@@ -248,7 +229,7 @@ impl ShapeKindFuncs for ShapeKind {
     }
 
     fn toggle_prop(&mut self) {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.toggle_prop(),
             RectangleRounded(sh) => sh.toggle_prop(),
@@ -258,7 +239,7 @@ impl ShapeKindFuncs for ShapeKind {
     }
 
     fn move_position(&mut self, dpos: Vec2) {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.move_position(dpos),
             RectangleRounded(sh) => sh.move_position(dpos),
@@ -267,7 +248,7 @@ impl ShapeKindFuncs for ShapeKind {
         }
     }
     fn move_modifier(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) -> bool {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.move_modifier(pos_init, pos, _shift_pressed),
             RectangleRounded(sh) => sh.move_modifier(pos_init, pos, _shift_pressed),
@@ -276,7 +257,7 @@ impl ShapeKindFuncs for ShapeKind {
         }
     }
     fn get_position(&self) -> Vec2 {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.get_position(),
             RectangleRounded(sh) => sh.get_position(),
@@ -286,7 +267,7 @@ impl ShapeKindFuncs for ShapeKind {
     }
 
     fn get_paths(&self) -> Vec<BezPath> {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.get_paths(),
             RectangleRounded(sh) => sh.get_paths(),
@@ -295,7 +276,7 @@ impl ShapeKindFuncs for ShapeKind {
         }
     }
     fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)> {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.get_modifiers_paths(),
             RectangleRounded(sh) => sh.get_modifiers_paths(),
@@ -304,7 +285,7 @@ impl ShapeKindFuncs for ShapeKind {
         }
     }
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
-        use ShapeKind::*;
+        use BSKind::*;
         match self {
             Rectangle(sh) => sh.get_dimensions_paths(),
             RectangleRounded(sh) => sh.get_dimensions_paths(),
@@ -312,13 +293,95 @@ impl ShapeKindFuncs for ShapeKind {
             Oblong(sh) => sh.get_dimensions_paths(),
         }
     }
-    fn get_polygon(&self) -> Polygon<f64> {
-        use ShapeKind::*;
+}
+impl Shape for BSKind {
+    type PathElementsIter<'iter> = BSKindIter;
+
+    fn path_elements(&self, tolerance: f64) -> BSKindIter {
+        use BSKind::*;
         match self {
-            Rectangle(sh) => sh.get_polygon(),
-            RectangleRounded(sh) => sh.get_polygon(),
-            Disc(sh) => sh.get_polygon(),
-            Oblong(sh) => sh.get_polygon(),
+            Rectangle(sh) => BSKindIter::RectangleIter(sh.path_elements(tolerance)),
+            RectangleRounded(sh) => BSKindIter::RectangleRoundedIter(sh.path_elements(tolerance)),
+            Disc(sh) => BSKindIter::DiscIter(sh.path_elements(tolerance)),
+            Oblong(sh) => BSKindIter::OblongIter(sh.path_elements(tolerance)),
+        }
+    }
+    #[inline]
+    fn area(&self) -> f64 {
+        use BSKind::*;
+        match self {
+            Rectangle(sh) => sh.area(),
+            RectangleRounded(sh) => sh.area(),
+            Disc(sh) => sh.area(),
+            Oblong(sh) => sh.area(),
+        }
+    }
+    #[inline]
+    fn perimeter(&self, accuracy: f64) -> f64 {
+        use BSKind::*;
+        match self {
+            Rectangle(sh) => sh.perimeter(accuracy),
+            RectangleRounded(sh) => sh.perimeter(accuracy),
+            Disc(sh) => sh.perimeter(accuracy),
+            Oblong(sh) => sh.perimeter(accuracy),
+        }
+    }
+    #[inline]
+    fn winding(&self, pt: Point) -> i32 {
+        use BSKind::*;
+        match self {
+            Rectangle(sh) => sh.winding(pt),
+            RectangleRounded(sh) => sh.winding(pt),
+            Disc(sh) => sh.winding(pt),
+            Oblong(sh) => sh.winding(pt),
+        }
+    }
+    #[inline]
+    fn bounding_box(&self) -> Rect {
+        use BSKind::*;
+        match self {
+            Rectangle(sh) => sh.bounding_box(),
+            RectangleRounded(sh) => sh.bounding_box(),
+            Disc(sh) => sh.bounding_box(),
+            Oblong(sh) => sh.bounding_box(),
+        }
+    }
+    #[inline]
+    fn as_circle(&self) -> Option<Circle> {
+        use BSKind::*;
+        match self {
+            Rectangle(sh) => sh.as_circle(),
+            RectangleRounded(sh) => sh.as_circle(),
+            Disc(sh) => sh.as_circle(),
+            Oblong(sh) => sh.as_circle(),
+        }
+    }
+    #[inline]
+    fn contains(&self, pt: Point) -> bool {
+        use BSKind::*;
+        match self {
+            Rectangle(sh) => sh.contains(pt),
+            RectangleRounded(sh) => sh.contains(pt),
+            Disc(sh) => sh.contains(pt),
+            Oblong(sh) => sh.contains(pt),
+        }
+    }
+}
+pub enum BSKindIter {
+    RectangleIter(ShapeRectangleIter),
+    RectangleRoundedIter(ShapeRectRoundedIter),
+    DiscIter(CirclePathIter),
+    OblongIter(ShapeOblongIter),
+}
+impl Iterator for BSKindIter {
+    type Item = PathEl;
+    fn next(&mut self) -> Option<Self::Item> {
+        use BSKindIter::*;
+        match self {
+            RectangleIter(sh) => sh.next(),
+            RectangleRoundedIter(sh) => sh.next(),
+            DiscIter(sh) => sh.next(),
+            OblongIter(sh) => sh.next(),
         }
     }
 }
@@ -365,52 +428,48 @@ impl BoolOps {
 }
 
 #[derive(Clone, Debug)]
-pub struct Shape {
-    enabled: bool,
-    shid: Shid,
-    shape_kind: ShapeKind,
+pub struct BasicShape {
+    shid: BSid,
+    shape_kind: BSKind,
+
     boolean_op: BoolOps,
 }
-impl Shape {
-    pub fn new(cshid: Shid, shape_kind: ShapeKind, boolean_op: BoolOps) -> Shape {
-        Shape {
-            enabled: true,
-            shid: cshid,
+impl BasicShape {
+    pub fn new(shid: BSid, shape_kind: BSKind, boolean_op: BoolOps) -> BasicShape {
+        BasicShape {
+            shid,
             shape_kind,
             boolean_op,
         }
     }
-    pub fn disable(&mut self) {
-        self.enabled = false;
-    }
-    pub fn enable(&mut self) {
-        self.enabled = true;
-    }
-    pub fn get_kind(&self) -> &ShapeKind {
-        &self.shape_kind
-    }
-    pub fn get_kind_mut(&mut self) -> &mut ShapeKind {
-        &mut self.shape_kind
-    }
-    pub fn get_id(&self) -> Shid {
-        self.shid
-    }
-    pub fn set_new_id(&mut self, new_id: Shid) {
-        self.shid = new_id;
-    }
     pub fn get_boolean_op(&self) -> BoolOps {
         self.boolean_op
     }
-
     pub fn toggle_boolean_op(&mut self) {
         self.boolean_op.toggle();
     }
-
     pub fn set_boolean_op(&mut self, bool_ops: BoolOps) {
         self.boolean_op = bool_ops;
     }
+}
 
-    pub fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
+impl ObjectOps for BasicShape {
+    type Id = BSid;
+    type Kind = BSKind;
+
+    fn get_id(&self) -> BSid {
+        self.shid
+    }
+    fn get_kind(&self) -> &BSKind {
+        &self.shape_kind
+    }
+    fn get_kind_mut(&mut self) -> &mut BSKind {
+        &mut self.shape_kind
+    }
+    fn set_new_id(&mut self, new_id: BSid) {
+        self.shid = new_id;
+    }
+    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
         let hs = self.shape_kind.get_hhss();
         let pattern = match (hs.0, hs.1, self.boolean_op) {
             (false, false, BoolOps::UnionForced) => Pattern::BasicNormalDark,

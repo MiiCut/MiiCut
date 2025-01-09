@@ -1,10 +1,10 @@
 use super::helpers::HelperKind;
-use super::helpers::HelperKindFuncs;
 use super::helpers::HelperKindvars;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
 use crate::is_near_line;
 use crate::prefab::modifiers_path;
+use crate::traits::*;
 use crate::Position;
 use crate::Value;
 use crate::HS;
@@ -47,9 +47,10 @@ impl Display for HelperLine {
     }
 }
 
-impl HelperKindFuncs for HelperLine {
+impl ObjectsFuncs for HelperLine {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
+    type Kindvars = HelperKindvars;
 
     fn save_vars(&mut self) {
         self.position.save_pos();

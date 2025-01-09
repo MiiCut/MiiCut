@@ -1,9 +1,9 @@
 use super::helpers::HelperKind;
-use super::helpers::HelperKindFuncs;
 use super::helpers::HelperKindvars;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
 use crate::prefab::center_path;
+use crate::traits::*;
 use crate::Position;
 use crate::HS;
 use kurbo::BezPath;
@@ -35,9 +35,10 @@ impl Display for HelperPoint {
     }
 }
 
-impl HelperKindFuncs for HelperPoint {
+impl ObjectsFuncs for HelperPoint {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
+    type Kindvars = HelperKindvars;
 
     fn save_vars(&mut self) {
         self.position.save_pos();

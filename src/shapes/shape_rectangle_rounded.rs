@@ -4,13 +4,14 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
-use super::shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars};
+use super::shapes::{BSKind, BSKindvars};
 use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
     positions::{Position, Value, HS},
     prefab::{center_path, modifiers_path},
+    traits::*,
     Modifier,
 };
 use geo::{LineString, Polygon};
@@ -46,11 +47,11 @@ impl ShapeRectRounded {
     const MIN_SIZE: f64 = 20.;
     const RAD_MIN_SIZE: f64 = ShapeRectRounded::MIN_SIZE / 2.;
 
-    pub fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
+    pub fn new(pos1: Vec2, pos2: Vec2) -> BSKind {
         let mut br = Position::new(pos2, true);
         br.select(true);
         let tl = Position::new(pos1, true);
-        ShapeKind::RectangleRounded(ShapeRectRounded {
+        BSKind::RectangleRounded(ShapeRectRounded {
             tl,
             br,
             radius_tl: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
@@ -70,9 +71,11 @@ impl ShapeRectRounded {
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
     }
+    pub fn get_polygon(&self) -> Polygon<f64> {
+        self.polygon.clone()
+    }
 
     fn update_polygon(&mut self) {
-        log!("calc rect rounded polygon");
         self.segs = calc_segs(self.get_paths());
         self.polygon = calc_polygon(&self.segs);
     }
@@ -154,10 +157,10 @@ impl Display for ShapeRectRounded {
     }
 }
 impl Shape for ShapeRectRounded {
-    type PathElementsIter<'iter> = CShapeRectRoundedIter;
+    type PathElementsIter<'iter> = ShapeRectRoundedIter;
 
-    fn path_elements(&self, tolerance: f64) -> CShapeRectRoundedIter {
-        CShapeRectRoundedIter {
+    fn path_elements(&self, tolerance: f64) -> ShapeRectRoundedIter {
+        ShapeRectRoundedIter {
             rouned_rect_path_iter: self.get_rectangle_rounded().path_elements(tolerance),
         }
     }
@@ -186,10 +189,10 @@ impl Shape for ShapeRectRounded {
         self.get_rectangle_rounded().contains(pt)
     }
 }
-
-impl ShapeKindFuncs for ShapeRectRounded {
+impl ObjectsFuncs for ShapeRectRounded {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
+    type Kindvars = BSKindvars;
 
     fn save_vars(&mut self) {
         self.tl.save_pos();
@@ -208,8 +211,8 @@ impl ShapeKindFuncs for ShapeRectRounded {
         self.radius_bl.restore_saved();
         self.update_polygon();
     }
-    fn get_vars(&self) -> ShapeKindvars {
-        ShapeKindvars::RectangleRounded(
+    fn get_vars(&self) -> BSKindvars {
+        BSKindvars::RectangleRounded(
             self.tl,
             self.br,
             self.radius_tl,
@@ -218,8 +221,8 @@ impl ShapeKindFuncs for ShapeRectRounded {
             self.radius_bl,
         )
     }
-    fn set_vars(&mut self, vars: &ShapeKindvars) {
-        if let ShapeKindvars::RectangleRounded(tl, br, radius_tl, radius_tr, radius_br, radius_bl) =
+    fn set_vars(&mut self, vars: &BSKindvars) {
+        if let BSKindvars::RectangleRounded(tl, br, radius_tl, radius_tr, radius_br, radius_bl) =
             vars
         {
             self.tl = tl.clone();
@@ -755,15 +758,12 @@ impl ShapeKindFuncs for ShapeRectRounded {
             vec![BezPath::new()]
         }
     }
-    fn get_polygon(&self) -> Polygon<f64> {
-        self.polygon.clone()
-    }
 }
 
-pub struct CShapeRectRoundedIter {
+pub struct ShapeRectRoundedIter {
     rouned_rect_path_iter: RoundedRectPathIter,
 }
-impl Iterator for CShapeRectRoundedIter {
+impl Iterator for ShapeRectRoundedIter {
     type Item = PathEl;
 
     fn next(&mut self) -> Option<PathEl> {

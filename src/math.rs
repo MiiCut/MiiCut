@@ -6,7 +6,7 @@
 //     }
 // }
 
-use crate::shapes::shapes_pool::Shid;
+use crate::shapes::shapes_pool::BSid;
 use approx::*;
 use geo::{LineString, Polygon};
 use kurbo::{flatten, Arc, BezPath, Line, ParamCurveNearest, PathEl, RoundedRectRadii, Vec2};
@@ -20,7 +20,7 @@ use std::{
 #[derive(Debug)]
 pub enum MyError {
     NoShapeSelected,
-    NoClosedShapeForCShid(Shid),
+    NoClosedShapeForCShid(BSid),
     Inconsistent,
     Impossible,
     ShapesFull,

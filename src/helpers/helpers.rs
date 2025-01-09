@@ -4,6 +4,7 @@ use super::helper_point::HelperPoint;
 use super::helpers_pool::DHid;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
+use crate::traits::*;
 use crate::Position;
 use crate::Value;
 use crate::HS;
@@ -16,45 +17,6 @@ pub enum HelperKindvars {
     Point(Position),
     Line(Position, Value),
     Circle(Position, Value),
-}
-
-pub trait HelperKindFuncs: Debug + Clone {
-    const TOLERANCE: f64;
-    const GRAB: f64;
-
-    fn save_vars(&mut self);
-    fn restore_saved(&mut self);
-    fn get_vars(&self) -> HelperKindvars;
-    fn set_vars(&mut self, vars: &HelperKindvars);
-    fn good_size(&self) -> bool;
-
-    fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool;
-    fn set_hs(&mut self, value: bool, hors: HS);
-    fn get_hs(&self, hors: HS) -> bool;
-    fn get_hhss(&self) -> (bool, bool);
-
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool;
-    fn set_hs_modifiers(&mut self, value: bool, hors: HS);
-    fn get_hs_modifiers(&self, hors: HS) -> bool;
-
-    fn toggle_prop(&mut self);
-
-    fn move_position(&mut self, dpos: Vec2);
-    fn move_modifier(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) -> bool;
-    fn get_position(&self) -> Vec2;
-
-    fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)>;
-    fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>);
-    fn get_paths(&self) -> Vec<BezPath>;
-
-    fn get_pattern_modifiers(&self, selected: bool, highlighted: bool) -> Pattern {
-        match (selected, highlighted) {
-            (false, false) => Pattern::Modifiers,
-            (false, true) => Pattern::ModifiersHighlighted,
-            (true, false) => Pattern::ModifiersSelected,
-            (true, true) => Pattern::ModifiersSelected,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -72,10 +34,10 @@ impl Display for HelperKind {
         }
     }
 }
-
-impl HelperKindFuncs for HelperKind {
+impl ObjectsFuncs for HelperKind {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
+    type Kindvars = HelperKindvars;
 
     fn save_vars(&mut self) {
         use HelperKind::*;
@@ -238,40 +200,31 @@ impl HelperKindFuncs for HelperKind {
 
 #[derive(Clone, Debug)]
 pub struct Helper {
-    enabled: bool,
     dhid: DHid,
     helper_kind: HelperKind,
 }
 impl Helper {
     pub fn new(dhid: DHid, helper_kind: HelperKind) -> Helper {
-        Helper {
-            enabled: true,
-            dhid,
-            helper_kind,
-        }
+        Helper { dhid, helper_kind }
     }
-    pub fn disable(&mut self) {
-        self.enabled = false;
-    }
-    pub fn enable(&mut self) {
-        self.enabled = true;
-    }
-    pub fn clone_kind(&self) -> HelperKind {
-        self.helper_kind.clone()
-    }
-    pub fn get_id(&self) -> DHid {
+}
+impl ObjectOps for Helper {
+    type Id = DHid;
+    type Kind = HelperKind;
+
+    fn get_id(&self) -> DHid {
         self.dhid
     }
-    pub fn set_new_id(&mut self, new_id: DHid) {
-        self.dhid = new_id;
-    }
-    pub fn get_kind(&self) -> &HelperKind {
+    fn get_kind(&self) -> &HelperKind {
         &self.helper_kind
     }
-    pub fn get_kind_mut(&mut self) -> &mut HelperKind {
+    fn get_kind_mut(&mut self) -> &mut HelperKind {
         &mut self.helper_kind
     }
-    pub fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
+    fn set_new_id(&mut self, id: Self::Id) {
+        self.dhid = id;
+    }
+    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
         let hs = self.helper_kind.get_hhss();
         let pattern = match (hs.0, hs.1) {
             (false, false) => Pattern::BasicNormal,

@@ -4,13 +4,13 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
-
 use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
     positions::{Position, Value, HS},
     prefab::{center_path, modifiers_path},
+    traits::*,
 };
 use geo::{LineString, Polygon};
 use kurbo::{Arc, ArcAppendIter, BezPath, Line, LinePathIter, PathEl, Point, Rect, Shape, Vec2};
@@ -19,7 +19,7 @@ use std::{
     fmt::Display,
 };
 
-use super::shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars};
+use super::shapes::{BSKind, BSKindvars};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeOblongVars {
@@ -70,13 +70,13 @@ impl ShapeOblong {
     const MIN_WIDTH_SIZE: f64 = 2.;
     const MIN_LENGTH_SIZE: f64 = 10.;
 
-    pub fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
+    pub fn new(pos1: Vec2, pos2: Vec2) -> BSKind {
         // let pos2 = pos2 + Vec2::new(30., 0.);
         let start = Position::new(pos1, true);
         let mut end = Position::new(pos2, true);
         end.select(true);
         let width = Value::new(10.);
-        ShapeKind::Oblong(ShapeOblong {
+        BSKind::Oblong(ShapeOblong {
             start,
             end,
             width,
@@ -86,10 +86,15 @@ impl ShapeOblong {
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
     }
+    pub fn get_polygon(&self) -> Polygon<f64> {
+        self.polygon.clone()
+    }
+
     fn update_polygon(&mut self) {
         self.segs = calc_segs(self.get_paths());
         self.polygon = calc_polygon(&self.segs);
     }
+
     fn get_width(&self) -> f64 {
         self.width.get_val()
     }
@@ -152,9 +157,9 @@ impl Display for ShapeOblong {
     }
 }
 impl Shape for ShapeOblong {
-    type PathElementsIter<'iter> = CShapeOblongIter;
+    type PathElementsIter<'iter> = ShapeOblongIter;
 
-    fn path_elements(&self, tolerance: f64) -> CShapeOblongIter {
+    fn path_elements(&self, tolerance: f64) -> ShapeOblongIter {
         let arcs_iter = [
             self.get_arc(true).append_iter(tolerance),
             self.get_arc(false).append_iter(tolerance),
@@ -164,7 +169,7 @@ impl Shape for ShapeOblong {
             self.get_line(true).path_elements(tolerance),
         ];
 
-        CShapeOblongIter {
+        ShapeOblongIter {
             idx: 0,
             lines_iter,
             arcs_iter,
@@ -194,10 +199,10 @@ impl Shape for ShapeOblong {
         self.winding(pt) != 0
     }
 }
-
-impl ShapeKindFuncs for ShapeOblong {
+impl ObjectsFuncs for ShapeOblong {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
+    type Kindvars = BSKindvars;
 
     fn save_vars(&mut self) {
         self.start.save_pos();
@@ -210,11 +215,11 @@ impl ShapeKindFuncs for ShapeOblong {
         self.width.restore_saved();
         self.update_polygon();
     }
-    fn get_vars(&self) -> ShapeKindvars {
-        ShapeKindvars::Oblong(self.start, self.end, self.width)
+    fn get_vars(&self) -> BSKindvars {
+        BSKindvars::Oblong(self.start, self.end, self.width)
     }
-    fn set_vars(&mut self, vars: &ShapeKindvars) {
-        if let ShapeKindvars::Oblong(start, end, width) = vars {
+    fn set_vars(&mut self, vars: &BSKindvars) {
+        if let BSKindvars::Oblong(start, end, width) = vars {
             self.start = start.clone();
             self.end = end.clone();
             self.width = width.clone();
@@ -423,13 +428,10 @@ impl ShapeKindFuncs for ShapeOblong {
         paths.push(self.get_arc(true).to_path(ShapeOblong::TOLERANCE));
         paths
     }
-    fn get_polygon(&self) -> Polygon<f64> {
-        self.polygon.clone()
-    }
 }
 
 #[doc(hidden)]
-pub struct CShapeOblongIter {
+pub struct ShapeOblongIter {
     idx: usize,
     arcs_iter: [ArcAppendIter; 2],
     lines_iter: [LinePathIter; 2],
@@ -438,7 +440,7 @@ pub struct CShapeOblongIter {
     // 1: arcs_iter[0]/lines_iter[1]
     // 2: arcs_iter[1]
 }
-impl Iterator for CShapeOblongIter {
+impl Iterator for ShapeOblongIter {
     type Item = PathEl;
 
     fn next(&mut self) -> Option<PathEl> {

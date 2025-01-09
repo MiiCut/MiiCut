@@ -1,6 +1,6 @@
 use kurbo::Vec2;
 
-use crate::{draw_helpers::helpers::HelperKindFuncs, HS};
+use crate::{traits::*, HS};
 
 use super::helpers::{Helper, HelperKindvars};
 use std::{
@@ -21,7 +21,7 @@ impl HelpersPool {
             helpers: HashMap::new(),
         }
     }
-
+    // Methods
     pub fn duplicate_helpers(&mut self, shapes: Vec<Helper>) -> Vec<Helper> {
         let mut new_helpers = vec![];
         for mut helper in shapes.into_iter() {
@@ -32,15 +32,12 @@ impl HelpersPool {
         }
         new_helpers
     }
-
     pub fn add_helper(&mut self, helper: Helper) {
         self.helpers.insert(helper.get_id(), helper);
     }
-
     pub fn delete_helper(&mut self, dhid: DHid) -> Option<Helper> {
         self.helpers.remove(&dhid)
     }
-
     pub fn get_helper(&self, target_dhid: DHid) -> Option<&Helper> {
         self.helpers.get(&target_dhid)
     }
@@ -58,6 +55,12 @@ impl HelpersPool {
     }
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Helper> {
         self.helpers.values_mut()
+    }
+
+    pub fn save_vars(&mut self) {
+        self.helpers.values_mut().for_each(|helper| {
+            helper.get_kind_mut().save_vars();
+        });
     }
 
     pub fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
@@ -81,41 +84,6 @@ impl HelpersPool {
             helper.get_kind_mut().set_hs(value, hors);
         });
     }
-
-    pub fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _precision: f64, hors: HS) -> bool {
-        let mut setted = false;
-        self.helpers.values_mut().for_each(|helper| {
-            setted |= helper.get_kind_mut().set_hs_modifiers_from_pos(pos, hors);
-        });
-        setted
-    }
-    pub fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
-        self.helpers.values_mut().for_each(|helper| {
-            helper.get_kind_mut().set_hs_modifiers(value, hors);
-        });
-    }
-
-    pub fn move_positions(
-        &mut self,
-        dhid_sel: Vec<DHid>,
-        pos_init: Vec2,
-        pos: Vec2,
-        _shift_pressed: bool,
-    ) {
-        dhid_sel.into_iter().for_each(|dhid| {
-            if let Some(helper) = self.helpers.get_mut(&dhid) {
-                helper.get_kind_mut().move_position(pos - pos_init);
-            }
-        });
-    }
-    pub fn move_modifier(&mut self, dhid: DHid, pos_init: Vec2, pos: Vec2, shift_pressed: bool) {
-        if let Some(helper) = self.helpers.get_mut(&dhid) {
-            helper
-                .get_kind_mut()
-                .move_modifier(pos_init, pos, shift_pressed);
-        }
-    }
-
     pub fn get_hs(&self, hors: HS) -> Vec<DHid> {
         let mut result = vec![];
         for helper in self.helpers.values() {
@@ -147,6 +115,19 @@ impl HelpersPool {
             helper.get_kind_mut().set_hs(value, hors);
         }
     }
+
+    pub fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _precision: f64, hors: HS) -> bool {
+        let mut setted = false;
+        self.helpers.values_mut().for_each(|helper| {
+            setted |= helper.get_kind_mut().set_hs_modifiers_from_pos(pos, hors);
+        });
+        setted
+    }
+    pub fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
+        self.helpers.values_mut().for_each(|helper| {
+            helper.get_kind_mut().set_hs_modifiers(value, hors);
+        });
+    }
     pub fn get_first_selected_modifier_vars(&self) -> Option<(DHid, HelperKindvars)> {
         for helper in self.helpers.values() {
             if helper.get_kind().get_hs_modifiers(HS::Select) {
@@ -155,6 +136,28 @@ impl HelpersPool {
         }
         None
     }
+
+    pub fn move_positions(
+        &mut self,
+        dhid_sel: Vec<DHid>,
+        pos_init: Vec2,
+        pos: Vec2,
+        _shift_pressed: bool,
+    ) {
+        dhid_sel.into_iter().for_each(|dhid| {
+            if let Some(helper) = self.helpers.get_mut(&dhid) {
+                helper.get_kind_mut().move_position(pos - pos_init);
+            }
+        });
+    }
+    pub fn move_modifier(&mut self, dhid: DHid, pos_init: Vec2, pos: Vec2, shift_pressed: bool) {
+        if let Some(helper) = self.helpers.get_mut(&dhid) {
+            helper
+                .get_kind_mut()
+                .move_modifier(pos_init, pos, shift_pressed);
+        }
+    }
+
     pub fn delete_helpers_selected(&mut self) -> Vec<Helper> {
         let shapes_deleted: Vec<Helper> = self
             .helpers
@@ -166,6 +169,7 @@ impl HelpersPool {
         shapes_deleted
     }
 }
+
 static COUNTER_DRAW_HELPERS: AtomicUsize = AtomicUsize::new(0);
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd)]
 pub struct DHid {
@@ -187,8 +191,8 @@ impl Display for DHid {
         write!(f, "{}", self.id)
     }
 }
-impl DHid {
-    pub fn new() -> DHid {
+impl NewId for DHid {
+    fn new() -> Self {
         DHid {
             id: COUNTER_DRAW_HELPERS.fetch_add(1, Ordering::Relaxed),
         }
