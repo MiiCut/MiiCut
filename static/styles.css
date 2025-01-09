@@ -14,6 +14,9 @@
     --canvas-basic-normal-color: #424242;
     --canvas-basic-highlight-color:  #ffffff;
     --canvas-basic-selected-color:  #ff0000;
+    --canvas-basic-normal-color-dark: #424242;
+    --canvas-basic-highlight-color-dark:  #ffffff;
+    --canvas-basic-selected-color-dark:  #ff0000;
 
     --canvas-composed-normal-color: #424242;
     --canvas-composed-highlight-color:  #bfbb48;
@@ -259,14 +262,20 @@ canvas {
 #icon-circle {
     background-image: url('../assets/icon-circle.svg');
 }
-#icon-quarter-circle {
-    background-image: url('../assets/icon-quarter-circle.svg');
-}
 #icon-oblong {
     background-image: url('../assets/icon-oblong.svg');
 }
 #icon-quarter-ellipse {
     background-image: url('../assets/icon-quarter-ellipse.svg');
+}
+#icon-construction-point {
+    background-image: url('../assets/icon-construction-point.svg');
+}
+#icon-construction-line {
+    background-image: url('../assets/icon-construction-line.svg');
+}
+#icon-construction-circle {
+    background-image: url('../assets/icon-construction-circle.svg');
 }
 
 
@@ -327,11 +336,7 @@ canvas {
 }
 
 .status-section {
-    flex-grow: 1;               /* Allows each section to grow and take up available space */
-    margin: 0 10px;             /* Some margin between sections */
-    display: flex;              /* To align items vertically and horizontally */
-    align-items: center;        /* Vertically centers the content */
-    justify-content: center;    /* Horizontally centers the content */
+    margin: 0 10px;
 }
 
 #status-info-worksheet-pos {

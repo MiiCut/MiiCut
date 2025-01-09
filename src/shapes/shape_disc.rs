@@ -4,19 +4,18 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
-
-use geo::{LineString, Polygon};
-use kurbo::{BezPath, Circle, CirclePathIter, Point, Rect, Shape, Vec2};
-use std::fmt::Display;
-
 use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
     positions::{Position, Value, HS},
     prefab::{center_path, modifiers_path},
-    shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars, Shapes},
 };
+use geo::{LineString, Polygon};
+use kurbo::{BezPath, Circle, CirclePathIter, Point, Rect, Shape, Vec2};
+use std::fmt::Display;
+
+use super::shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeDisc {
@@ -32,9 +31,22 @@ pub struct ShapeDisc {
 impl ShapeDisc {
     const MIN_RADIUS: f64 = 2.;
 
+    pub fn new(center: Vec2, _pos2: Vec2) -> ShapeKind {
+        let center = Position::new(center, false);
+        let mut radius = Value::new(ShapeDisc::MIN_RADIUS);
+        radius.select(true);
+
+        ShapeKind::Disc(ShapeDisc {
+            center,
+            radius,
+            highlighted: false,
+            selected: false,
+            segs: BezPath::new(),
+            polygon: Polygon::new(LineString::new(vec![]), vec![]),
+        })
+    }
     fn update_polygon(&mut self) {
-        log!("calc disc polygon");
-        self.segs = calc_segs(self.get_paths_and_patterns());
+        self.segs = calc_segs(self.get_paths());
         self.polygon = calc_polygon(&self.segs);
     }
 
@@ -85,26 +97,11 @@ impl Shape for ShapeDisc {
         self.get_circle().contains(pt)
     }
 }
-impl Shapes for ShapeDisc {
+
+impl ShapeKindFuncs for ShapeDisc {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
 
-    fn new(center: Vec2, _pos2: Vec2) -> ShapeKind {
-        let center = Position::new(center, false);
-        let mut radius = Value::new(ShapeDisc::MIN_RADIUS);
-        radius.select(true);
-
-        ShapeKind::Disc(ShapeDisc {
-            center,
-            radius,
-            highlighted: false,
-            selected: false,
-            segs: BezPath::new(),
-            polygon: Polygon::new(LineString::new(vec![]), vec![]),
-        })
-    }
-}
-impl ShapeKindFuncs for ShapeDisc {
     fn save_vars(&mut self) {
         self.center.save_pos();
         self.radius.save_val();
@@ -151,6 +148,9 @@ impl ShapeKindFuncs for ShapeDisc {
             HS::Highlight => self.highlighted,
             HS::Select => self.selected,
         }
+    }
+    fn get_hhss(&self) -> (bool, bool) {
+        (self.selected, self.highlighted)
     }
 
     fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
@@ -229,11 +229,8 @@ impl ShapeKindFuncs for ShapeDisc {
         texts.push(text);
         (paths, texts)
     }
-    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
-        vec![(
-            self.get_circle().to_path(Self::TOLERANCE),
-            self.get_pattern(self.selected, self.highlighted),
-        )]
+    fn get_paths(&self) -> Vec<BezPath> {
+        vec![self.get_circle().to_path(Self::TOLERANCE)]
     }
     fn get_polygon(&self) -> Polygon<f64> {
         self.polygon.clone()

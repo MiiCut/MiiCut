@@ -4,14 +4,14 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
-
+use super::shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars};
 use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
-    positions::{Modifier, Position, HS},
+    positions::{Position, HS},
     prefab::{center_path, modifiers_path},
-    shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars, Shapes},
+    Modifier,
 };
 use geo::{LineString, Polygon};
 use kurbo::{BezPath, PathEl, Point, Rect, RectPathIter, Shape, Vec2};
@@ -38,9 +38,28 @@ pub struct ShapeRectangle {
 impl ShapeRectangle {
     const MIN_SIZE: f64 = 10.;
 
+    pub fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
+        let mut br = Position::new(pos2, true);
+        br.select(true);
+        let tl = Position::new(pos1, true);
+
+        ShapeKind::Rectangle(ShapeRectangle {
+            tl,
+            br,
+            tr: Modifier::new(),
+            bl: Modifier::new(),
+            top: Modifier::new(),
+            right: Modifier::new(),
+            bottom: Modifier::new(),
+            left: Modifier::new(),
+            highlighted: false,
+            selected: false,
+            segs: BezPath::new(),
+            polygon: Polygon::new(LineString::new(vec![]), vec![]),
+        })
+    }
     fn update_polygon(&mut self) {
-        log!("calc rect polygon");
-        self.segs = calc_segs(self.get_paths_and_patterns());
+        self.segs = calc_segs(self.get_paths());
         self.polygon = calc_polygon(&self.segs);
     }
 
@@ -128,32 +147,11 @@ impl Shape for ShapeRectangle {
         self.get_rectangle().abs().contains(pt)
     }
 }
-impl Shapes for ShapeRectangle {
+
+impl ShapeKindFuncs for ShapeRectangle {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
 
-    fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
-        let mut br = Position::new(pos2, true);
-        br.select(true);
-        let tl = Position::new(pos1, true);
-
-        ShapeKind::Rectangle(ShapeRectangle {
-            tl,
-            br,
-            tr: Modifier::new(),
-            bl: Modifier::new(),
-            top: Modifier::new(),
-            right: Modifier::new(),
-            bottom: Modifier::new(),
-            left: Modifier::new(),
-            highlighted: false,
-            selected: false,
-            segs: BezPath::new(),
-            polygon: Polygon::new(LineString::new(vec![]), vec![]),
-        })
-    }
-}
-impl ShapeKindFuncs for ShapeRectangle {
     fn save_vars(&mut self) {
         self.tl.save_pos();
         self.br.save_pos();
@@ -203,7 +201,9 @@ impl ShapeKindFuncs for ShapeRectangle {
             HS::Select => self.selected,
         }
     }
-
+    fn get_hhss(&self) -> (bool, bool) {
+        (self.selected, self.highlighted)
+    }
     fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
         let tl_hors = (pos - self.tl.get_pos()).hypot() < Self::GRAB;
         let tr_hors = (pos - self.get_tr_modifier()).hypot() < Self::GRAB;
@@ -467,14 +467,11 @@ impl ShapeKindFuncs for ShapeRectangle {
         texts.push(text);
         (paths, texts)
     }
-    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
+    fn get_paths(&self) -> Vec<BezPath> {
         if self.good_size() {
-            vec![(
-                self.get_rectangle().to_path(Self::TOLERANCE),
-                self.get_pattern(self.selected, self.highlighted),
-            )]
+            vec![self.get_rectangle().to_path(Self::TOLERANCE)]
         } else {
-            vec![(BezPath::new(), Pattern::BasicNormal)]
+            vec![BezPath::new()]
         }
     }
     fn get_polygon(&self) -> Polygon<f64> {

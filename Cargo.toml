@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 # kurbo = { git = "https://github.com/linebender/kurbo" }
 ttf-parser = "0.25.1"
+svg = "0.18.0"
 kurbo = "0.11.1"
 geo = "0.29.3"
 approx = "0.5.1"
@@ -38,4 +39,5 @@ features = [
     "WheelEvent",
     "KeyboardEvent",
     "Text",
+    "Performance",
 ]

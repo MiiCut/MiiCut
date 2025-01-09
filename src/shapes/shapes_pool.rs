@@ -1,14 +1,12 @@
-use crate::{
-    math::*,
-    positions::HS,
+use super::{
     shape_disc::ShapeDisc,
     shape_oblong::ShapeOblong,
     shape_rectangle::ShapeRectangle,
     shape_rectangle_rounded::ShapeRectRounded,
-    shapes::{BoolOps, Shape, ShapeKindFuncs, ShapeKindvars, Shapes},
-    undo_redo::Action,
-    IconsShapes,
+    shapes::Shape,
+    shapes::{BoolOps, ShapeKindFuncs, ShapeKindvars},
 };
+use crate::{clipboard::Action, math::*, positions::HS, IconsShapes, Pools};
 use geo::{BooleanOps, Intersects, MultiPolygon, Polygon};
 use kurbo::{BezPath, Vec2};
 use std::{
@@ -18,36 +16,37 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
     vec,
 };
+use web_sys::window;
 
 pub struct AddShapeAction {
     pub shape: Shape,
 }
 impl Action for AddShapeAction {
-    fn undo(&self, pool: &mut ShapesPool) {
+    fn undo(&self, pools: &mut Pools) {
         log!("Undoing shape creation: {:?}", self.shape.get_id());
-        pool.delete_shape(self.shape.get_id());
+        pools.sh.delete_shape(self.shape.get_id());
     }
 
-    fn redo(&self, pool: &mut ShapesPool) {
+    fn redo(&self, pools: &mut Pools) {
         log!("Redoing shape creation: {:?}", self.shape.get_id());
-        pool.add_shape(self.shape.clone());
+        pools.sh.add_shape(self.shape.clone());
     }
 }
 pub struct RemoveShapeAction {
     pub shapes: Vec<Shape>,
 }
 impl Action for RemoveShapeAction {
-    fn undo(&self, pool: &mut ShapesPool) {
+    fn undo(&self, pools: &mut Pools) {
         log!("Undoing shapes creation");
         self.shapes.iter().for_each(|shape| {
-            pool.add_shape(shape.clone());
+            pools.sh.add_shape(shape.clone());
         });
     }
 
-    fn redo(&self, pool: &mut ShapesPool) {
+    fn redo(&self, pools: &mut Pools) {
         log!("Redoing shapes creation");
         self.shapes.iter().for_each(|shape| {
-            pool.delete_shape(shape.get_id());
+            pools.sh.delete_shape(shape.get_id());
         });
     }
 }
@@ -82,10 +81,15 @@ impl ShapesPool {
         };
         Shape::new(shid, shape_kind, boolean_op)
     }
-    pub fn new_shape_cloned_from(shape: &Shape) -> Shape {
-        let shid = Shid::new();
-        let shape_kind = shape.clone_kind();
-        Shape::new(shid, shape_kind, shape.get_boolean_op())
+    pub fn duplicate_shapes(&mut self, shapes: Vec<Shape>) -> Vec<Shape> {
+        let mut new_shapes = vec![];
+        for mut shape in shapes.into_iter() {
+            shape.set_new_id(Shid::new());
+            shape.get_kind_mut().set_hs(true, HS::Select);
+            self.add_shape(shape.clone());
+            new_shapes.push(shape);
+        }
+        new_shapes
     }
 
     // Methods
@@ -115,11 +119,12 @@ impl ShapesPool {
         self.shapes.values_mut()
     }
 
-    pub fn save_positions(&mut self) {
+    pub fn save_vars(&mut self) {
         self.shapes.values_mut().for_each(|shape| {
-            shape.kind_mut().save_vars();
+            shape.get_kind_mut().save_vars();
         });
     }
+
     pub fn intersection_set(&self, shid: Shid) -> HashSet<Shid> {
         let mut result = HashSet::new();
         if let Some(shape) = self.shapes.get(&shid) {
@@ -129,9 +134,9 @@ impl ShapesPool {
                     continue;
                 }
                 if shape
-                    .kind()
+                    .get_kind()
                     .get_polygon()
-                    .intersects(&v.kind().get_polygon())
+                    .intersects(&v.get_kind().get_polygon())
                 {
                     result.insert(*k);
                 }
@@ -170,7 +175,7 @@ impl ShapesPool {
             let connected_shids = self.connected_shapes(start_shid);
             connected_shids.iter().for_each(|shid| {
                 if let Some(shape) = self.shapes.get_mut(shid) {
-                    shape.kind_mut().set_hs(true, HS::Select);
+                    shape.get_kind_mut().set_hs(true, HS::Select);
                     res = true;
                 }
             });
@@ -183,13 +188,13 @@ impl ShapesPool {
         if let Highlight = hors {
             let mut res = false;
             self.shapes.values_mut().for_each(|shape| {
-                res |= shape.kind_mut().set_hs_from_pos(pos, Highlight);
+                res |= shape.get_kind_mut().set_hs_from_pos(pos, Highlight);
             });
             return res;
         } else {
             let mut overlapping_shapes = HashSet::new();
             self.shapes.values_mut().for_each(|shape| {
-                if shape.kind_mut().set_hs_from_pos(pos, Select) {
+                if shape.get_kind_mut().set_hs_from_pos(pos, Select) {
                     overlapping_shapes.insert(shape.get_id());
                 }
             });
@@ -199,12 +204,12 @@ impl ShapesPool {
             // Toggle to the next shape
             self.shapes
                 .values_mut()
-                .for_each(|shape| shape.kind_mut().set_hs(false, Select));
+                .for_each(|shape| shape.get_kind_mut().set_hs(false, Select));
 
             if let Some(next_shid) = self.shapes_selector.next_selection() {
                 // Find and select the next shape
                 if let Some(shape) = self.shapes.get_mut(&next_shid) {
-                    shape.kind_mut().set_hs(true, Select);
+                    shape.get_kind_mut().set_hs(true, Select);
                     return true;
                 }
             }
@@ -213,20 +218,20 @@ impl ShapesPool {
     }
     pub fn set_hs(&mut self, value: bool, hors: HS) {
         self.shapes.values_mut().for_each(|shape| {
-            shape.kind_mut().set_hs(value, hors);
+            shape.get_kind_mut().set_hs(value, hors);
         });
     }
 
     pub fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _precision: f64, hors: HS) -> bool {
         let mut setted = false;
         self.shapes.values_mut().for_each(|shape| {
-            setted |= shape.kind_mut().set_hs_modifiers_from_pos(pos, hors);
+            setted |= shape.get_kind_mut().set_hs_modifiers_from_pos(pos, hors);
         });
         setted
     }
     pub fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
         self.shapes.values_mut().for_each(|shape| {
-            shape.kind_mut().set_hs_modifiers(value, hors);
+            shape.get_kind_mut().set_hs_modifiers(value, hors);
         });
     }
 
@@ -239,55 +244,66 @@ impl ShapesPool {
     ) {
         shid_sel.into_iter().for_each(|shid| {
             if let Some(shape) = self.shapes.get_mut(&shid) {
-                shape.kind_mut().move_position(pos - pos_init);
+                shape.get_kind_mut().move_position(pos - pos_init);
             }
         });
     }
     pub fn move_modifier(&mut self, shid: Shid, pos_init: Vec2, pos: Vec2, shift_pressed: bool) {
         if let Some(shape) = self.shapes.get_mut(&shid) {
-            shape.kind_mut().move_modifier(pos_init, pos, shift_pressed);
+            shape
+                .get_kind_mut()
+                .move_modifier(pos_init, pos, shift_pressed);
         }
     }
+
     pub fn get_hs(&self, hors: HS) -> Vec<Shid> {
         let mut result = vec![];
         for shape in self.shapes.values() {
-            if shape.kind().get_hs(hors) {
+            if shape.get_kind().get_hs(hors) {
                 result.push(shape.get_id());
             }
         }
         result
     }
+    pub fn get_hs_if_one(&self, hors: HS) -> Option<Shid> {
+        let result = self.get_hs(hors);
+        if result.len() == 1 {
+            Some(result[0])
+        } else {
+            None
+        }
+    }
     pub fn get_hs_vars(&self, hors: HS) -> Vec<(Shid, ShapeKindvars)> {
         let mut result = vec![];
         for shape in self.shapes.values() {
-            if shape.kind().get_hs(hors) {
-                result.push((shape.get_id(), shape.kind().get_vars()));
+            if shape.get_kind().get_hs(hors) {
+                result.push((shape.get_id(), shape.get_kind().get_vars()));
             }
         }
         result
     }
-    pub fn get_first_selected_modifier(&self) -> Option<Shid> {
+    pub fn set_hs_from_shid(&mut self, shid: Shid, value: bool, hors: HS) {
+        if let Some(shape) = self.shapes.get_mut(&shid) {
+            shape.get_kind_mut().set_hs(value, hors);
+        }
+    }
+    pub fn get_first_selected_modifier_vars(&self) -> Option<(Shid, ShapeKindvars)> {
         for shape in self.shapes.values() {
-            if shape.kind().get_hs_modifiers(HS::Select) {
-                return Some(shape.get_id());
+            if shape.get_kind().get_hs_modifiers(HS::Select) {
+                return Some((shape.get_id(), shape.get_kind().get_vars()));
             }
         }
         None
-    }
-    pub fn set_hs_from_shid(&mut self, shid: Shid, value: bool, hors: HS) {
-        if let Some(shape) = self.shapes.get_mut(&shid) {
-            shape.kind_mut().set_hs(value, hors);
-        }
     }
 
     pub fn delete_shapes_selected(&mut self) -> Vec<Shape> {
         let shapes_deleted: Vec<Shape> = self
             .shapes
             .iter()
-            .filter(|(_, shape)| shape.kind().get_hs(HS::Select))
+            .filter(|(_, shape)| shape.get_kind().get_hs(HS::Select))
             .map(|(_, shape)| shape.clone())
             .collect();
-        self.shapes.retain(|_, v| !v.kind().get_hs(HS::Select));
+        self.shapes.retain(|_, v| !v.get_kind().get_hs(HS::Select));
         shapes_deleted
     }
 
@@ -301,15 +317,17 @@ impl ShapesPool {
                 BoolOps::Difference => 1,
                 BoolOps::UnionForced => 2,
             };
-
             priority(&a.get_boolean_op()).cmp(&priority(&b.get_boolean_op()))
         });
 
         // Convert shapes to polygons with their boolean operations
         let polygons: Vec<(Polygon, BoolOps)> = shapes
             .iter()
-            .map(|shape| (shape.kind().get_polygon(), shape.get_boolean_op()))
+            .map(|shape| (shape.get_kind().get_polygon(), shape.get_boolean_op()))
             .collect();
+
+        let performance = window().unwrap().performance().unwrap();
+        let start_time = performance.now();
 
         // Apply boolean operations iteratively
         let mut multi_polygon = MultiPolygon(vec![]);
@@ -320,6 +338,9 @@ impl ShapesPool {
                 multi_polygon = multi_polygon.boolean_op(polygon, op_type.get_op());
             }
         }
+
+        let end_time = performance.now();
+        log!("Apply boolean operation: {:.2} ms", end_time - start_time);
 
         // Convert the resulting MultiPolygon to BezPath
         self.full_segs = multi_polygon

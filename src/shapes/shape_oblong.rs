@@ -11,7 +11,6 @@ use crate::{
     math::*,
     positions::{Position, Value, HS},
     prefab::{center_path, modifiers_path},
-    shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars, Shapes},
 };
 use geo::{LineString, Polygon};
 use kurbo::{Arc, ArcAppendIter, BezPath, Line, LinePathIter, PathEl, Point, Rect, Shape, Vec2};
@@ -19,6 +18,8 @@ use std::{
     f64::consts::{FRAC_PI_2, PI},
     fmt::Display,
 };
+
+use super::shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeOblongVars {
@@ -69,9 +70,24 @@ impl ShapeOblong {
     const MIN_WIDTH_SIZE: f64 = 2.;
     const MIN_LENGTH_SIZE: f64 = 10.;
 
+    pub fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
+        // let pos2 = pos2 + Vec2::new(30., 0.);
+        let start = Position::new(pos1, true);
+        let mut end = Position::new(pos2, true);
+        end.select(true);
+        let width = Value::new(10.);
+        ShapeKind::Oblong(ShapeOblong {
+            start,
+            end,
+            width,
+            highlighted: false,
+            selected: false,
+            segs: BezPath::new(),
+            polygon: Polygon::new(LineString::new(vec![]), vec![]),
+        })
+    }
     fn update_polygon(&mut self) {
-        log!("calc oblong polygon");
-        self.segs = calc_segs(self.get_paths_and_patterns());
+        self.segs = calc_segs(self.get_paths());
         self.polygon = calc_polygon(&self.segs);
     }
     fn get_width(&self) -> f64 {
@@ -178,28 +194,11 @@ impl Shape for ShapeOblong {
         self.winding(pt) != 0
     }
 }
-impl Shapes for ShapeOblong {
+
+impl ShapeKindFuncs for ShapeOblong {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
 
-    fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
-        // let pos2 = pos2 + Vec2::new(30., 0.);
-        let start = Position::new(pos1, true);
-        let mut end = Position::new(pos2, true);
-        end.select(true);
-        let width = Value::new(10.);
-        ShapeKind::Oblong(ShapeOblong {
-            start,
-            end,
-            width,
-            highlighted: false,
-            selected: false,
-            segs: BezPath::new(),
-            polygon: Polygon::new(LineString::new(vec![]), vec![]),
-        })
-    }
-}
-impl ShapeKindFuncs for ShapeOblong {
     fn save_vars(&mut self) {
         self.start.save_pos();
         self.end.save_pos();
@@ -240,6 +239,21 @@ impl ShapeKindFuncs for ShapeOblong {
             }
         }
     }
+    fn set_hs(&mut self, value: bool, hors: HS) {
+        match hors {
+            HS::Highlight => self.highlighted = value,
+            HS::Select => self.selected = value,
+        }
+    }
+    fn get_hs(&self, hors: HS) -> bool {
+        match hors {
+            HS::Highlight => self.highlighted,
+            HS::Select => self.selected,
+        }
+    }
+    fn get_hhss(&self) -> (bool, bool) {
+        (self.selected, self.highlighted)
+    }
     fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
         let start_hors = (pos - self.start.get_pos()).hypot() < Self::GRAB;
         let end_hors = (pos - self.end.get_pos()).hypot() < Self::GRAB;
@@ -261,12 +275,6 @@ impl ShapeKindFuncs for ShapeOblong {
             }
         }
     }
-    fn set_hs(&mut self, value: bool, hors: HS) {
-        match hors {
-            HS::Highlight => self.highlighted = value,
-            HS::Select => self.selected = value,
-        }
-    }
     fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
         match hors {
             HS::Highlight => {
@@ -279,12 +287,6 @@ impl ShapeKindFuncs for ShapeOblong {
                 self.end.select(value);
                 self.width.select(value);
             }
-        }
-    }
-    fn get_hs(&self, hors: HS) -> bool {
-        match hors {
-            HS::Highlight => self.highlighted,
-            HS::Select => self.selected,
         }
     }
     fn get_hs_modifiers(&self, hors: HS) -> bool {
@@ -412,25 +414,13 @@ impl ShapeKindFuncs for ShapeOblong {
 
         (paths, texts)
     }
-    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
-        let mut paths: Vec<(BezPath, Pattern)> = vec![];
-        paths.push((
-            self.get_line(true).to_path(ShapeOblong::TOLERANCE),
-            self.get_pattern(self.selected, self.highlighted),
-        ));
-        paths.push((
-            self.get_arc(false).to_path(ShapeOblong::TOLERANCE),
-            self.get_pattern(self.selected, self.highlighted),
-        ));
+    fn get_paths(&self) -> Vec<BezPath> {
+        let mut paths: Vec<BezPath> = vec![];
+        paths.push(self.get_line(true).to_path(ShapeOblong::TOLERANCE));
+        paths.push(self.get_arc(false).to_path(ShapeOblong::TOLERANCE));
 
-        paths.push((
-            self.get_line(false).to_path(ShapeOblong::TOLERANCE),
-            self.get_pattern(self.selected, self.highlighted),
-        ));
-        paths.push((
-            self.get_arc(true).to_path(ShapeOblong::TOLERANCE),
-            self.get_pattern(self.selected, self.highlighted),
-        ));
+        paths.push(self.get_line(false).to_path(ShapeOblong::TOLERANCE));
+        paths.push(self.get_arc(true).to_path(ShapeOblong::TOLERANCE));
         paths
     }
     fn get_polygon(&self) -> Polygon<f64> {

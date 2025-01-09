@@ -4,14 +4,14 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
-
+use super::shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars};
 use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
-    positions::{Modifier, Position, Value, HS},
-    prefab::*,
-    shapes::{ShapeKind, ShapeKindFuncs, ShapeKindvars, Shapes},
+    positions::{Position, Value, HS},
+    prefab::{center_path, modifiers_path},
+    Modifier,
 };
 use geo::{LineString, Polygon};
 use kurbo::{
@@ -46,9 +46,34 @@ impl ShapeRectRounded {
     const MIN_SIZE: f64 = 20.;
     const RAD_MIN_SIZE: f64 = ShapeRectRounded::MIN_SIZE / 2.;
 
+    pub fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
+        let mut br = Position::new(pos2, true);
+        br.select(true);
+        let tl = Position::new(pos1, true);
+        ShapeKind::RectangleRounded(ShapeRectRounded {
+            tl,
+            br,
+            radius_tl: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
+            radius_tr: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
+            radius_br: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
+            radius_bl: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
+            tr: Modifier::new(),
+            bl: Modifier::new(),
+            top: Modifier::new(),
+            right: Modifier::new(),
+            bottom: Modifier::new(),
+            left: Modifier::new(),
+            on_create: true,
+            highlighted: false,
+            selected: false,
+            segs: BezPath::new(),
+            polygon: Polygon::new(LineString::new(vec![]), vec![]),
+        })
+    }
+
     fn update_polygon(&mut self) {
         log!("calc rect rounded polygon");
-        self.segs = calc_segs(self.get_paths_and_patterns());
+        self.segs = calc_segs(self.get_paths());
         self.polygon = calc_polygon(&self.segs);
     }
     fn get_radii(&self) -> RoundedRectRadii {
@@ -59,13 +84,13 @@ impl ShapeRectRounded {
             bottom_left: self.radius_bl.get_val(),
         }
     }
-    fn get_max_radius_size(&self) -> f64 {
-        self.radius_tl
-            .get_val()
-            .max(self.radius_tr.get_val())
-            .max(self.radius_br.get_val())
-            .max(self.radius_bl.get_val())
+    fn get_width(&self) -> f64 {
+        (self.tl.get_pos().x - self.br.get_pos().x).abs()
     }
+    fn get_height(&self) -> f64 {
+        (self.tl.get_pos().y - self.br.get_pos().y).abs()
+    }
+
     fn get_rectangle_rounded(&self) -> RoundedRect {
         let (tl_pos, br_pos) = (self.tl.get_pos(), self.br.get_pos());
         RoundedRect::new(tl_pos.x, tl_pos.y, br_pos.x, br_pos.y, self.get_radii())
@@ -161,43 +186,26 @@ impl Shape for ShapeRectRounded {
         self.get_rectangle_rounded().contains(pt)
     }
 }
-impl Shapes for ShapeRectRounded {
+
+impl ShapeKindFuncs for ShapeRectRounded {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 2.;
 
-    fn new(pos1: Vec2, pos2: Vec2) -> ShapeKind {
-        let mut br = Position::new(pos2, true);
-        br.select(true);
-        let tl = Position::new(pos1, true);
-        ShapeKind::RectangleRounded(ShapeRectRounded {
-            tl,
-            br,
-            radius_tl: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
-            radius_tr: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
-            radius_br: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
-            radius_bl: Value::new(ShapeRectRounded::RAD_MIN_SIZE),
-            tr: Modifier::new(),
-            bl: Modifier::new(),
-            top: Modifier::new(),
-            right: Modifier::new(),
-            bottom: Modifier::new(),
-            left: Modifier::new(),
-            on_create: true,
-            highlighted: false,
-            selected: false,
-            segs: BezPath::new(),
-            polygon: Polygon::new(LineString::new(vec![]), vec![]),
-        })
-    }
-}
-impl ShapeKindFuncs for ShapeRectRounded {
     fn save_vars(&mut self) {
         self.tl.save_pos();
         self.br.save_pos();
+        self.radius_tl.save_val();
+        self.radius_tr.save_val();
+        self.radius_br.save_val();
+        self.radius_bl.save_val();
     }
     fn restore_saved(&mut self) {
         self.tl.restore_saved();
         self.br.restore_saved();
+        self.radius_tl.restore_saved();
+        self.radius_tr.restore_saved();
+        self.radius_br.restore_saved();
+        self.radius_bl.restore_saved();
         self.update_polygon();
     }
     fn get_vars(&self) -> ShapeKindvars {
@@ -240,6 +248,22 @@ impl ShapeKindFuncs for ShapeRectRounded {
             }
         }
     }
+    fn set_hs(&mut self, value: bool, hors: HS) {
+        match hors {
+            HS::Highlight => self.highlighted = value,
+            HS::Select => self.selected = value,
+        }
+    }
+    fn get_hs(&self, hors: HS) -> bool {
+        match hors {
+            HS::Highlight => self.highlighted,
+            HS::Select => self.selected,
+        }
+    }
+    fn get_hhss(&self) -> (bool, bool) {
+        (self.selected, self.highlighted)
+    }
+
     fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
         self.on_create = false;
         let tl_hors = (pos - self.tl.get_pos()).hypot() < Self::GRAB;
@@ -327,12 +351,6 @@ impl ShapeKindFuncs for ShapeRectRounded {
             }
         }
     }
-    fn set_hs(&mut self, value: bool, hors: HS) {
-        match hors {
-            HS::Highlight => self.highlighted = value,
-            HS::Select => self.selected = value,
-        }
-    }
     fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
         match hors {
             HS::Highlight => {
@@ -363,12 +381,6 @@ impl ShapeKindFuncs for ShapeRectRounded {
                 self.radius_br.select(value);
                 self.radius_bl.select(value);
             }
-        }
-    }
-    fn get_hs(&self, hors: HS) -> bool {
-        match hors {
-            HS::Highlight => self.highlighted,
-            HS::Select => self.selected,
         }
     }
     fn get_hs_modifiers(&self, hors: HS) -> bool {
@@ -414,6 +426,9 @@ impl ShapeKindFuncs for ShapeRectRounded {
         self.update_polygon();
     }
     fn move_modifier(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) -> bool {
+        const MIN_SIZE: f64 = ShapeRectRounded::MIN_SIZE;
+        const RAD_MIN_SIZE: f64 = ShapeRectRounded::RAD_MIN_SIZE;
+
         let tl_saved = self.tl.get_saved_pos();
         let br_saved = self.br.get_saved_pos();
         let tr_saved = self.get_tr_saved_modifier();
@@ -441,8 +456,6 @@ impl ShapeKindFuncs for ShapeRectRounded {
         let rad_bl_sel = self.radius_bl.is_selected();
 
         let dpos = pos - pos_init;
-        const MIN_SIZE: f64 = ShapeRectRounded::MIN_SIZE;
-        const RAD_MIN_SIZE: f64 = ShapeRectRounded::RAD_MIN_SIZE;
 
         let modified = match (tl_sel, tr_sel, br_sel, bl_sel) {
             (true, false, false, false) => {
@@ -518,15 +531,15 @@ impl ShapeKindFuncs for ShapeRectRounded {
             return true;
         }
 
-        let max_radius_size = self.get_max_radius_size();
+        let max_radius_size = self.get_width().min(self.get_height()) / 2.;
+        log!("max_radius_size: {}", max_radius_size);
         let modified = match (rad_tl_sel, rad_tr_sel, rad_br_sel, rad_bl_sel) {
             (true, false, false, false) => {
-                let (mut proj, dir) = project_to_segment_with_direction(
+                let (proj, dir) = project_to_segment_with_direction(
                     self.tl.get_pos(),
                     (self.tl.get_pos() + self.get_tr_modifier()) / 2.,
                     dpos,
                 );
-                proj /= 2_f64.sqrt();
                 self.radius_tl.set_val(
                     (radius_tl_saved + proj * dir)
                         .max(RAD_MIN_SIZE)
@@ -535,12 +548,11 @@ impl ShapeKindFuncs for ShapeRectRounded {
                 true
             }
             (false, true, false, false) => {
-                let (mut proj, dir) = project_to_segment_with_direction(
+                let (proj, dir) = project_to_segment_with_direction(
                     self.get_tr_modifier(),
                     (self.tl.get_pos() + self.get_tr_modifier()) / 2.,
                     dpos,
                 );
-                proj /= 2_f64.sqrt();
                 self.radius_tr.set_val(
                     (radius_tr_saved + proj * dir)
                         .max(RAD_MIN_SIZE)
@@ -549,12 +561,11 @@ impl ShapeKindFuncs for ShapeRectRounded {
                 true
             }
             (false, false, true, false) => {
-                let (mut proj, dir) = project_to_segment_with_direction(
+                let (proj, dir) = project_to_segment_with_direction(
                     self.br.get_pos(),
                     (self.br.get_pos() + self.get_bl_modifier()) / 2.,
                     dpos,
                 );
-                proj /= 2_f64.sqrt();
                 self.radius_br.set_val(
                     (radius_br_saved + proj * dir)
                         .max(RAD_MIN_SIZE)
@@ -563,12 +574,11 @@ impl ShapeKindFuncs for ShapeRectRounded {
                 true
             }
             (false, false, false, true) => {
-                let (mut proj, dir) = project_to_segment_with_direction(
+                let (proj, dir) = project_to_segment_with_direction(
                     self.get_bl_modifier(),
                     (self.br.get_pos() + self.get_bl_modifier()) / 2.,
                     dpos,
                 );
-                proj /= 2_f64.sqrt();
                 self.radius_bl.set_val(
                     (radius_bl_saved + proj * dir)
                         .max(RAD_MIN_SIZE)
@@ -677,28 +687,72 @@ impl ShapeKindFuncs for ShapeRectRounded {
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         let mut paths = vec![];
         let mut texts = vec![];
+
+        let tl = self.tl.get_pos();
+        let tr = self.get_tr_modifier();
+        let br = self.br.get_pos();
+        let bl = self.get_bl_modifier();
+        let rad_tl_center = tl + Vec2::new(self.radius_tl.get_val(), self.radius_tl.get_val());
+        let rad_tr_center = tr + Vec2::new(-self.radius_tr.get_val(), self.radius_tr.get_val());
+        let rad_br_center = br + Vec2::new(-self.radius_br.get_val(), -self.radius_br.get_val());
+        let rad_bl_center = bl + Vec2::new(self.radius_bl.get_val(), -self.radius_bl.get_val());
+
+        let rad_tl = self.radius_tl.get_val() / 2_f64.sqrt();
+        let rad_tr = self.radius_tr.get_val() / 2_f64.sqrt();
+        let rad_br = self.radius_br.get_val() / 2_f64.sqrt();
+        let rad_bl = self.radius_bl.get_val() / 2_f64.sqrt();
+
+        let (path, text) = Dimension::new(DimKind::Horizontal, tl, tr).get_path();
+        paths.push(path);
+        texts.push(text);
+
+        let (path, text) = Dimension::new(DimKind::Vertical, bl, tl).get_path();
+        paths.push(path);
+        texts.push(text);
+
         let (path, text) = Dimension::new(
-            DimKind::Horizontal,
-            self.tl.get_pos(),
-            self.get_tr_modifier(),
+            DimKind::Radius,
+            rad_tl_center,
+            rad_tl_center + Vec2::new(-rad_tl, -rad_tl),
         )
         .get_path();
         paths.push(path);
         texts.push(text);
-        let (path, text) =
-            Dimension::new(DimKind::Vertical, self.get_bl_modifier(), self.tl.get_pos()).get_path();
+
+        let (path, text) = Dimension::new(
+            DimKind::Radius,
+            rad_tr_center,
+            rad_tr_center + Vec2::new(rad_tr, -rad_tr),
+        )
+        .get_path();
         paths.push(path);
         texts.push(text);
+
+        let (path, text) = Dimension::new(
+            DimKind::Radius,
+            rad_br_center,
+            rad_br_center + Vec2::new(rad_br, rad_br),
+        )
+        .get_path();
+        paths.push(path);
+        texts.push(text);
+
+        let (path, text) = Dimension::new(
+            DimKind::Radius,
+            rad_bl_center,
+            rad_bl_center + Vec2::new(-rad_bl, rad_bl),
+        )
+        .get_path();
+        paths.push(path);
+        texts.push(text);
+
         (paths, texts)
     }
-    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
+    fn get_paths(&self) -> Vec<BezPath> {
         if self.good_size() {
-            vec![(
-                self.get_rectangle_rounded().to_path(Self::TOLERANCE),
-                self.get_pattern(self.selected, self.highlighted),
-            )]
+            vec![self.get_rectangle_rounded().to_path(Self::TOLERANCE)]
         } else {
-            vec![(BezPath::new(), Pattern::BasicNormal)]
+            vec![BezPath::new()]
         }
     }
     fn get_polygon(&self) -> Polygon<f64> {

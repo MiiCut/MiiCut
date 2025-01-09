@@ -6,6 +6,7 @@
 //     }
 // }
 
+use crate::shapes::shapes_pool::Shid;
 use approx::*;
 use geo::{LineString, Polygon};
 use kurbo::{flatten, Arc, BezPath, Line, ParamCurveNearest, PathEl, RoundedRectRadii, Vec2};
@@ -15,9 +16,6 @@ use std::{
     f64::consts::*,
     fmt::{self},
 };
-
-use crate::canvas::Pattern;
-use crate::shapes_pool::Shid;
 
 #[derive(Debug)]
 pub enum MyError {
@@ -1067,9 +1065,9 @@ pub fn geo_polygon_to_bez_path(polygon: &Polygon<f64>) -> Vec<BezPath> {
     vec_bez_path
 }
 
-pub fn calc_segs(paths_patterns: Vec<(BezPath, Pattern)>) -> BezPath {
+pub fn calc_segs(paths_patterns: Vec<BezPath>) -> BezPath {
     let mut segs = BezPath::new();
-    for (path, _) in paths_patterns {
+    for path in paths_patterns {
         flatten(path, 0.15, |s| segs.push(s));
     }
     segs
@@ -1101,4 +1099,11 @@ pub fn ring_to_bez_path(ring: &LineString<f64>) -> Option<BezPath> {
     }
 
     Some(bez_path)
+}
+
+pub fn is_near_line(point: Vec2, angle: f64, cursor: Vec2, precision: f64) -> bool {
+    let dx = cursor.x - point.x;
+    let dy = cursor.y - point.y;
+    let distance = (dx * angle.sin() - dy * angle.cos()).abs();
+    distance <= precision
 }

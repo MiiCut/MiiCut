@@ -22,11 +22,29 @@ impl IconsShapes {
     }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum IconsConstruction {
+    Point,
+    Line,
+    Circle,
+}
+impl IconsConstruction {
+    pub fn id(&self) -> &'static str {
+        use IconsConstruction::*;
+        match self {
+            Point => "icon-construction-point",
+            Line => "icon-construction-line",
+            Circle => "icon-construction-circle",
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Icons {
     Arrow,
     Selection,
     Scissors,
     IShapes(IconsShapes),
+    IConstruction(IconsConstruction),
 }
 impl Icons {
     pub fn id(&self) -> &'static str {
@@ -35,7 +53,8 @@ impl Icons {
             Arrow => "icon-arrow",
             Selection => "icon-selection",
             Scissors => "icon-scissors",
-            IShapes(shape) => shape.id(),
+            IShapes(ishape) => ishape.id(),
+            IConstruction(iconstruct) => iconstruct.id(),
         }
     }
     pub fn get_element(&self) -> Option<Element> {
