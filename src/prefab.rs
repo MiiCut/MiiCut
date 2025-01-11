@@ -62,6 +62,19 @@ pub fn center_path(pos: Vec2, _scale: f64, size: f64) -> BezPath {
     BezPath::from_vec(v)
 }
 
+pub fn helper_point_path(pos: Vec2, size: f64) -> BezPath {
+    let tol = 0.01;
+    use PathEl::*;
+    let mut v: Vec<PathEl> = vec![
+        MoveTo(pos.to_point() - (0., 2. * size)),
+        LineTo(pos.to_point() + (0., 2. * size)),
+        MoveTo(pos.to_point() - (2. * size, 0.)),
+        LineTo(pos.to_point() + (2. * size, 0.)),
+    ];
+    v.extend(Circle::new(pos.to_point(), size).to_path(tol).to_path(tol));
+    BezPath::from_vec(v)
+}
+
 pub fn modifiers_path(pos: Vec2, scale: f64, size: f64) -> BezPath {
     let tol = 0.01;
     let size = size;

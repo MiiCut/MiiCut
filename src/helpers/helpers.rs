@@ -4,15 +4,41 @@ use super::helper_point::HelperPoint;
 use super::helpers_pool::DHid;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
+use crate::pools::Pools;
 use crate::traits::*;
+use crate::Action;
 use crate::Position;
 use crate::Value;
 use crate::HS;
 use kurbo::BezPath;
+use kurbo::Size;
 use kurbo::Vec2;
 use std::fmt::Debug;
 use std::fmt::Display;
 
+pub struct MoveHelpersAction {
+    pub dhids_vars: Vec<(DHid, HelperKindvars)>,
+}
+impl Action for MoveHelpersAction {
+    fn undo(&self, pools: &mut Pools) {
+        log!("Undoing last shapes move");
+        for (dhid, vars) in &self.dhids_vars {
+            if let Some(shape) = pools.hp.get_helper_mut(*dhid) {
+                shape.get_kind_mut().set_vars(vars);
+                shape.get_kind_mut().restore_saved();
+            }
+        }
+    }
+
+    fn redo(&self, pools: &mut Pools) {
+        log!("Redoing last shapes move");
+        for (dhid, vars) in &self.dhids_vars {
+            if let Some(shape) = pools.hp.get_helper_mut(*dhid) {
+                shape.get_kind_mut().set_vars(vars);
+            }
+        }
+    }
+}
 pub enum HelperKindvars {
     Point(Position),
     Line(Position, Value),
@@ -25,6 +51,16 @@ pub enum HelperKind {
     Line(HelperLine),
     Circle(HelperCircle),
 }
+impl HelperKind {
+    pub fn magnet_to(&self, pos: Vec2) -> Option<Vec2> {
+        use HelperKind::*;
+        match self {
+            Point(sh) => sh.magnet_to(pos),
+            Line(sh) => sh.magnet_to(pos),
+            Circle(sh) => sh.magnet_to(pos),
+        }
+    }
+}
 impl Display for HelperKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -36,7 +72,7 @@ impl Display for HelperKind {
 }
 impl ObjectsFuncs for HelperKind {
     const TOLERANCE: f64 = 0.01;
-    const GRAB: f64 = 2.;
+    const GRAB_RADIUS: f64 = 2.;
     type Kindvars = HelperKindvars;
 
     fn save_vars(&mut self) {
@@ -80,12 +116,12 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
+    fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> bool {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.set_hs_from_pos(pos, hors),
-            Line(sh) => sh.set_hs_from_pos(pos, hors),
-            Circle(sh) => sh.set_hs_from_pos(pos, hors),
+            Point(sh) => sh.set_hs_from_pos(pos, snap, hors),
+            Line(sh) => sh.set_hs_from_pos(pos, snap, hors),
+            Circle(sh) => sh.set_hs_from_pos(pos, snap, hors),
         }
     }
     fn set_hs(&mut self, value: bool, hors: HS) {
@@ -113,12 +149,12 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
+    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2> {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.set_hs_modifiers_from_pos(pos, hors),
-            Line(sh) => sh.set_hs_modifiers_from_pos(pos, hors),
-            Circle(sh) => sh.set_hs_modifiers_from_pos(pos, hors),
+            Point(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
+            Line(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
+            Circle(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
         }
     }
     fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
@@ -147,20 +183,26 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn move_position(&mut self, dpos: Vec2) {
+    fn move_position(&mut self, dpos: Vec2, snap: f64) {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.move_position(dpos),
-            Line(sh) => sh.move_position(dpos),
-            Circle(sh) => sh.move_position(dpos),
+            Point(sh) => sh.move_position(dpos, snap),
+            Line(sh) => sh.move_position(dpos, snap),
+            Circle(sh) => sh.move_position(dpos, snap),
         }
     }
-    fn move_modifier(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) -> bool {
+    fn move_modifier(
+        &mut self,
+        pos_init: Vec2,
+        pos: Vec2,
+        snap: f64,
+        _shift_pressed: bool,
+    ) -> Option<Vec2> {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.move_modifier(pos_init, pos, _shift_pressed),
-            Line(sh) => sh.move_modifier(pos_init, pos, _shift_pressed),
-            Circle(sh) => sh.move_modifier(pos_init, pos, _shift_pressed),
+            Point(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
+            Line(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
+            Circle(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
         }
     }
     fn get_position(&self) -> Vec2 {
@@ -172,20 +214,20 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn get_paths(&self) -> Vec<BezPath> {
+    fn get_paths(&self, drawing_area_size: &Size) -> Vec<BezPath> {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.get_paths(),
-            Line(sh) => sh.get_paths(),
-            Circle(sh) => sh.get_paths(),
+            Point(sh) => sh.get_paths(drawing_area_size),
+            Line(sh) => sh.get_paths(drawing_area_size),
+            Circle(sh) => sh.get_paths(drawing_area_size),
         }
     }
-    fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)> {
+    fn get_modifiers_paths(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.get_modifiers_paths(),
-            Line(sh) => sh.get_modifiers_paths(),
-            Circle(sh) => sh.get_modifiers_paths(),
+            Point(sh) => sh.get_modifiers_paths(drawing_area_size),
+            Line(sh) => sh.get_modifiers_paths(drawing_area_size),
+            Circle(sh) => sh.get_modifiers_paths(drawing_area_size),
         }
     }
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
@@ -224,16 +266,16 @@ impl ObjectOps for Helper {
     fn set_new_id(&mut self, id: Self::Id) {
         self.dhid = id;
     }
-    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
+    fn get_paths_and_patterns(&self, canvas_size: &Size) -> Vec<(BezPath, Pattern)> {
         let hs = self.helper_kind.get_hhss();
         let pattern = match (hs.0, hs.1) {
-            (false, false) => Pattern::BasicNormal,
-            (false, true) => Pattern::BasicHighlighted,
-            (true, false) => Pattern::BasicSelected,
-            (true, true) => Pattern::BasicSelected,
+            (false, false) => Pattern::HelperNormal,
+            (false, true) => Pattern::HelperHighlighted,
+            (true, false) => Pattern::HelperSelected,
+            (true, true) => Pattern::HelperSelected,
         };
 
-        let mut paths = self.helper_kind.get_paths();
+        let mut paths = self.helper_kind.get_paths(canvas_size);
         let result = paths
             .iter_mut()
             .map(|path| (path.clone(), pattern))

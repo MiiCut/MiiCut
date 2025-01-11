@@ -12,11 +12,15 @@
     --canvas-modifiers-selected-color: #ff00008c;
     /*  */
     --canvas-basic-normal-color: #424242;
-    --canvas-basic-highlight-color:  #ffffff;
-    --canvas-basic-selected-color:  #ff0000;
+    --canvas-basic-highlight-color:  #ffea0016;
+    --canvas-basic-selected-color:  #ff000025;
     --canvas-basic-normal-color-dark: #424242;
     --canvas-basic-highlight-color-dark:  #ffffff;
     --canvas-basic-selected-color-dark:  #ff0000;
+
+    --canvas-helper-normal-color: #49004d8b;
+    --canvas-helper-highlight-color:  #fd07f94c;
+    --canvas-helper-selected-color:  #ff000097;
 
     --canvas-composed-normal-color: #424242;
     --canvas-composed-highlight-color:  #bfbb48;

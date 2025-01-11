@@ -8,6 +8,7 @@ use crate::Position;
 use crate::Value;
 use crate::HS;
 use kurbo::BezPath;
+use kurbo::Size;
 use kurbo::Vec2;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -34,6 +35,16 @@ impl HelperCircle {
             selected: false,
         })
     }
+    pub fn magnet_to(&self, pos: Vec2) -> Option<Vec2> {
+        if self.selected {
+            return None;
+        }
+        if (pos - self.position.get_pos()).hypot() < Self::GRAB_RADIUS {
+            Some(self.position.get_pos())
+        } else {
+            None
+        }
+    }
     fn get_modifier(&self) -> Vec2 {
         self.position.get_pos() + Vec2::new(self.radius.get_val(), 0.)
     }
@@ -46,7 +57,7 @@ impl Display for HelperCircle {
 
 impl ObjectsFuncs for HelperCircle {
     const TOLERANCE: f64 = 0.01;
-    const GRAB: f64 = 2.;
+    const GRAB_RADIUS: f64 = 2.;
     type Kindvars = HelperKindvars;
 
     fn save_vars(&mut self) {
@@ -70,8 +81,8 @@ impl ObjectsFuncs for HelperCircle {
         true
     }
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
-        let hs = (self.position.get_pos() - pos).hypot() < Self::GRAB;
+    fn set_hs_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> bool {
+        let hs = (self.position.get_pos() - pos).hypot() < Self::GRAB_RADIUS;
         match hors {
             HS::Highlight => {
                 self.highlighted = hs;
@@ -99,19 +110,17 @@ impl ObjectsFuncs for HelperCircle {
         (self.selected, self.highlighted)
     }
 
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
-        let mod_hs = (self.get_modifier() - pos).hypot() < Self::GRAB;
-        match hors {
-            HS::Highlight => {
-                self.radius.highlight(mod_hs);
-                self.radius.is_highlighted()
+    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> Option<Vec2> {
+        if (pos - self.get_modifier()).hypot() < Self::GRAB_RADIUS {
+            match hors {
+                HS::Highlight => self.radius.highlight(true),
+                HS::Select => self.radius.select(true),
             }
-            HS::Select => {
-                self.radius.select(mod_hs);
-                self.radius.is_selected()
-            }
-        }
+            return Some(self.get_modifier());
+        };
+        None
     }
+
     fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
         match hors {
             HS::Highlight => {
@@ -133,26 +142,35 @@ impl ObjectsFuncs for HelperCircle {
         ()
     }
 
-    fn move_position(&mut self, dpos: Vec2) {
+    fn move_position(&mut self, dpos: Vec2, snap: f64) {
         self.position.set_pos(self.position.get_saved_pos() + dpos);
     }
-    fn move_modifier(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) -> bool {
-        self.radius
-            .set_val(self.radius.get_saved_val() + (pos.x - pos_init.x));
-        true
+    fn move_modifier(
+        &mut self,
+        pos_init: Vec2,
+        pos: Vec2,
+        snap: f64,
+        _shift_pressed: bool,
+    ) -> Option<Vec2> {
+        if self.radius.is_selected() {
+            self.radius
+                .set_val(self.radius.get_saved_val() + (pos.x - pos_init.x));
+            return Some(self.get_modifier());
+        }
+        None
     }
     fn get_position(&self) -> Vec2 {
         self.position.get_pos()
     }
 
-    fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)> {
+    fn get_modifiers_paths(&self, _: &Size) -> Vec<(BezPath, Pattern)> {
         vec![
             (
-                modifiers_path(self.get_modifier(), 1., HelperCircle::GRAB),
+                modifiers_path(self.get_modifier(), 1., HelperCircle::GRAB_RADIUS),
                 self.get_pattern_modifiers(self.radius.is_selected(), self.radius.is_highlighted()),
             ),
             (
-                modifiers_path(self.position.get_pos(), 1., HelperCircle::GRAB),
+                modifiers_path(self.position.get_pos(), 1., HelperCircle::GRAB_RADIUS),
                 self.get_pattern_modifiers(
                     self.position.is_selected(),
                     self.position.is_highlighted(),
@@ -163,11 +181,11 @@ impl ObjectsFuncs for HelperCircle {
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         (vec![], vec![])
     }
-    fn get_paths(&self) -> Vec<BezPath> {
+    fn get_paths(&self, _: &Size) -> Vec<BezPath> {
         vec![modifiers_path(
             self.position.get_pos(),
             1.,
-            HelperCircle::GRAB,
+            HelperCircle::GRAB_RADIUS,
         )]
     }
 }

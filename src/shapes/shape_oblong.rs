@@ -13,7 +13,9 @@ use crate::{
     traits::*,
 };
 use geo::{LineString, Polygon};
-use kurbo::{Arc, ArcAppendIter, BezPath, Line, LinePathIter, PathEl, Point, Rect, Shape, Vec2};
+use kurbo::{
+    Arc, ArcAppendIter, BezPath, Line, LinePathIter, PathEl, Point, Rect, Shape, Size, Vec2,
+};
 use std::{
     f64::consts::{FRAC_PI_2, PI},
     fmt::Display,
@@ -67,7 +69,7 @@ pub struct ShapeOblong {
     polygon: Polygon<f64>,
 }
 impl ShapeOblong {
-    const MIN_WIDTH_SIZE: f64 = 2.;
+    const MIN_WIDTH_SIZE: f64 = 4.;
     const MIN_LENGTH_SIZE: f64 = 10.;
 
     pub fn new(pos1: Vec2, pos2: Vec2) -> BSKind {
@@ -91,7 +93,7 @@ impl ShapeOblong {
     }
 
     fn update_polygon(&mut self) {
-        self.segs = calc_segs(self.get_paths());
+        self.segs = calc_segs(self.get_paths(&Size::ZERO));
         self.polygon = calc_polygon(&self.segs);
     }
 
@@ -201,7 +203,7 @@ impl Shape for ShapeOblong {
 }
 impl ObjectsFuncs for ShapeOblong {
     const TOLERANCE: f64 = 0.01;
-    const GRAB: f64 = 2.;
+    const GRAB_RADIUS: f64 = 5.;
     type Kindvars = BSKindvars;
 
     fn save_vars(&mut self) {
@@ -232,7 +234,7 @@ impl ObjectsFuncs for ShapeOblong {
             && self.get_length() >= ShapeOblong::MIN_LENGTH_SIZE - 0.1
     }
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
+    fn set_hs_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> bool {
         match hors {
             HS::Highlight => {
                 self.highlighted = self.contains(pos.to_point());
@@ -259,27 +261,46 @@ impl ObjectsFuncs for ShapeOblong {
     fn get_hhss(&self) -> (bool, bool) {
         (self.selected, self.highlighted)
     }
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
-        let start_hors = (pos - self.start.get_pos()).hypot() < Self::GRAB;
-        let end_hors = (pos - self.end.get_pos()).hypot() < Self::GRAB;
-        let middle_hors = (pos - self.get_middle_modifier()).hypot() < Self::GRAB;
-        match hors {
-            HS::Highlight => {
-                self.start.highlight(start_hors);
-                self.end.highlight(end_hors);
-                self.width.highlight(middle_hors);
-                self.start.is_highlighted()
-                    || self.end.is_highlighted()
-                    || self.width.is_highlighted()
+    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> Option<Vec2> {
+        if (pos - self.start.get_pos()).hypot() < Self::GRAB_RADIUS {
+            match hors {
+                HS::Highlight => self.start.highlight(true),
+                HS::Select => self.start.select(true),
             }
-            HS::Select => {
-                self.start.select(start_hors);
-                self.end.select(end_hors);
-                self.width.select(middle_hors);
-                self.start.is_selected() || self.end.is_selected() || self.width.is_selected()
+            return Some(self.start.get_pos());
+        } else {
+            match hors {
+                HS::Highlight => self.start.highlight(false),
+                HS::Select => self.start.select(false),
             }
         }
+        if (pos - self.end.get_pos()).hypot() < Self::GRAB_RADIUS {
+            match hors {
+                HS::Highlight => self.end.highlight(true),
+                HS::Select => self.end.select(true),
+            }
+            return Some(self.end.get_pos());
+        } else {
+            match hors {
+                HS::Highlight => self.end.highlight(false),
+                HS::Select => self.end.select(false),
+            }
+        }
+        if (pos - self.get_middle_modifier()).hypot() < Self::GRAB_RADIUS {
+            match hors {
+                HS::Highlight => self.width.highlight(true),
+                HS::Select => self.width.select(true),
+            }
+            return Some(self.get_middle_modifier());
+        } else {
+            match hors {
+                HS::Highlight => self.width.highlight(false),
+                HS::Select => self.width.select(false),
+            }
+        }
+        None
     }
+
     fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
         match hors {
             HS::Highlight => {
@@ -311,12 +332,20 @@ impl ObjectsFuncs for ShapeOblong {
         ()
     }
 
-    fn move_position(&mut self, dpos: Vec2) {
-        self.start.set_pos(self.start.get_saved_pos() + dpos);
-        self.end.set_pos(self.end.get_saved_pos() + dpos);
+    fn move_position(&mut self, dpos: Vec2, snap: f64) {
+        self.start
+            .set_pos(snap_pt(self.start.get_saved_pos() + dpos, snap));
+        self.end
+            .set_pos(snap_pt(self.end.get_saved_pos() + dpos, snap));
         self.update_polygon();
     }
-    fn move_modifier(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) -> bool {
+    fn move_modifier(
+        &mut self,
+        pos_init: Vec2,
+        pos: Vec2,
+        snap: f64,
+        _shift_pressed: bool,
+    ) -> Option<Vec2> {
         let start_saved = self.start.get_saved_pos();
         let end_saved = self.end.get_saved_pos();
         let middle_saved = self.get_middle_modifier_saved();
@@ -332,18 +361,26 @@ impl ObjectsFuncs for ShapeOblong {
         match (start_sel, end_sel, width_sel) {
             (true, false, false) => {
                 let start = start_saved + dpos;
+                let length = snap_val((start - end_saved).hypot(), snap);
+                let angle = snap_angle_hv((end_saved - start).atan2());
+                let start = end_saved - Vec2::from_angle(angle) * length;
+
                 if (start - end_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
                     self.start.set_pos(start);
                     self.update_polygon();
-                    return true;
+                    return Some(self.start.get_pos());
                 }
             }
             (false, true, false) => {
                 let end = end_saved + dpos;
+                let length = snap_val((start_saved - end).hypot(), snap);
+                let angle = snap_angle_hv((end - start_saved).atan2());
+                let end = start_saved + Vec2::from_angle(angle) * length;
+
                 if (end - start_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
                     self.end.set_pos(end);
                     self.update_polygon();
-                    return true;
+                    return Some(self.end.get_pos());
                 }
             }
             (false, false, true) => {
@@ -353,41 +390,40 @@ impl ObjectsFuncs for ShapeOblong {
                 let (_, dir2) =
                     project_to_perpendicular(start_saved, end_saved, middle - center_saved);
 
-                if (middle - center_saved).hypot() >= ShapeOblong::MIN_WIDTH_SIZE / 2.
-                    && dir1 * dir2 > 0.
-                {
-                    self.width.set_val((middle - center_saved).hypot() * 2.);
+                let width = snap_val((middle - center_saved).hypot() * 2., snap);
+                if width >= ShapeOblong::MIN_WIDTH_SIZE && dir1 * dir2 > 0. {
+                    self.width.set_val(width);
                     self.update_polygon();
-                    return true;
+                    return Some(self.get_middle_modifier());
                 }
             }
             _ => (),
         }
-        false
+        None
     }
     fn get_position(&self) -> Vec2 {
         (self.start.get_pos() + self.end.get_pos()) / 2.
     }
 
-    fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)> {
+    fn get_modifiers_paths(&self, _: &Size) -> Vec<(BezPath, Pattern)> {
         vec![
             (
-                modifiers_path(self.start.get_pos(), 1., ShapeOblong::GRAB),
+                modifiers_path(self.start.get_pos(), 1., ShapeOblong::GRAB_RADIUS),
                 self.get_pattern_modifiers(self.start.is_selected(), self.start.is_highlighted()),
             ),
             (
-                modifiers_path(self.end.get_pos(), 1., ShapeOblong::GRAB),
+                modifiers_path(self.end.get_pos(), 1., ShapeOblong::GRAB_RADIUS),
                 self.get_pattern_modifiers(self.end.is_selected(), self.end.is_highlighted()),
             ),
             (
-                modifiers_path(self.get_middle_modifier(), 1., ShapeOblong::GRAB),
+                modifiers_path(self.get_middle_modifier(), 1., ShapeOblong::GRAB_RADIUS),
                 self.get_pattern_modifiers(self.width.is_selected(), self.width.is_highlighted()),
             ),
             (
                 center_path(
                     (self.start.get_pos() + self.end.get_pos()) / 2.,
                     1.,
-                    ShapeOblong::GRAB,
+                    ShapeOblong::GRAB_RADIUS,
                 ),
                 self.get_pattern_modifiers(self.selected, self.highlighted),
             ),
@@ -397,7 +433,12 @@ impl ObjectsFuncs for ShapeOblong {
         let mut paths = vec![];
         let mut texts = vec![];
 
-        let mut dim = Dimension::new(DimKind::Linear, self.start.get_pos(), self.end.get_pos());
+        let mut dim = Dimension::new(
+            DimKind::Linear,
+            self.start.get_pos(),
+            self.end.get_pos(),
+            self.get_length(),
+        );
         dim.set_dim_offset(self.get_width() / 2. + 10.);
         let (path, text) = dim.get_path();
         paths.push(path);
@@ -411,6 +452,7 @@ impl ObjectsFuncs for ShapeOblong {
                 self.end.get_pos(),
                 self.get_middle_modifier(),
             ),
+            self.get_width(),
         );
         dim.set_dim_offset(10.);
         let (path, text) = dim.get_path();
@@ -419,11 +461,10 @@ impl ObjectsFuncs for ShapeOblong {
 
         (paths, texts)
     }
-    fn get_paths(&self) -> Vec<BezPath> {
+    fn get_paths(&self, _: &Size) -> Vec<BezPath> {
         let mut paths: Vec<BezPath> = vec![];
         paths.push(self.get_line(true).to_path(ShapeOblong::TOLERANCE));
         paths.push(self.get_arc(false).to_path(ShapeOblong::TOLERANCE));
-
         paths.push(self.get_line(false).to_path(ShapeOblong::TOLERANCE));
         paths.push(self.get_arc(true).to_path(ShapeOblong::TOLERANCE));
         paths

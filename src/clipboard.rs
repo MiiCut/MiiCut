@@ -34,35 +34,43 @@ impl Clipboard {
         self.item_paste = None;
     }
 
-    pub fn move_paste(&mut self, cursor_pos: Vec2) {
+    pub fn move_paste(&mut self, cursor_pos: Vec2, snap: f64) {
         if let Some(item_paste) = self.item_paste.as_mut() {
             match item_paste {
                 ClipboardItem::Shapes((shapes, pos_copy)) => {
                     shapes.iter_mut().for_each(|shape| {
-                        shape.get_kind_mut().move_position(cursor_pos - *pos_copy);
+                        shape
+                            .get_kind_mut()
+                            .move_position(cursor_pos - *pos_copy, snap);
                     });
                 }
                 ClipboardItem::Helpers((helpers, pos_copy)) => {
                     helpers.iter_mut().for_each(|helper| {
-                        helper.get_kind_mut().move_position(cursor_pos - *pos_copy);
+                        helper
+                            .get_kind_mut()
+                            .move_position(cursor_pos - *pos_copy, snap);
                     });
                 }
             }
         }
     }
 
-    pub fn paste_item(&mut self, cursor_pos: Vec2) {
+    pub fn paste_item(&mut self, cursor_pos: Vec2, snap: f64) {
         if let Some(item_copy) = &self.item_copy {
             let mut item_paste = item_copy.clone();
             match &mut item_paste {
                 ClipboardItem::Shapes((shapes, pos_copy)) => {
                     shapes.iter_mut().for_each(|shape| {
-                        shape.get_kind_mut().move_position(cursor_pos - *pos_copy);
+                        shape
+                            .get_kind_mut()
+                            .move_position(cursor_pos - *pos_copy, snap);
                     });
                 }
                 ClipboardItem::Helpers((helpers, pos_copy)) => {
                     helpers.iter_mut().for_each(|helper| {
-                        helper.get_kind_mut().move_position(cursor_pos - *pos_copy);
+                        helper
+                            .get_kind_mut()
+                            .move_position(cursor_pos - *pos_copy, snap);
                     });
                 }
             }

@@ -587,6 +587,10 @@ pub struct DrawStyles {
     basic_highlight_color_dark: String,
     basic_selected_color_dark: String,
 
+    helper_normal_color: String,
+    helper_highlight_color: String,
+    helper_selected_color: String,
+
     composed_normal_color: String,
     composed_highlight_color: String,
     composed_selected_color: String,
@@ -624,6 +628,10 @@ impl DrawStyles {
             style.get_property_value("--canvas-basic-highlight-color-dark")?;
         let basic_selected_color_dark =
             style.get_property_value("--canvas-basic-selected-color-dark")?;
+
+        let helper_normal_color = style.get_property_value("--canvas-helper-normal-color")?;
+        let helper_highlight_color = style.get_property_value("--canvas-helper-highlight-color")?;
+        let helper_selected_color = style.get_property_value("--canvas-helper-selected-color")?;
 
         let composed_normal_color = style.get_property_value("--canvas-composed-normal-color")?;
         let composed_highlight_color =
@@ -665,6 +673,10 @@ impl DrawStyles {
             basic_highlight_color_dark,
             basic_selected_color_dark,
 
+            helper_normal_color,
+            helper_highlight_color,
+            helper_selected_color,
+
             composed_normal_color,
             composed_highlight_color,
             composed_selected_color,
@@ -693,12 +705,17 @@ impl DrawStyles {
             ComposedNormal(filled) => (&self.pattern_solid, 3., filled),
             ComposedHighlighted(filled) => (&self.pattern_solid, 3., filled),
             ComposedSelected(filled) => (&self.pattern_solid, 3., filled),
-            BasicNormal => (&self.pattern_dashed, 1., false),
-            BasicHighlighted => (&self.pattern_dashed, 1., false),
-            BasicSelected => (&self.pattern_solid, 1., false),
+            BasicNormal => (&self.pattern_dashed, 1., true),
+            BasicHighlighted => (&self.pattern_dashed, 1., true),
+            BasicSelected => (&self.pattern_solid, 1., true),
             BasicNormalDark => (&self.pattern_dashed, 2., false),
             BasicHighlightedDark => (&self.pattern_dashed, 2., false),
             BasicSelectedDark => (&self.pattern_solid, 2., false),
+
+            HelperNormal => (&self.pattern_solid, 1., true),
+            HelperHighlighted => (&self.pattern_solid, 1., true),
+            HelperSelected => (&self.pattern_solid, 1., true),
+
             DimensionNormal => (&self.pattern_solid, 1., false),
             DimensionHighlighted => (&self.pattern_solid, 1., false),
             DimensionSelected => (&self.pattern_solid, 1., false),
@@ -733,11 +750,16 @@ impl DrawStyles {
                 &self.composed_selected_color,
             ),
             BasicNormal => (&self.transparent_color, &self.basic_normal_color),
-            BasicHighlighted => (&self.transparent_color, &self.basic_highlight_color),
+            BasicHighlighted => (&self.basic_highlight_color, &self.basic_highlight_color),
             BasicSelected => (&self.basic_selected_color, &self.basic_selected_color),
+
             BasicNormalDark => (&self.transparent_color, &self.basic_normal_color_dark),
             BasicHighlightedDark => (&self.transparent_color, &self.basic_highlight_color_dark),
             BasicSelectedDark => (&self.basic_selected_color, &self.basic_selected_color_dark),
+
+            HelperNormal => (&self.helper_normal_color, &self.helper_normal_color),
+            HelperHighlighted => (&self.helper_highlight_color, &self.helper_highlight_color),
+            HelperSelected => (&self.helper_selected_color, &self.helper_selected_color),
 
             DimensionNormal => (&self.dimension_normal_color, &self.dimension_normal_color),
             DimensionHighlighted => (
@@ -776,6 +798,9 @@ pub enum Pattern {
     BasicNormalDark,
     BasicHighlightedDark,
     BasicSelectedDark,
+    HelperNormal,
+    HelperHighlighted,
+    HelperSelected,
     DimensionNormal,
     DimensionHighlighted,
     DimensionSelected,

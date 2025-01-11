@@ -31,10 +31,11 @@ impl Action for AddShapeAction {
         pools.sh.add_shape(self.shape.clone());
     }
 }
-pub struct RemoveShapeAction {
+
+pub struct DeleteShapeAction {
     pub shapes: Vec<BasicShape>,
 }
-impl Action for RemoveShapeAction {
+impl Action for DeleteShapeAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing shapes creation");
         self.shapes.iter().for_each(|shape| {
@@ -122,18 +123,18 @@ impl ShapesPool {
         });
     }
 
-    pub fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
+    pub fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> bool {
         use HS::*;
         if let Highlight = hors {
             let mut res = false;
             self.shapes.values_mut().for_each(|shape| {
-                res |= shape.get_kind_mut().set_hs_from_pos(pos, Highlight);
+                res |= shape.get_kind_mut().set_hs_from_pos(pos, snap, Highlight);
             });
             return res;
         } else {
             let mut overlapping_shapes = HashSet::new();
             self.shapes.values_mut().for_each(|shape| {
-                if shape.get_kind_mut().set_hs_from_pos(pos, Select) {
+                if shape.get_kind_mut().set_hs_from_pos(pos, snap, Select) {
                     overlapping_shapes.insert(shape.get_id());
                 }
             });
@@ -192,12 +193,22 @@ impl ShapesPool {
         }
     }
 
-    pub fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _precision: f64, hors: HS) -> bool {
-        let mut setted = false;
-        self.shapes.values_mut().for_each(|shape| {
-            setted |= shape.get_kind_mut().set_hs_modifiers_from_pos(pos, hors);
-        });
-        setted
+    pub fn set_hs_modifiers_from_pos(
+        &mut self,
+        pos: Vec2,
+        snap: f64,
+        _precision: f64,
+        hors: HS,
+    ) -> Option<Vec2> {
+        for shape in self.shapes.values_mut() {
+            if let Some(pos) = shape
+                .get_kind_mut()
+                .set_hs_modifiers_from_pos(pos, snap, hors)
+            {
+                return Some(pos);
+            }
+        }
+        None
     }
     pub fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
         self.shapes.values_mut().for_each(|shape| {
@@ -213,28 +224,35 @@ impl ShapesPool {
         None
     }
 
-    pub fn move_positions(
+    pub fn move_position(
         &mut self,
-        shid_sel: Vec<BSid>,
+        shid: BSid,
         pos_init: Vec2,
         pos: Vec2,
+        snap: f64,
         _shift_pressed: bool,
     ) {
-        shid_sel.into_iter().for_each(|shid| {
-            if let Some(shape) = self.shapes.get_mut(&shid) {
-                shape.get_kind_mut().move_position(pos - pos_init);
-            }
-        });
-    }
-    pub fn move_modifier(&mut self, shid: BSid, pos_init: Vec2, pos: Vec2, shift_pressed: bool) {
         if let Some(shape) = self.shapes.get_mut(&shid) {
-            shape
-                .get_kind_mut()
-                .move_modifier(pos_init, pos, shift_pressed);
+            shape.get_kind_mut().move_position(pos - pos_init, snap);
         }
     }
+    pub fn move_modifier(
+        &mut self,
+        shid: BSid,
+        pos_init: Vec2,
+        pos: Vec2,
+        snap: f64,
+        shift_pressed: bool,
+    ) -> Option<Vec2> {
+        if let Some(shape) = self.shapes.get_mut(&shid) {
+            return shape
+                .get_kind_mut()
+                .move_modifier(pos_init, pos, snap, shift_pressed);
+        }
+        None
+    }
 
-    pub fn delete_shapes_selected(&mut self) -> Vec<BasicShape> {
+    pub fn delete_selection(&mut self) -> Option<Vec<BasicShape>> {
         let shapes_deleted: Vec<BasicShape> = self
             .shapes
             .iter()
@@ -242,7 +260,11 @@ impl ShapesPool {
             .map(|(_, shape)| shape.clone())
             .collect();
         self.shapes.retain(|_, v| !v.get_kind().get_hs(HS::Select));
-        shapes_deleted
+        if shapes_deleted.is_empty() {
+            None
+        } else {
+            Some(shapes_deleted)
+        }
     }
 
     pub fn intersection_set(&self, shid: BSid) -> HashSet<BSid> {

@@ -2,11 +2,13 @@ use super::helpers::HelperKind;
 use super::helpers::HelperKindvars;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
-use crate::prefab::center_path;
+use crate::prefab::*;
+use crate::snap_pt;
 use crate::traits::*;
 use crate::Position;
 use crate::HS;
 use kurbo::BezPath;
+use kurbo::Size;
 use kurbo::Vec2;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -28,6 +30,16 @@ impl HelperPoint {
             selected: false,
         })
     }
+    pub fn magnet_to(&self, pos: Vec2) -> Option<Vec2> {
+        if self.selected {
+            return None;
+        }
+        if (pos - self.position.get_pos()).hypot() < 2. * Self::GRAB_RADIUS {
+            Some(self.position.get_pos())
+        } else {
+            None
+        }
+    }
 }
 impl Display for HelperPoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -37,7 +49,7 @@ impl Display for HelperPoint {
 
 impl ObjectsFuncs for HelperPoint {
     const TOLERANCE: f64 = 0.01;
-    const GRAB: f64 = 2.;
+    const GRAB_RADIUS: f64 = 4.;
     type Kindvars = HelperKindvars;
 
     fn save_vars(&mut self) {
@@ -58,14 +70,14 @@ impl ObjectsFuncs for HelperPoint {
         true
     }
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
+    fn set_hs_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> bool {
         match hors {
             HS::Highlight => {
-                self.highlighted = (pos - self.position.get_pos()).hypot() < Self::GRAB;
+                self.highlighted = (pos - self.position.get_pos()).hypot() < Self::GRAB_RADIUS;
                 self.highlighted
             }
             HS::Select => {
-                self.selected = (pos - self.position.get_pos()).hypot() < Self::GRAB;
+                self.selected = (pos - self.position.get_pos()).hypot() < Self::GRAB_RADIUS;
                 self.selected
             }
         }
@@ -86,8 +98,8 @@ impl ObjectsFuncs for HelperPoint {
         (self.selected, self.highlighted)
     }
 
-    fn set_hs_modifiers_from_pos(&mut self, _pos: Vec2, _hors: HS) -> bool {
-        false
+    fn set_hs_modifiers_from_pos(&mut self, _pos: Vec2, _snap: f64, _hors: HS) -> Option<Vec2> {
+        None
     }
     fn set_hs_modifiers(&mut self, _value: bool, _hors: HS) {}
     fn get_hs_modifiers(&self, _hors: HS) -> bool {
@@ -98,23 +110,33 @@ impl ObjectsFuncs for HelperPoint {
         ()
     }
 
-    fn move_position(&mut self, dpos: Vec2) {
-        self.position.set_pos(self.position.get_saved_pos() + dpos);
+    fn move_position(&mut self, dpos: Vec2, snap: f64) {
+        self.position
+            .set_pos(snap_pt(self.position.get_saved_pos() + dpos, snap));
     }
-    fn move_modifier(&mut self, _pos_init: Vec2, _pos: Vec2, _shift_pressed: bool) -> bool {
-        false
+    fn move_modifier(
+        &mut self,
+        _pos_init: Vec2,
+        _pos: Vec2,
+        _snap: f64,
+        _shift_pressed: bool,
+    ) -> Option<Vec2> {
+        None
     }
     fn get_position(&self) -> Vec2 {
         self.position.get_pos()
     }
 
-    fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)> {
+    fn get_modifiers_paths(&self, _: &Size) -> Vec<(BezPath, Pattern)> {
         vec![]
     }
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         (vec![], vec![])
     }
-    fn get_paths(&self) -> Vec<BezPath> {
-        vec![center_path(self.position.get_pos(), 1., HelperPoint::GRAB)]
+    fn get_paths(&self, _: &Size) -> Vec<BezPath> {
+        vec![helper_point_path(
+            self.position.get_pos(),
+            Self::GRAB_RADIUS,
+        )]
     }
 }

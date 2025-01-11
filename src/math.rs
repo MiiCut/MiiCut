@@ -9,7 +9,7 @@
 use crate::shapes::shapes_pool::BSid;
 use approx::*;
 use geo::{LineString, Polygon};
-use kurbo::{flatten, Arc, BezPath, Line, ParamCurveNearest, PathEl, RoundedRectRadii, Vec2};
+use kurbo::{flatten, Arc, BezPath, Line, ParamCurveNearest, PathEl, RoundedRectRadii, Size, Vec2};
 use std::f64::consts::PI;
 use std::{
     error::Error,
@@ -1106,4 +1106,84 @@ pub fn is_near_line(point: Vec2, angle: f64, cursor: Vec2, precision: f64) -> bo
     let dy = cursor.y - point.y;
     let distance = (dx * angle.sin() - dy * angle.cos()).abs();
     distance <= precision
+}
+
+pub fn get_line_segment(size: &Size, point: Vec2, angle: f64) -> (Vec2, Vec2) {
+    let width = size.width;
+    let height = size.height;
+
+    if angle.abs() == FRAC_PI_2 {
+        let x = point.x;
+        return (Vec2::new(x, 0.), Vec2::new(x, height));
+    }
+
+    let m = angle.tan();
+    if m == 0. {
+        let y = point.y;
+        return (Vec2::new(0., y), Vec2::new(width, y));
+    }
+
+    // y= 0 intersection
+    let x0 = -point.y / m + point.x;
+    // y= height intersection
+    let xh = (height - point.y) / m + point.x;
+    // x= 0 intersection
+    let y0 = m * -point.x + point.y;
+    // x= width intersection
+    let yw = m * (width - point.x) + point.y;
+
+    let x0_inside = x0 >= 0. && x0 <= width;
+    let xh_inside = xh >= 0. && xh <= width;
+    let y0_inside = y0 >= 0. && y0 <= height;
+    let yw_inside = yw >= 0. && yw <= height;
+
+    match (x0_inside, xh_inside, y0_inside, yw_inside) {
+        (true, true, false, false) => (Vec2::new(x0, 0.), Vec2::new(xh, height)),
+        (false, false, true, true) => (Vec2::new(0., y0), Vec2::new(width, yw)),
+        (true, false, false, true) => (Vec2::new(x0, 0.), Vec2::new(width, yw)),
+        (true, false, true, false) => (Vec2::new(0., y0), Vec2::new(x0, 0.)),
+        (false, true, false, true) => (Vec2::new(width, y0), Vec2::new(xh, height)),
+        (false, true, true, false) => (Vec2::new(0., y0), Vec2::new(xh, height)),
+        _ => (Vec2::new(0., 0.), Vec2::new(width, height)),
+    }
+}
+
+const EPSILON: f64 = 1e-9;
+pub fn snap_pt(pos: Vec2, snap: f64) -> Vec2 {
+    // Avoid division by zero
+    if snap.abs() < EPSILON {
+        return pos;
+    }
+    // Snap to grid
+    let x = (pos.x / snap).round() * snap;
+    let y = (pos.y / snap).round() * snap;
+    Vec2::new(x, y)
+}
+pub fn snap_val(val: f64, snap: f64) -> f64 {
+    // Avoid division by zero
+    if snap.abs() < EPSILON {
+        return val;
+    }
+    // Snap to grid
+    let val = (val / snap).round() * snap;
+    val
+}
+
+// Round the angle to horizontal or vertical
+const THREAS_ANGLE: f64 = 2. / 180. * PI;
+pub fn snap_angle_hv(angle: f64) -> f64 {
+    let angle = angle % (2. * PI);
+    if angle.abs_diff_eq(&0., THREAS_ANGLE) {
+        return 0.;
+    }
+    if angle.abs_diff_eq(&PI, THREAS_ANGLE) {
+        return PI;
+    }
+    if angle.abs_diff_eq(&FRAC_PI_2, THREAS_ANGLE) {
+        return FRAC_PI_2;
+    }
+    if angle.abs_diff_eq(&-FRAC_PI_2, THREAS_ANGLE) {
+        return -FRAC_PI_2;
+    }
+    angle
 }

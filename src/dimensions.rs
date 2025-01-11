@@ -21,16 +21,18 @@ pub struct Dimension {
     start: Vec2,
     end: Vec2,
     dim_offset: f64,
+    value: f64,
     highlighted: bool,
     selected: bool,
 }
 impl Dimension {
-    pub fn new(kind: DimKind, start: Vec2, end: Vec2) -> Self {
+    pub fn new(kind: DimKind, start: Vec2, end: Vec2, value: f64) -> Self {
         Self {
             kind,
             start,
-            dim_offset: 2.,
             end,
+            dim_offset: 2.,
+            value,
             highlighted: false,
             selected: false,
         }
@@ -116,10 +118,14 @@ impl Dimension {
     }
     fn get_horizontal_path(&self) -> ((BezPath, Pattern), CanvasText) {
         let mut path = kurbo::BezPath::new();
-        let length = self.get_length();
+        let value = if self.value == 0. {
+            self.get_length()
+        } else {
+            self.value
+        };
         let pos_y = self.start.y - 10.;
         let text = CanvasText {
-            text: format!("{:.0}", length),
+            text: format!("{:.2}", value),
             pos: Vec2::new(self.get_center().x, pos_y - 2.),
             pattern: Pattern::DimensionNormal,
             angle: 0.,
@@ -144,10 +150,14 @@ impl Dimension {
     }
     fn get_vertical_path(&self) -> ((BezPath, Pattern), CanvasText) {
         let mut path = kurbo::BezPath::new();
-        let length = self.get_length();
+        let value = if self.value == 0. {
+            self.get_length()
+        } else {
+            self.value
+        };
         let pos_x = self.start.x - 10.;
         let text = CanvasText {
-            text: format!("{:.0}", length),
+            text: format!("{:.2}", value),
             pos: Vec2::new(self.get_center().x - 12., self.get_center().y),
             pattern: Pattern::DimensionNormal,
             angle: -PI / 2.,
@@ -173,9 +183,13 @@ impl Dimension {
     fn get_radius_path(&self) -> ((BezPath, Pattern), CanvasText) {
         let mut path = kurbo::BezPath::new();
         let end = self.end + (self.end - self.start).normalize() * 10.;
-        let length = self.get_length();
+        let value = if self.value == 0. {
+            self.get_length()
+        } else {
+            self.value
+        };
         let text = CanvasText {
-            text: format!("{:.1}", length),
+            text: format!("{:.2}", value),
             pos: Vec2::new(end.x + 2., end.y - 2.),
             pattern: Pattern::DimensionNormal,
             angle: 0.,
@@ -193,13 +207,17 @@ impl Dimension {
     }
     fn get_linear_path(&self) -> ((BezPath, Pattern), CanvasText) {
         let mut path = kurbo::BezPath::new();
-        let length = self.get_length();
+        let value = if self.value == 0. {
+            self.get_length()
+        } else {
+            self.value
+        };
         let start = self.start;
         let end = self.end;
         let unit_perp = unit_perpendicular(start, end, false);
         let unit_rot45 = rotate_vector(end - start, PI / 4.).normalize();
         let text = CanvasText {
-            text: format!("{:.2}", length),
+            text: format!("{:.2}", value),
             pos: self.get_center() + unit_perp * (self.dim_offset + 2.),
             pattern: Pattern::DimensionNormal,
             angle: self.get_text_angle(),

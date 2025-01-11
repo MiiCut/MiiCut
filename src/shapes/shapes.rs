@@ -27,6 +27,7 @@ use kurbo::PathEl;
 use kurbo::Point;
 use kurbo::Rect;
 use kurbo::Shape;
+use kurbo::Size;
 use kurbo::{BezPath, Vec2};
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -114,7 +115,7 @@ impl Display for BSKind {
 }
 impl ObjectsFuncs for BSKind {
     const TOLERANCE: f64 = 0.01;
-    const GRAB: f64 = 2.;
+    const GRAB_RADIUS: f64 = 2.;
     type Kindvars = BSKindvars;
 
     fn save_vars(&mut self) {
@@ -163,13 +164,13 @@ impl ObjectsFuncs for BSKind {
         }
     }
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
+    fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> bool {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.set_hs_from_pos(pos, hors),
-            RectangleRounded(sh) => sh.set_hs_from_pos(pos, hors),
-            Disc(sh) => sh.set_hs_from_pos(pos, hors),
-            Oblong(sh) => sh.set_hs_from_pos(pos, hors),
+            Rectangle(sh) => sh.set_hs_from_pos(pos, snap, hors),
+            RectangleRounded(sh) => sh.set_hs_from_pos(pos, snap, hors),
+            Disc(sh) => sh.set_hs_from_pos(pos, snap, hors),
+            Oblong(sh) => sh.set_hs_from_pos(pos, snap, hors),
         }
     }
     fn set_hs(&mut self, value: bool, hors: HS) {
@@ -200,13 +201,13 @@ impl ObjectsFuncs for BSKind {
         }
     }
 
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
+    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2> {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.set_hs_modifiers_from_pos(pos, hors),
-            RectangleRounded(sh) => sh.set_hs_modifiers_from_pos(pos, hors),
-            Disc(sh) => sh.set_hs_modifiers_from_pos(pos, hors),
-            Oblong(sh) => sh.set_hs_modifiers_from_pos(pos, hors),
+            Rectangle(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
+            RectangleRounded(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
+            Disc(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
+            Oblong(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
         }
     }
     fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
@@ -238,22 +239,28 @@ impl ObjectsFuncs for BSKind {
         }
     }
 
-    fn move_position(&mut self, dpos: Vec2) {
+    fn move_position(&mut self, dpos: Vec2, snap: f64) {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.move_position(dpos),
-            RectangleRounded(sh) => sh.move_position(dpos),
-            Disc(sh) => sh.move_position(dpos),
-            Oblong(sh) => sh.move_position(dpos),
+            Rectangle(sh) => sh.move_position(dpos, snap),
+            RectangleRounded(sh) => sh.move_position(dpos, snap),
+            Disc(sh) => sh.move_position(dpos, snap),
+            Oblong(sh) => sh.move_position(dpos, snap),
         }
     }
-    fn move_modifier(&mut self, pos_init: Vec2, pos: Vec2, _shift_pressed: bool) -> bool {
+    fn move_modifier(
+        &mut self,
+        pos_init: Vec2,
+        pos: Vec2,
+        snap: f64,
+        _shift_pressed: bool,
+    ) -> Option<Vec2> {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.move_modifier(pos_init, pos, _shift_pressed),
-            RectangleRounded(sh) => sh.move_modifier(pos_init, pos, _shift_pressed),
-            Disc(sh) => sh.move_modifier(pos_init, pos, _shift_pressed),
-            Oblong(sh) => sh.move_modifier(pos_init, pos, _shift_pressed),
+            Rectangle(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
+            RectangleRounded(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
+            Disc(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
+            Oblong(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
         }
     }
     fn get_position(&self) -> Vec2 {
@@ -266,22 +273,22 @@ impl ObjectsFuncs for BSKind {
         }
     }
 
-    fn get_paths(&self) -> Vec<BezPath> {
+    fn get_paths(&self, canvas_size: &Size) -> Vec<BezPath> {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.get_paths(),
-            RectangleRounded(sh) => sh.get_paths(),
-            Disc(sh) => sh.get_paths(),
-            Oblong(sh) => sh.get_paths(),
+            Rectangle(sh) => sh.get_paths(canvas_size),
+            RectangleRounded(sh) => sh.get_paths(canvas_size),
+            Disc(sh) => sh.get_paths(canvas_size),
+            Oblong(sh) => sh.get_paths(canvas_size),
         }
     }
-    fn get_modifiers_paths(&self) -> Vec<(BezPath, Pattern)> {
+    fn get_modifiers_paths(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.get_modifiers_paths(),
-            RectangleRounded(sh) => sh.get_modifiers_paths(),
-            Disc(sh) => sh.get_modifiers_paths(),
-            Oblong(sh) => sh.get_modifiers_paths(),
+            Rectangle(sh) => sh.get_modifiers_paths(drawing_area_size),
+            RectangleRounded(sh) => sh.get_modifiers_paths(drawing_area_size),
+            Disc(sh) => sh.get_modifiers_paths(drawing_area_size),
+            Oblong(sh) => sh.get_modifiers_paths(drawing_area_size),
         }
     }
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
@@ -469,7 +476,7 @@ impl ObjectOps for BasicShape {
     fn set_new_id(&mut self, new_id: BSid) {
         self.shid = new_id;
     }
-    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern)> {
+    fn get_paths_and_patterns(&self, canvas_size: &Size) -> Vec<(BezPath, Pattern)> {
         let hs = self.shape_kind.get_hhss();
         let pattern = match (hs.0, hs.1, self.boolean_op) {
             (false, false, BoolOps::UnionForced) => Pattern::BasicNormalDark,
@@ -482,7 +489,7 @@ impl ObjectOps for BasicShape {
             (true, true, _) => Pattern::BasicSelected,
         };
 
-        let mut paths = self.shape_kind.get_paths();
+        let mut paths = self.shape_kind.get_paths(canvas_size);
         let result = paths
             .iter_mut()
             .map(|path| (path.clone(), pattern))

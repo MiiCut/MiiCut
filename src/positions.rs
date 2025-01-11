@@ -160,6 +160,30 @@ impl Pointer {
     pub fn set_pos(&mut self, pos: Vec2) {
         self.pos.set_pos(pos);
     }
+    pub fn save_pos(&mut self) {
+        self.pos.save_pos();
+    }
+    pub fn restore_saved(&mut self) {
+        self.pos.restore_saved();
+    }
+    pub fn get_last_pos(&self) -> Vec2 {
+        self.pos.get_last_pos()
+    }
+    pub fn get_saved_pos(&self) -> Vec2 {
+        self.pos.get_saved_pos()
+    }
+    pub fn highlight(&mut self, value: bool) {
+        self.pos.highlight(value);
+    }
+    pub fn is_highlighted(&self) -> bool {
+        self.pos.is_highlighted()
+    }
+    pub fn select(&mut self, value: bool) {
+        self.pos.select(value);
+    }
+    pub fn is_selected(&self) -> bool {
+        self.pos.is_selected()
+    }
     pub fn set_active(&mut self, value: bool) {
         self.active = value;
     }

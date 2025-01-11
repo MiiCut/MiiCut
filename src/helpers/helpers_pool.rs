@@ -1,14 +1,51 @@
+use super::{
+    helper_circle::HelperCircle,
+    helper_line::HelperLine,
+    helper_point::HelperPoint,
+    helpers::{Helper, HelperKind, HelperKindvars},
+};
+use crate::{pools::Pools, traits::*, Action, IconsConstruction, HS};
 use kurbo::Vec2;
-
-use crate::{traits::*, HS};
-
-use super::helpers::{Helper, HelperKindvars};
 use std::{
     collections::HashMap,
     fmt::Display,
     ops::{Deref, DerefMut},
     sync::atomic::{AtomicUsize, Ordering},
 };
+
+pub struct AddHelperAction {
+    pub helper: Helper,
+}
+impl Action for AddHelperAction {
+    fn undo(&self, pools: &mut Pools) {
+        log!("Undoing shape creation: {:?}", self.helper.get_id());
+        pools.hp.delete_helper(self.helper.get_id());
+    }
+
+    fn redo(&self, pools: &mut Pools) {
+        log!("Redoing shape creation: {:?}", self.helper.get_id());
+        pools.hp.add_helper(self.helper.clone());
+    }
+}
+
+pub struct DeleteHelperAction {
+    pub helpers: Vec<Helper>,
+}
+impl Action for DeleteHelperAction {
+    fn undo(&self, pools: &mut Pools) {
+        log!("Undoing shapes creation");
+        self.helpers.iter().for_each(|helper| {
+            pools.hp.add_helper(helper.clone());
+        });
+    }
+
+    fn redo(&self, pools: &mut Pools) {
+        log!("Redoing shapes creation");
+        self.helpers.iter().for_each(|helper| {
+            pools.hp.delete_helper(helper.get_id());
+        });
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct HelpersPool {
@@ -20,6 +57,15 @@ impl HelpersPool {
         HelpersPool {
             helpers: HashMap::new(),
         }
+    }
+    pub fn new_helper(icon_helper: IconsConstruction, pos1: Vec2, pos2: Vec2) -> Helper {
+        let dhid = DHid::new();
+        let helper_kind = match icon_helper {
+            IconsConstruction::Point => HelperPoint::new(pos1, pos2),
+            IconsConstruction::Line => HelperLine::new(pos1, pos2),
+            IconsConstruction::Circle => HelperCircle::new(pos1, pos2),
+        };
+        Helper::new(dhid, helper_kind)
     }
     // Methods
     pub fn duplicate_helpers(&mut self, shapes: Vec<Helper>) -> Vec<Helper> {
@@ -63,18 +109,18 @@ impl HelpersPool {
         });
     }
 
-    pub fn set_hs_from_pos(&mut self, pos: Vec2, hors: HS) -> bool {
+    pub fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> bool {
         use HS::*;
         if let Highlight = hors {
             let mut res = false;
             self.helpers.values_mut().for_each(|helper| {
-                res |= helper.get_kind_mut().set_hs_from_pos(pos, Highlight);
+                res |= helper.get_kind_mut().set_hs_from_pos(pos, snap, Highlight);
             });
             return res;
         } else {
             let mut res = false;
             self.helpers.values_mut().for_each(|helper| {
-                res |= helper.get_kind_mut().set_hs_from_pos(pos, Select);
+                res |= helper.get_kind_mut().set_hs_from_pos(pos, snap, Select);
             });
             return res;
         }
@@ -116,12 +162,22 @@ impl HelpersPool {
         }
     }
 
-    pub fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _precision: f64, hors: HS) -> bool {
-        let mut setted = false;
-        self.helpers.values_mut().for_each(|helper| {
-            setted |= helper.get_kind_mut().set_hs_modifiers_from_pos(pos, hors);
-        });
-        setted
+    pub fn set_hs_modifiers_from_pos(
+        &mut self,
+        pos: Vec2,
+        snap: f64,
+        _precision: f64,
+        hors: HS,
+    ) -> Option<Vec2> {
+        for helper in self.helpers.values_mut() {
+            if let Some(pos) = helper
+                .get_kind_mut()
+                .set_hs_modifiers_from_pos(pos, snap, hors)
+            {
+                return Some(pos);
+            }
+        }
+        None
     }
     pub fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
         self.helpers.values_mut().for_each(|helper| {
@@ -137,41 +193,86 @@ impl HelpersPool {
         None
     }
 
-    pub fn move_positions(
+    pub fn move_position(
         &mut self,
-        dhid_sel: Vec<DHid>,
+        dhid: DHid,
         pos_init: Vec2,
         pos: Vec2,
+        snap: f64,
         _shift_pressed: bool,
     ) {
-        dhid_sel.into_iter().for_each(|dhid| {
-            if let Some(helper) = self.helpers.get_mut(&dhid) {
-                helper.get_kind_mut().move_position(pos - pos_init);
-            }
-        });
+        if let Some(helper) = self.helpers.get_mut(&dhid) {
+            helper.get_kind_mut().move_position(pos - pos_init, snap);
+        }
     }
-    pub fn move_modifier(&mut self, dhid: DHid, pos_init: Vec2, pos: Vec2, shift_pressed: bool) {
+    pub fn move_modifier(
+        &mut self,
+        dhid: DHid,
+        pos_init: Vec2,
+        pos: Vec2,
+        snap: f64,
+        shift_pressed: bool,
+    ) {
         if let Some(helper) = self.helpers.get_mut(&dhid) {
             helper
                 .get_kind_mut()
-                .move_modifier(pos_init, pos, shift_pressed);
+                .move_modifier(pos_init, pos, snap, shift_pressed);
         }
     }
 
-    pub fn delete_helpers_selected(&mut self) -> Vec<Helper> {
-        let shapes_deleted: Vec<Helper> = self
+    pub fn delete_selection(&mut self) -> Option<Vec<Helper>> {
+        let helpers_deleted: Vec<Helper> = self
             .helpers
             .iter()
-            .filter(|(_, helper)| helper.get_kind().get_hs(HS::Select))
-            .map(|(_, helper)| helper.clone())
+            .filter(|(_, shape)| shape.get_kind().get_hs(HS::Select))
+            .map(|(_, shape)| shape.clone())
             .collect();
         self.helpers.retain(|_, v| !v.get_kind().get_hs(HS::Select));
-        shapes_deleted
+        if helpers_deleted.is_empty() {
+            None
+        } else {
+            Some(helpers_deleted)
+        }
+    }
+    pub fn magnet_to_helpers(&mut self, pos: Vec2) -> Vec2 {
+        let mut result: Vec<(&HelperKind, Vec2)> = vec![];
+        for helper in self.helpers.values() {
+            if let Some(pos) = helper.get_kind().magnet_to(pos) {
+                result.push((helper.get_kind(), pos));
+            }
+        }
+        // If result contains at least one Point, return the nearest
+        let result_points: Vec<Vec2> = result
+            .iter()
+            .filter_map(|(kind, pos)| {
+                if let HelperKind::Point(_) = kind {
+                    Some(pos.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if result_points.len() > 0 {
+            let mut min_dist = f64::MAX;
+            let mut min_pos = Vec2::ZERO;
+            for pos_result in result_points {
+                let dist = (pos_result - pos).hypot();
+                if dist < min_dist {
+                    min_dist = dist;
+                    min_pos = pos_result;
+                }
+            }
+            log!("Magnet to point: {:?}", min_pos);
+            return min_pos;
+        }
+
+        pos
     }
 }
 
 static COUNTER_DRAW_HELPERS: AtomicUsize = AtomicUsize::new(0);
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd)]
+
 pub struct DHid {
     id: usize,
 }

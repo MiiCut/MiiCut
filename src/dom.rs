@@ -44,7 +44,7 @@ pub enum Icons {
     Selection,
     Scissors,
     IShapes(IconsShapes),
-    IConstruction(IconsConstruction),
+    IHelpers(IconsConstruction),
 }
 impl Icons {
     pub fn id(&self) -> &'static str {
@@ -54,7 +54,7 @@ impl Icons {
             Selection => "icon-selection",
             Scissors => "icon-scissors",
             IShapes(ishape) => ishape.id(),
-            IConstruction(iconstruct) => iconstruct.id(),
+            IHelpers(iconstruct) => iconstruct.id(),
         }
     }
     pub fn get_element(&self) -> Option<Element> {
@@ -263,7 +263,6 @@ impl Mouse {
                 y: self.mouse_client.y - canvas_offset_y as f64,
             };
             self.draw_pos = to_draw(self.canvas_pos, drawing_scale, drawing_offset);
-            self.draw_pos = magnet_to_grid(&self.draw_pos);
             if self.draw_pos != self.last_draw_pos {
                 self.last_draw_pos = self.draw_pos;
             }
