@@ -496,11 +496,10 @@ impl ObjectsFuncs for ShapeRectRounded {
         ()
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) {
-        self.tl
-            .set_pos(snap_pt(self.tl.get_saved_pos() + dpos, snap));
-        self.br
-            .set_pos(snap_pt(self.br.get_saved_pos() + dpos, snap));
+    fn move_position(&mut self, mut dpos: Vec2, snap: f64) {
+        dpos = snap_pt(dpos, snap);
+        self.tl.set_pos(self.tl.get_saved_pos() + dpos);
+        self.br.set_pos(self.br.get_saved_pos() + dpos);
         self.update_polygon();
     }
     fn move_modifier(
@@ -855,6 +854,22 @@ impl ObjectsFuncs for ShapeRectRounded {
         } else {
             vec![BezPath::new()]
         }
+    }
+    fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+        let hs = self.get_hhss();
+        let pattern = match (hs.0, hs.1) {
+            (false, false) => Pattern::BasicNormal,
+            (false, true) => Pattern::BasicHighlighted,
+            (true, false) => Pattern::BasicSelected,
+            (true, true) => Pattern::BasicSelected,
+        };
+
+        let mut paths = self.get_paths(drawing_area_size);
+        let result = paths
+            .iter_mut()
+            .map(|path| (path.clone(), pattern))
+            .collect();
+        result
     }
 }
 

@@ -3,7 +3,7 @@ use std::f64::consts::PI;
 use kurbo::{BezPath, Vec2};
 
 use crate::{
-    canvas::{Align, CanvasText, Pattern},
+    canvas::{CanvasText, CanvasTextConfig, Pattern, TextAlign, TextPos},
     math::*,
 };
 
@@ -13,6 +13,7 @@ pub enum DimKind {
     Linear,
     Horizontal,
     Vertical,
+    Angle,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -64,26 +65,27 @@ impl Dimension {
     pub fn get_center(&self) -> Vec2 {
         (self.start + self.end) / 2.
     }
-    pub fn get_text_pos(&self) -> Vec2 {
+    pub fn get_text_pos(&self) -> TextPos {
         let center = self.get_center();
         let angle = self.get_angle();
         let length = self.get_length();
         let text_pos = center + Vec2::from_angle(angle) * length / 2.;
-        text_pos
+        TextPos::PosCustom(text_pos)
     }
     pub fn get_text_angle(&self) -> f64 {
-        let mut angle = self.get_angle();
-        if angle < -PI / 2. || angle > PI / 2. {
-            angle = PI + angle;
+        let angle = self.get_angle();
+        if angle.abs() > PI / 2. {
+            angle + PI
+        } else {
+            angle
         }
-        angle
     }
-    pub fn get_text_align(&self) -> Align {
+    pub fn get_text_align(&self) -> TextAlign {
         let angle = self.get_angle();
         if angle > std::f64::consts::PI / 2. && angle < 3. * std::f64::consts::PI / 2. {
-            Align::Right
+            TextAlign::Right
         } else {
-            Align::Left
+            TextAlign::Left
         }
     }
     pub fn get_text_val(&self) -> String {
@@ -98,15 +100,17 @@ impl Dimension {
         }
     }
     pub fn get_text(&self) -> CanvasText {
-        CanvasText {
-            text: self.get_text_val(),
-            pos: self.get_text_pos(),
-            pattern: self.get_pattern(self.selected, self.highlighted),
-            angle: self.get_text_angle(),
-            align: self.get_text_align(),
-            font_size: 14,
-            opacity: 1.,
-        }
+        CanvasText::new(
+            self.get_text_val(),
+            self.get_text_pos(),
+            CanvasTextConfig::new(
+                self.get_pattern(self.selected, self.highlighted),
+                self.get_text_angle(),
+                self.get_text_align(),
+                14,
+                1.,
+            ),
+        )
     }
     pub fn get_path(&self) -> ((BezPath, Pattern), CanvasText) {
         match self.kind {
@@ -114,6 +118,7 @@ impl Dimension {
             DimKind::Linear => self.get_linear_path(),
             DimKind::Horizontal => self.get_horizontal_path(),
             DimKind::Vertical => self.get_vertical_path(),
+            DimKind::Angle => self.get_angle_path(),
         }
     }
     fn get_horizontal_path(&self) -> ((BezPath, Pattern), CanvasText) {
@@ -124,15 +129,11 @@ impl Dimension {
             self.value
         };
         let pos_y = self.start.y - 10.;
-        let text = CanvasText {
-            text: format!("{:.2}", value),
-            pos: Vec2::new(self.get_center().x, pos_y - 2.),
-            pattern: Pattern::DimensionNormal,
-            angle: 0.,
-            align: Align::Center,
-            font_size: 14,
-            opacity: 0.5,
-        };
+        let text = CanvasText::new(
+            format!("{:.2}", value),
+            TextPos::PosCustom(Vec2::new(self.get_center().x, pos_y - 2.)),
+            CanvasTextConfig::new(Pattern::DimensionNormal, 0., TextAlign::Center, 14, 0.5),
+        );
 
         let start = Vec2::new(self.start.x, pos_y);
         let end = Vec2::new(self.end.x, pos_y);
@@ -156,15 +157,17 @@ impl Dimension {
             self.value
         };
         let pos_x = self.start.x - 10.;
-        let text = CanvasText {
-            text: format!("{:.2}", value),
-            pos: Vec2::new(self.get_center().x - 12., self.get_center().y),
-            pattern: Pattern::DimensionNormal,
-            angle: -PI / 2.,
-            align: Align::Center,
-            font_size: 14,
-            opacity: 0.5,
-        };
+        let text = CanvasText::new(
+            format!("{:.2}", value),
+            TextPos::PosCustom(Vec2::new(self.get_center().x - 12., self.get_center().y)),
+            CanvasTextConfig::new(
+                Pattern::DimensionNormal,
+                -PI / 2.,
+                TextAlign::Center,
+                14,
+                0.5,
+            ),
+        );
 
         let start = Vec2::new(pos_x, self.start.y);
         let end = Vec2::new(pos_x, self.end.y);
@@ -188,20 +191,42 @@ impl Dimension {
         } else {
             self.value
         };
-        let text = CanvasText {
-            text: format!("{:.2}", value),
-            pos: Vec2::new(end.x + 2., end.y - 2.),
-            pattern: Pattern::DimensionNormal,
-            angle: 0.,
-            align: Align::Left,
-            font_size: 14,
-            opacity: 0.5,
-        };
+        let text = CanvasText::new(
+            format!("r: {:.2}", value),
+            TextPos::PosCustom(Vec2::new(end.x + 2., end.y - 2.)),
+            CanvasTextConfig::new(Pattern::DimensionNormal, 0., TextAlign::Left, 14, 0.5),
+        );
 
         path.move_to(self.start.to_point());
 
         path.line_to(end.to_point());
         path.line_to(Vec2::new(end.x + 10., end.y).to_point());
+
+        ((path, Pattern::DimensionNormal), text)
+    }
+    fn get_angle_path(&self) -> ((BezPath, Pattern), CanvasText) {
+        let mut path = kurbo::BezPath::new();
+        let start = self.start;
+        let end = self.end;
+        let unit_vec = (end - start).normalize();
+        let ratio = self.get_length() * 0.4;
+        let angle_pt = start + unit_vec * ratio;
+        let angle = (self.end - self.start).atan2();
+        let text = CanvasText::new(
+            format!("a: {:.1}", -angle / PI * 180.),
+            TextPos::PosCustom(Vec2::new(angle_pt.x + 2., angle_pt.y - 2.)),
+            CanvasTextConfig::new(
+                Pattern::DimensionNormal,
+                self.get_text_angle(),
+                TextAlign::Right,
+                14,
+                0.5,
+            ),
+        );
+
+        path.move_to((start + Vec2::new(ratio, 0.)).to_point());
+        path.line_to(start.to_point());
+        path.line_to(angle_pt.to_point());
 
         ((path, Pattern::DimensionNormal), text)
     }
@@ -216,15 +241,17 @@ impl Dimension {
         let end = self.end;
         let unit_perp = unit_perpendicular(start, end, false);
         let unit_rot45 = rotate_vector(end - start, PI / 4.).normalize();
-        let text = CanvasText {
-            text: format!("{:.2}", value),
-            pos: self.get_center() + unit_perp * (self.dim_offset + 2.),
-            pattern: Pattern::DimensionNormal,
-            angle: self.get_text_angle(),
-            align: Align::Center,
-            font_size: 14,
-            opacity: 0.5,
-        };
+        let text = CanvasText::new(
+            format!("{:.1}", value),
+            TextPos::PosCustom(self.get_center() + unit_perp * (self.dim_offset + 10.)),
+            CanvasTextConfig::new(
+                Pattern::DimensionNormal,
+                self.get_text_angle(),
+                TextAlign::Center,
+                14,
+                0.5,
+            ),
+        );
 
         path.move_to((start + unit_perp * self.dim_offset).to_point());
         path.line_to((end + unit_perp * self.dim_offset).to_point());

@@ -16,7 +16,6 @@ pub trait ObjectOps {
     fn get_kind(&self) -> &Self::Kind;
     fn get_kind_mut(&mut self) -> &mut Self::Kind;
     fn set_new_id(&mut self, id: Self::Id);
-    fn get_paths_and_patterns(&self, canvas_size: &Size) -> Vec<(BezPath, Pattern)>;
 }
 pub trait CommonPool {
     fn duplicate<T: ObjectOps + Clone>(&mut self, draw_objs: Vec<T>) -> Vec<T>;
@@ -55,6 +54,7 @@ pub trait ObjectsFuncs: Debug + Clone {
     fn get_position(&self) -> Vec2;
 
     fn get_paths(&self, drawing_area_size: &Size) -> Vec<BezPath>;
+    fn get_paths_and_patterns(&self, canvas_size: &Size) -> Vec<(BezPath, Pattern)>;
     fn get_modifiers_paths(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)>;
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>);
     fn get_pattern_modifiers(&self, selected: bool, highlighted: bool) -> Pattern {

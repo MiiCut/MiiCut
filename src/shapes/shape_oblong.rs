@@ -4,6 +4,7 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
+use super::shapes::{BSKind, BSKindvars};
 use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
@@ -20,8 +21,6 @@ use std::{
     f64::consts::{FRAC_PI_2, PI},
     fmt::Display,
 };
-
-use super::shapes::{BSKind, BSKindvars};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeOblongVars {
@@ -332,11 +331,10 @@ impl ObjectsFuncs for ShapeOblong {
         ()
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) {
-        self.start
-            .set_pos(snap_pt(self.start.get_saved_pos() + dpos, snap));
-        self.end
-            .set_pos(snap_pt(self.end.get_saved_pos() + dpos, snap));
+    fn move_position(&mut self, mut dpos: Vec2, snap: f64) {
+        dpos = snap_pt(dpos, snap);
+        self.start.set_pos(self.start.get_saved_pos() + dpos);
+        self.end.set_pos(self.end.get_saved_pos() + dpos);
         self.update_polygon();
     }
     fn move_modifier(
@@ -360,9 +358,10 @@ impl ObjectsFuncs for ShapeOblong {
 
         match (start_sel, end_sel, width_sel) {
             (true, false, false) => {
-                let start = start_saved + dpos;
+                let start = snap_pt(start_saved + dpos, snap);
                 let length = snap_val((start - end_saved).hypot(), snap);
-                let angle = snap_angle_hv((end_saved - start).atan2());
+                let mut angle = snap_angle_hv((end_saved - start).atan2());
+                angle = snap_val(angle / PI * 180., snap) / 180. * PI;
                 let start = end_saved - Vec2::from_angle(angle) * length;
 
                 if (start - end_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
@@ -372,9 +371,10 @@ impl ObjectsFuncs for ShapeOblong {
                 }
             }
             (false, true, false) => {
-                let end = end_saved + dpos;
+                let end = snap_pt(end_saved + dpos, snap);
                 let length = snap_val((start_saved - end).hypot(), snap);
-                let angle = snap_angle_hv((end - start_saved).atan2());
+                let mut angle = snap_angle_hv((end - start_saved).atan2());
+                angle = snap_val(angle / PI * 180., snap) / 180. * PI;
                 let end = start_saved + Vec2::from_angle(angle) * length;
 
                 if (end - start_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
@@ -432,29 +432,26 @@ impl ObjectsFuncs for ShapeOblong {
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         let mut paths = vec![];
         let mut texts = vec![];
+        let start = self.start.get_pos();
+        let end = self.end.get_pos();
+        let length = self.get_length();
+        let width = self.get_width();
+        let middle1_pt = self.get_middle_modifier();
+        let middle2_pt = symmetric_point_to_segment(start, end, self.get_middle_modifier());
 
-        let mut dim = Dimension::new(
-            DimKind::Linear,
-            self.start.get_pos(),
-            self.end.get_pos(),
-            self.get_length(),
-        );
-        dim.set_dim_offset(self.get_width() / 2. + 10.);
+        let mut dim = Dimension::new(DimKind::Linear, start, end, length);
+        dim.set_dim_offset(width / 2. + 6.);
         let (path, text) = dim.get_path();
         paths.push(path);
         texts.push(text);
 
-        let mut dim = Dimension::new(
-            DimKind::Linear,
-            self.get_middle_modifier(),
-            symmetric_point_to_segment(
-                self.start.get_pos(),
-                self.end.get_pos(),
-                self.get_middle_modifier(),
-            ),
-            self.get_width(),
-        );
-        dim.set_dim_offset(10.);
+        let mut dim = Dimension::new(DimKind::Linear, middle1_pt, middle2_pt, width);
+        dim.set_dim_offset(length / 2. + width / 2. + 6.);
+        let (path, text) = dim.get_path();
+        paths.push(path);
+        texts.push(text);
+
+        let dim = Dimension::new(DimKind::Angle, start, end, 0.);
         let (path, text) = dim.get_path();
         paths.push(path);
         texts.push(text);
@@ -468,6 +465,22 @@ impl ObjectsFuncs for ShapeOblong {
         paths.push(self.get_line(false).to_path(ShapeOblong::TOLERANCE));
         paths.push(self.get_arc(true).to_path(ShapeOblong::TOLERANCE));
         paths
+    }
+    fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+        let hs = self.get_hhss();
+        let pattern = match (hs.0, hs.1) {
+            (false, false) => Pattern::BasicNormal,
+            (false, true) => Pattern::BasicHighlighted,
+            (true, false) => Pattern::BasicSelected,
+            (true, true) => Pattern::BasicSelected,
+        };
+
+        let mut paths = self.get_paths(drawing_area_size);
+        let result = paths
+            .iter_mut()
+            .map(|path| (path.clone(), pattern))
+            .collect();
+        result
     }
 }
 

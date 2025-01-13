@@ -1,12 +1,3 @@
-use std::vec;
-
-use js_sys::Array;
-use kurbo::{BezPath, PathEl, Point, Size, Vec2};
-use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{CanvasRenderingContext2d, CssStyleDeclaration, HtmlCanvasElement, Window};
-
-use crate::math::*;
-
 // #![cfg(not(test))]
 // A macro to provide `println!(..)`-style syntax for `console.log` logging.
 // macro_rules! log {
@@ -14,23 +5,136 @@ use crate::math::*;
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
+use crate::math::*;
+use js_sys::Array;
+use kurbo::{BezPath, PathEl, Point, Size, Vec2};
+use std::vec;
+use wasm_bindgen::{JsCast, JsValue};
+use web_sys::{CanvasRenderingContext2d, CssStyleDeclaration, HtmlCanvasElement, Window};
+
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Align {
+pub enum TextPos {
+    Pos1(f64),
+    Pos2(f64),
+    Pos3(f64),
+    Pos4(f64),
+    Pos5(f64),
+    PosCustom(Vec2),
+}
+impl TextPos {
+    pub fn pos(&self) -> Vec2 {
+        const OFFSET: f64 = 10.;
+        match self {
+            TextPos::Pos1(y0) => Vec2::new(10., *y0 - OFFSET),
+            TextPos::Pos2(y0) => Vec2::new(10., *y0 - 2. * OFFSET),
+            TextPos::Pos3(y0) => Vec2::new(10., *y0 - 3. * OFFSET),
+            TextPos::Pos4(y0) => Vec2::new(10., *y0 - 4. * OFFSET),
+            TextPos::Pos5(y0) => Vec2::new(10., *y0 - 5. * OFFSET),
+            TextPos::PosCustom(pos) => *pos,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum TextAlign {
     Left,
     Right,
     Center,
 }
 #[derive(Clone, Debug)]
-pub struct CanvasText {
-    pub text: String,
-    pub pos: Vec2,
-    pub pattern: Pattern,
-    pub angle: f64,
-    pub align: Align,
-    pub font_size: u32,
-    pub opacity: f64,
+pub struct CanvasTextConfig {
+    pattern: Pattern,
+    angle: f64,
+    align: TextAlign,
+    font_size: u32,
+    opacity: f64,
 }
-
+impl CanvasTextConfig {
+    pub fn new(
+        pattern: Pattern,
+        angle: f64,
+        align: TextAlign,
+        font_size: u32,
+        opacity: f64,
+    ) -> CanvasTextConfig {
+        CanvasTextConfig {
+            pattern,
+            angle,
+            align,
+            font_size,
+            opacity,
+        }
+    }
+    pub fn set_pattern(&mut self, pattern: Pattern) {
+        self.pattern = pattern
+    }
+    pub fn set_angle(&mut self, angle: f64) {
+        self.angle = angle
+    }
+    pub fn set_align(&mut self, align: TextAlign) {
+        self.align = align
+    }
+    pub fn set_font_size(&mut self, font_size: u32) {
+        self.font_size = font_size
+    }
+    pub fn set_opacity(&mut self, opacity: f64) {
+        self.opacity = opacity
+    }
+    pub fn get_pattern(&self) -> Pattern {
+        self.pattern
+    }
+    pub fn get_angle(&self) -> f64 {
+        self.angle
+    }
+    pub fn get_align(&self) -> TextAlign {
+        self.align
+    }
+    pub fn get_font_size(&self) -> u32 {
+        self.font_size
+    }
+    pub fn get_opacity(&self) -> f64 {
+        self.opacity
+    }
+}
+impl Default for CanvasTextConfig {
+    fn default() -> Self {
+        CanvasTextConfig {
+            pattern: Pattern::Rules,
+            angle: 0.,
+            align: TextAlign::Center,
+            font_size: 16,
+            opacity: 0.4,
+        }
+    }
+}
+pub struct CanvasText {
+    text: String,
+    pos: TextPos,
+    config: CanvasTextConfig,
+}
+impl CanvasText {
+    pub fn new(text: String, pos: TextPos, config: CanvasTextConfig) -> CanvasText {
+        CanvasText { text, pos, config }
+    }
+    pub fn set_text(&mut self, text: String) {
+        self.text = text
+    }
+    pub fn set_pos(&mut self, pos: TextPos) {
+        self.pos = pos
+    }
+    pub fn set_config(&mut self, config: CanvasTextConfig) {
+        self.config = config
+    }
+    pub fn get_text(&self) -> &str {
+        &self.text
+    }
+    pub fn get_pos(&self) -> TextPos {
+        self.pos
+    }
+    pub fn get_config(&self) -> &CanvasTextConfig {
+        &self.config
+    }
+}
 #[derive(Clone, Debug)]
 pub enum CanvasKind {
     Background,
@@ -75,15 +179,11 @@ impl GridRules {
         let mut wx = 0.;
         while wx <= draw_rec_size.width {
             let h = if (wx / (10. * draw_rec_grid_spacing)).fract() == 0. {
-                texts.push(CanvasText {
-                    text: format!("{:.0}", wx / 10.),
-                    pos: Vec2::new(wx, offset_y + 15.),
-                    pattern: Pattern::Rules,
-                    angle: 0.,
-                    align: Align::Center,
-                    font_size: 16,
-                    opacity: 0.4,
-                });
+                texts.push(CanvasText::new(
+                    format!("{:.0}", wx / 10.),
+                    TextPos::PosCustom(Vec2::new(wx, offset_y + 15.)),
+                    CanvasTextConfig::new(Pattern::Rules, 0., TextAlign::Center, 16, 0.4),
+                ));
                 self.primary_rules_thicks_hw
             } else {
                 self.secondary_rules_thicks_hw
@@ -102,15 +202,11 @@ impl GridRules {
         let mut wy = 0.;
         while wy <= draw_rec_size.height {
             let w = if (wy / (10. * draw_rec_grid_spacing)).fract() == 0. {
-                texts.push(CanvasText {
-                    text: format!("{:.0}", wy / 10.),
-                    pos: Vec2::new(offset_x + 5., wy),
-                    pattern: Pattern::Rules,
-                    angle: 0.,
-                    align: Align::Left,
-                    font_size: 16,
-                    opacity: 0.4,
-                });
+                texts.push(CanvasText::new(
+                    format!("{:.0}", wy / 10.),
+                    TextPos::PosCustom(Vec2::new(offset_x + 5., wy)),
+                    CanvasTextConfig::new(Pattern::Rules, 0., TextAlign::Left, 16, 0.4),
+                ));
                 self.primary_rules_thicks_hw
             } else {
                 self.secondary_rules_thicks_hw
@@ -325,25 +421,54 @@ impl Canvases {
         let offset = self.get_drawing_offset();
 
         ctx.save();
-        let cpt = to_canvas(text.pos, scale, offset);
+
+        let cpt = to_canvas(text.pos.pos(), scale, offset);
 
         ctx.translate(cpt.x, cpt.y)
             .expect("Failed to translate canvas");
 
-        ctx.rotate(text.angle).expect("Failed to rotate canvas");
+        ctx.rotate(text.config.angle)
+            .expect("Failed to rotate canvas");
         ctx.set_font("14px Orbitron");
-        ctx.set_font(&format!("{}px Orbitron", text.font_size));
-        ctx.set_global_alpha(text.opacity);
-        let (stroke_style, stroke_width, _) = self.styles.get_styles(text.pattern);
+        ctx.set_font(&format!("{}px Orbitron", text.config.font_size));
+        ctx.set_global_alpha(text.config.opacity);
+        let (stroke_style, stroke_width, _) = self.styles.get_styles(text.config.pattern);
         ctx.set_line_dash(stroke_style).unwrap();
         ctx.set_line_width(stroke_width);
-        let (fill_color, stroke_color) = self.styles.get_colors(text.pattern);
+        let (fill_color, stroke_color) = self.styles.get_colors(text.config.pattern);
         ctx.set_stroke_style_str(stroke_color);
         ctx.set_fill_style_str(fill_color);
-        ctx.set_text_align(match text.align {
-            Align::Left => "left",
-            Align::Right => "right",
-            Align::Center => "center",
+        ctx.set_text_align(match text.config.align {
+            TextAlign::Left => "left",
+            TextAlign::Right => "right",
+            TextAlign::Center => "center",
+        });
+        ctx.fill_text(&text.text, 0., 0.)
+            .expect("Failed to draw text");
+        ctx.restore();
+    }
+
+    pub fn direct_text(&self, canvas_kind: &CanvasKind, text: &CanvasText) {
+        let ctx = self.get_context(canvas_kind);
+        ctx.save();
+        ctx.translate(text.pos.pos().x, text.pos.pos().y)
+            .expect("Failed to translate canvas");
+
+        ctx.rotate(text.config.angle)
+            .expect("Failed to rotate canvas");
+        ctx.set_font("14px Orbitron");
+        ctx.set_font(&format!("{}px Orbitron", text.config.font_size));
+        ctx.set_global_alpha(text.config.opacity);
+        let (stroke_style, stroke_width, _) = self.styles.get_styles(text.config.pattern);
+        ctx.set_line_dash(stroke_style).unwrap();
+        ctx.set_line_width(stroke_width);
+        let (fill_color, stroke_color) = self.styles.get_colors(text.config.pattern);
+        ctx.set_stroke_style_str(stroke_color);
+        ctx.set_fill_style_str(fill_color);
+        ctx.set_text_align(match text.config.align {
+            TextAlign::Left => "left",
+            TextAlign::Right => "right",
+            TextAlign::Center => "center",
         });
         ctx.fill_text(&text.text, 0., 0.)
             .expect("Failed to draw text");
@@ -360,7 +485,6 @@ impl Canvases {
         let scale = self.get_drawing_scale();
         let offset = self.get_drawing_offset();
         ctx.set_font("14px Orbitron");
-
         for (path, pattern) in paths.iter() {
             let (stroke_style, stroke_width, filled) = self.styles.get_styles(*pattern);
             ctx.set_line_dash(stroke_style).unwrap();
@@ -654,7 +778,7 @@ impl DrawStyles {
 
         let dash_pattern = Array::new();
         dash_pattern.push(&JsValue::from_f64(4.0));
-        dash_pattern.push(&JsValue::from_f64(10.0));
+        dash_pattern.push(&JsValue::from_f64(6.0));
         let solid_pattern = Array::new();
         Ok(DrawStyles {
             background_color,
@@ -708,13 +832,13 @@ impl DrawStyles {
             BasicNormal => (&self.pattern_dashed, 1., true),
             BasicHighlighted => (&self.pattern_dashed, 1., true),
             BasicSelected => (&self.pattern_solid, 1., true),
-            BasicNormalDark => (&self.pattern_dashed, 2., false),
-            BasicHighlightedDark => (&self.pattern_dashed, 2., false),
-            BasicSelectedDark => (&self.pattern_solid, 2., false),
 
             HelperNormal => (&self.pattern_solid, 1., true),
             HelperHighlighted => (&self.pattern_solid, 1., true),
             HelperSelected => (&self.pattern_solid, 1., true),
+            HelperNormalCircle => (&self.pattern_dashed, 1., false),
+            HelperHighlightedCircle => (&self.pattern_dashed, 1., false),
+            HelperSelectedCircle => (&self.pattern_dashed, 1., false),
 
             DimensionNormal => (&self.pattern_solid, 1., false),
             DimensionHighlighted => (&self.pattern_solid, 1., false),
@@ -753,9 +877,9 @@ impl DrawStyles {
             BasicHighlighted => (&self.basic_highlight_color, &self.basic_highlight_color),
             BasicSelected => (&self.basic_selected_color, &self.basic_selected_color),
 
-            BasicNormalDark => (&self.transparent_color, &self.basic_normal_color_dark),
-            BasicHighlightedDark => (&self.transparent_color, &self.basic_highlight_color_dark),
-            BasicSelectedDark => (&self.basic_selected_color, &self.basic_selected_color_dark),
+            HelperNormalCircle => (&self.transparent_color, &self.helper_normal_color),
+            HelperHighlightedCircle => (&self.transparent_color, &self.helper_highlight_color),
+            HelperSelectedCircle => (&self.basic_selected_color, &self.helper_selected_color),
 
             HelperNormal => (&self.helper_normal_color, &self.helper_normal_color),
             HelperHighlighted => (&self.helper_highlight_color, &self.helper_highlight_color),
@@ -795,12 +919,15 @@ pub enum Pattern {
     BasicNormal,
     BasicHighlighted,
     BasicSelected,
-    BasicNormalDark,
-    BasicHighlightedDark,
-    BasicSelectedDark,
+
+    HelperNormalCircle,
+    HelperHighlightedCircle,
+    HelperSelectedCircle,
+
     HelperNormal,
     HelperHighlighted,
     HelperSelected,
+
     DimensionNormal,
     DimensionHighlighted,
     DimensionSelected,

@@ -1,6 +1,5 @@
 use super::helper_circle::HelperCircle;
 use super::helper_line::HelperLine;
-use super::helper_point::HelperPoint;
 use super::helpers_pool::DHid;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
@@ -47,7 +46,6 @@ pub enum HelperKindvars {
 
 #[derive(Clone, Debug)]
 pub enum HelperKind {
-    Point(HelperPoint),
     Line(HelperLine),
     Circle(HelperCircle),
 }
@@ -55,7 +53,6 @@ impl HelperKind {
     pub fn magnet_to(&self, pos: Vec2) -> Option<Vec2> {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.magnet_to(pos),
             Line(sh) => sh.magnet_to(pos),
             Circle(sh) => sh.magnet_to(pos),
         }
@@ -64,7 +61,6 @@ impl HelperKind {
 impl Display for HelperKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HelperKind::Point(p) => write!(f, "{}", p),
             HelperKind::Line(l) => write!(f, "{}", l),
             HelperKind::Circle(c) => write!(f, "{}", c),
         }
@@ -78,7 +74,6 @@ impl ObjectsFuncs for HelperKind {
     fn save_vars(&mut self) {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.save_vars(),
             Line(sh) => sh.save_vars(),
             Circle(sh) => sh.save_vars(),
         }
@@ -86,7 +81,6 @@ impl ObjectsFuncs for HelperKind {
     fn restore_saved(&mut self) {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.restore_saved(),
             Line(sh) => sh.restore_saved(),
             Circle(sh) => sh.restore_saved(),
         }
@@ -94,7 +88,6 @@ impl ObjectsFuncs for HelperKind {
     fn get_vars(&self) -> HelperKindvars {
         use HelperKind::*;
         match &self {
-            Point(sh) => sh.get_vars(),
             Line(sh) => sh.get_vars(),
             Circle(sh) => sh.get_vars(),
         }
@@ -102,7 +95,6 @@ impl ObjectsFuncs for HelperKind {
     fn set_vars(&mut self, vars: &HelperKindvars) {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.set_vars(vars),
             Line(sh) => sh.set_vars(vars),
             Circle(sh) => sh.set_vars(vars),
         }
@@ -110,7 +102,6 @@ impl ObjectsFuncs for HelperKind {
     fn good_size(&self) -> bool {
         use HelperKind::*;
         match &self {
-            Point(sh) => sh.good_size(),
             Line(sh) => sh.good_size(),
             Circle(sh) => sh.good_size(),
         }
@@ -119,7 +110,6 @@ impl ObjectsFuncs for HelperKind {
     fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> bool {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.set_hs_from_pos(pos, snap, hors),
             Line(sh) => sh.set_hs_from_pos(pos, snap, hors),
             Circle(sh) => sh.set_hs_from_pos(pos, snap, hors),
         }
@@ -127,7 +117,6 @@ impl ObjectsFuncs for HelperKind {
     fn set_hs(&mut self, value: bool, hors: HS) {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.set_hs(value, hors),
             Line(sh) => sh.set_hs(value, hors),
             Circle(sh) => sh.set_hs(value, hors),
         }
@@ -135,7 +124,6 @@ impl ObjectsFuncs for HelperKind {
     fn get_hs(&self, hors: HS) -> bool {
         use HelperKind::*;
         match &self {
-            Point(sh) => sh.get_hs(hors),
             Line(sh) => sh.get_hs(hors),
             Circle(sh) => sh.get_hs(hors),
         }
@@ -143,7 +131,6 @@ impl ObjectsFuncs for HelperKind {
     fn get_hhss(&self) -> (bool, bool) {
         use HelperKind::*;
         match &self {
-            Point(sh) => sh.get_hhss(),
             Line(sh) => sh.get_hhss(),
             Circle(sh) => sh.get_hhss(),
         }
@@ -152,7 +139,6 @@ impl ObjectsFuncs for HelperKind {
     fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2> {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
             Line(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
             Circle(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
         }
@@ -160,7 +146,6 @@ impl ObjectsFuncs for HelperKind {
     fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.set_hs_modifiers(value, hors),
             Line(sh) => sh.set_hs_modifiers(value, hors),
             Circle(sh) => sh.set_hs_modifiers(value, hors),
         }
@@ -168,7 +153,6 @@ impl ObjectsFuncs for HelperKind {
     fn get_hs_modifiers(&self, hors: HS) -> bool {
         use HelperKind::*;
         match &self {
-            Point(sh) => sh.get_hs_modifiers(hors),
             Line(sh) => sh.get_hs_modifiers(hors),
             Circle(sh) => sh.get_hs_modifiers(hors),
         }
@@ -177,7 +161,6 @@ impl ObjectsFuncs for HelperKind {
     fn toggle_prop(&mut self) {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.toggle_prop(),
             Line(sh) => sh.toggle_prop(),
             Circle(sh) => sh.toggle_prop(),
         }
@@ -186,7 +169,6 @@ impl ObjectsFuncs for HelperKind {
     fn move_position(&mut self, dpos: Vec2, snap: f64) {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.move_position(dpos, snap),
             Line(sh) => sh.move_position(dpos, snap),
             Circle(sh) => sh.move_position(dpos, snap),
         }
@@ -200,7 +182,6 @@ impl ObjectsFuncs for HelperKind {
     ) -> Option<Vec2> {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
             Line(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
             Circle(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
         }
@@ -208,7 +189,6 @@ impl ObjectsFuncs for HelperKind {
     fn get_position(&self) -> Vec2 {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.get_position(),
             Line(sh) => sh.get_position(),
             Circle(sh) => sh.get_position(),
         }
@@ -217,15 +197,20 @@ impl ObjectsFuncs for HelperKind {
     fn get_paths(&self, drawing_area_size: &Size) -> Vec<BezPath> {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.get_paths(drawing_area_size),
             Line(sh) => sh.get_paths(drawing_area_size),
             Circle(sh) => sh.get_paths(drawing_area_size),
+        }
+    }
+    fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+        use HelperKind::*;
+        match self {
+            Line(sh) => sh.get_paths_and_patterns(drawing_area_size),
+            Circle(sh) => sh.get_paths_and_patterns(drawing_area_size),
         }
     }
     fn get_modifiers_paths(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.get_modifiers_paths(drawing_area_size),
             Line(sh) => sh.get_modifiers_paths(drawing_area_size),
             Circle(sh) => sh.get_modifiers_paths(drawing_area_size),
         }
@@ -233,7 +218,6 @@ impl ObjectsFuncs for HelperKind {
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         use HelperKind::*;
         match self {
-            Point(sh) => sh.get_dimensions_paths(),
             Line(sh) => sh.get_dimensions_paths(),
             Circle(sh) => sh.get_dimensions_paths(),
         }
@@ -265,21 +249,5 @@ impl ObjectOps for Helper {
     }
     fn set_new_id(&mut self, id: Self::Id) {
         self.dhid = id;
-    }
-    fn get_paths_and_patterns(&self, canvas_size: &Size) -> Vec<(BezPath, Pattern)> {
-        let hs = self.helper_kind.get_hhss();
-        let pattern = match (hs.0, hs.1) {
-            (false, false) => Pattern::HelperNormal,
-            (false, true) => Pattern::HelperHighlighted,
-            (true, false) => Pattern::HelperSelected,
-            (true, true) => Pattern::HelperSelected,
-        };
-
-        let mut paths = self.helper_kind.get_paths(canvas_size);
-        let result = paths
-            .iter_mut()
-            .map(|path| (path.clone(), pattern))
-            .collect();
-        result
     }
 }

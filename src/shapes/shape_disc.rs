@@ -33,7 +33,7 @@ impl ShapeDisc {
 
     pub fn new(center: Vec2, _pos2: Vec2) -> BSKind {
         let center = Position::new(center, false);
-        let mut radius = Value::new(0.); //ShapeDisc::MIN_RADIUS);
+        let mut radius = Value::new(0.);
         radius.select(true);
 
         BSKind::Disc(ShapeDisc {
@@ -103,7 +103,7 @@ impl Shape for ShapeDisc {
 }
 impl ObjectsFuncs for ShapeDisc {
     const TOLERANCE: f64 = 0.01;
-    const GRAB_RADIUS: f64 = 2.;
+    const GRAB_RADIUS: f64 = 5.;
     type Kindvars = BSKindvars;
 
     fn save_vars(&mut self) {
@@ -157,7 +157,8 @@ impl ObjectsFuncs for ShapeDisc {
         (self.selected, self.highlighted)
     }
     fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> Option<Vec2> {
-        if (pos - self.get_radius_modifier()).hypot() < Self::GRAB_RADIUS {
+        let hs: bool = (pos - self.get_radius_modifier()).hypot() < Self::GRAB_RADIUS;
+        if hs {
             match hors {
                 HS::Highlight => self.radius.highlight(true),
                 HS::Select => self.radius.select(true),
@@ -206,9 +207,9 @@ impl ObjectsFuncs for ShapeDisc {
     ) -> Option<Vec2> {
         let dpos = pos - pos_init;
         let saved_radius = self.radius.get_saved_val();
-        let radius = saved_radius + dpos.x;
+        let radius = snap_val(saved_radius + dpos.x, snap);
         if radius >= ShapeDisc::MIN_RADIUS {
-            self.radius.set_val(snap_val(radius, snap));
+            self.radius.set_val(radius);
             self.update_polygon();
             Some(self.get_radius_modifier())
         } else {
@@ -249,5 +250,21 @@ impl ObjectsFuncs for ShapeDisc {
     }
     fn get_paths(&self, _: &Size) -> Vec<BezPath> {
         vec![self.get_circle().to_path(Self::TOLERANCE)]
+    }
+    fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+        let hs = self.get_hhss();
+        let pattern = match (hs.0, hs.1) {
+            (false, false) => Pattern::BasicNormal,
+            (false, true) => Pattern::BasicHighlighted,
+            (true, false) => Pattern::BasicSelected,
+            (true, true) => Pattern::BasicSelected,
+        };
+
+        let mut paths = self.get_paths(drawing_area_size);
+        let result = paths
+            .iter_mut()
+            .map(|path| (path.clone(), pattern))
+            .collect();
+        result
     }
 }

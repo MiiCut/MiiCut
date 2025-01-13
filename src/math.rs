@@ -17,6 +17,10 @@ use std::{
     fmt::{self},
 };
 
+const EPSILON: f64 = 1e-9;
+// Snap the angle to horizontal or vertical
+const THREAS_ANGLE: f64 = 2. / 180. * PI;
+
 #[derive(Debug)]
 pub enum MyError {
     NoShapeSelected,
@@ -666,6 +670,7 @@ pub fn to_draw(pt: Vec2, scale: f64, offset: Vec2) -> Vec2 {
         y: (pt.y - offset.y) / scale,
     }
 }
+
 pub fn near_line(pos1: Vec2, pos2: Vec2, pos: Vec2, precision: f64) -> bool {
     Line::new(pos1.to_point(), pos2.to_point())
         .nearest(pos.to_point(), 0.)
@@ -1072,6 +1077,7 @@ pub fn calc_segs(paths_patterns: Vec<BezPath>) -> BezPath {
     }
     segs
 }
+
 pub fn calc_polygon(bez_path: &BezPath) -> Polygon<f64> {
     bez_path_to_geo_polygon(bez_path)
 }
@@ -1148,7 +1154,6 @@ pub fn get_line_segment(size: &Size, point: Vec2, angle: f64) -> (Vec2, Vec2) {
     }
 }
 
-const EPSILON: f64 = 1e-9;
 pub fn snap_pt(pos: Vec2, snap: f64) -> Vec2 {
     // Avoid division by zero
     if snap.abs() < EPSILON {
@@ -1169,8 +1174,6 @@ pub fn snap_val(val: f64, snap: f64) -> f64 {
     val
 }
 
-// Round the angle to horizontal or vertical
-const THREAS_ANGLE: f64 = 2. / 180. * PI;
 pub fn snap_angle_hv(angle: f64) -> f64 {
     let angle = angle % (2. * PI);
     if angle.abs_diff_eq(&0., THREAS_ANGLE) {

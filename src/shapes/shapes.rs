@@ -282,6 +282,15 @@ impl ObjectsFuncs for BSKind {
             Oblong(sh) => sh.get_paths(canvas_size),
         }
     }
+    fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+        use BSKind::*;
+        match self {
+            Rectangle(sh) => sh.get_paths_and_patterns(drawing_area_size),
+            RectangleRounded(sh) => sh.get_paths_and_patterns(drawing_area_size),
+            Disc(sh) => sh.get_paths_and_patterns(drawing_area_size),
+            Oblong(sh) => sh.get_paths_and_patterns(drawing_area_size),
+        }
+    }
     fn get_modifiers_paths(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
         use BSKind::*;
         match self {
@@ -475,25 +484,5 @@ impl ObjectOps for BasicShape {
     }
     fn set_new_id(&mut self, new_id: BSid) {
         self.shid = new_id;
-    }
-    fn get_paths_and_patterns(&self, canvas_size: &Size) -> Vec<(BezPath, Pattern)> {
-        let hs = self.shape_kind.get_hhss();
-        let pattern = match (hs.0, hs.1, self.boolean_op) {
-            (false, false, BoolOps::UnionForced) => Pattern::BasicNormalDark,
-            (false, true, BoolOps::UnionForced) => Pattern::BasicHighlightedDark,
-            (true, false, BoolOps::UnionForced) => Pattern::BasicSelectedDark,
-            (true, true, BoolOps::UnionForced) => Pattern::BasicSelectedDark,
-            (false, false, _) => Pattern::BasicNormal,
-            (false, true, _) => Pattern::BasicHighlighted,
-            (true, false, _) => Pattern::BasicSelected,
-            (true, true, _) => Pattern::BasicSelected,
-        };
-
-        let mut paths = self.shape_kind.get_paths(canvas_size);
-        let result = paths
-            .iter_mut()
-            .map(|path| (path.clone(), pattern))
-            .collect();
-        result
     }
 }

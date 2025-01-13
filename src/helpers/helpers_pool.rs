@@ -1,7 +1,6 @@
 use super::{
     helper_circle::HelperCircle,
     helper_line::HelperLine,
-    helper_point::HelperPoint,
     helpers::{Helper, HelperKind, HelperKindvars},
 };
 use crate::{pools::Pools, traits::*, Action, IconsConstruction, HS};
@@ -61,7 +60,6 @@ impl HelpersPool {
     pub fn new_helper(icon_helper: IconsConstruction, pos1: Vec2, pos2: Vec2) -> Helper {
         let dhid = DHid::new();
         let helper_kind = match icon_helper {
-            IconsConstruction::Point => HelperPoint::new(pos1, pos2),
             IconsConstruction::Line => HelperLine::new(pos1, pos2),
             IconsConstruction::Circle => HelperCircle::new(pos1, pos2),
         };
@@ -242,30 +240,29 @@ impl HelpersPool {
             }
         }
         // If result contains at least one Point, return the nearest
-        let result_points: Vec<Vec2> = result
+        let result_lines: Vec<Vec2> = result
             .iter()
             .filter_map(|(kind, pos)| {
-                if let HelperKind::Point(_) = kind {
+                if let HelperKind::Line(_) = kind {
                     Some(pos.clone())
                 } else {
                     None
                 }
             })
             .collect();
-        if result_points.len() > 0 {
+        if result_lines.len() > 0 {
             let mut min_dist = f64::MAX;
             let mut min_pos = Vec2::ZERO;
-            for pos_result in result_points {
+            for pos_result in result_lines {
                 let dist = (pos_result - pos).hypot();
                 if dist < min_dist {
                     min_dist = dist;
                     min_pos = pos_result;
                 }
             }
-            log!("Magnet to point: {:?}", min_pos);
+            log!("Magnet to line: {:?}", min_pos);
             return min_pos;
         }
-
         pos
     }
 }

@@ -23,7 +23,6 @@ impl IconsShapes {
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum IconsConstruction {
-    Point,
     Line,
     Circle,
 }
@@ -31,7 +30,6 @@ impl IconsConstruction {
     pub fn id(&self) -> &'static str {
         use IconsConstruction::*;
         match self {
-            Point => "icon-construction-point",
             Line => "icon-construction-line",
             Circle => "icon-construction-circle",
         }
