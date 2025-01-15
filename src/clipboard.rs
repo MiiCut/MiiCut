@@ -112,12 +112,12 @@ impl Action for PasteAction {
         match &self.clip_item {
             ClipboardItem::Shapes((shapes, ..)) => {
                 shapes.iter().for_each(|shape| {
-                    pools.sh.delete_shape(shape.get_id());
+                    pools.shapes.delete_shape(shape.get_id());
                 });
             }
             ClipboardItem::Helpers((helpers, ..)) => {
                 helpers.iter().for_each(|helper| {
-                    pools.hp.delete_helper(helper.get_id());
+                    pools.helpers.delete_helper(helper.get_id());
                 });
             }
         }
@@ -127,12 +127,12 @@ impl Action for PasteAction {
         match &self.clip_item {
             ClipboardItem::Shapes((shapes, _)) => {
                 shapes.iter().for_each(|shape| {
-                    pools.sh.add_shape(shape.clone());
+                    pools.shapes.add_shape(shape.clone());
                 });
             }
             ClipboardItem::Helpers((helpers, _)) => {
                 helpers.iter().for_each(|helper| {
-                    pools.hp.add_helper(helper.clone());
+                    pools.helpers.add_helper(helper.clone());
                 });
             }
         }

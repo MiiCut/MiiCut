@@ -13,6 +13,30 @@ pub enum D1Kind {
     D1KCBez,
     D1KCBezSmooth,
 }
+impl D1Kind {
+    pub fn next_kind(&mut self) {
+        use D1Kind::*;
+        *self = match self {
+            D1KLine => D1KArc,
+            D1KArc => D1KQBez,
+            D1KQBez => D1KQBezSmooth,
+            D1KQBezSmooth => D1KCBez,
+            D1KCBez => D1KCBezSmooth,
+            D1KCBezSmooth => D1KLine,
+        }
+    }
+    pub fn prev_kind(&mut self) {
+        use D1Kind::*;
+        *self = match self {
+            D1KLine => D1KCBezSmooth,
+            D1KArc => D1KLine,
+            D1KQBez => D1KArc,
+            D1KQBezSmooth => D1KQBez,
+            D1KCBez => D1KQBezSmooth,
+            D1KCBezSmooth => D1KCBez,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct D1 {
@@ -166,6 +190,7 @@ impl D1 {
 }
 impl D1 {
     const TOLERANCE: f64 = 0.01;
+    const GRAB_RADIUS: f64 = 4.;
 
     pub fn path_elements(&self) -> D1KindIter {
         use D1Kind::*;
@@ -232,19 +257,39 @@ impl D1 {
         };
         (self.to_path(), pattern)
     }
-    pub fn get_positions(&self) -> (&Position, &Position) {
-        (&self.start, &self.end)
+
+    pub fn get_start_position(&self) -> Vec2 {
+        self.start.pos
     }
-    pub fn get_positions_mut(&mut self) -> (&mut Position, &mut Position) {
-        (&mut self.start, &mut self.end)
+    pub fn get_start_saved_position(&self) -> Vec2 {
+        self.start.saved_pos
     }
-    pub fn get_positions_into(&self) -> (Position, Position) {
-        (self.start, self.end)
+    pub fn set_start_position(&mut self, start: Vec2) {
+        self.start.pos = start;
     }
-    pub fn set_positions(&mut self, start: &Position, end: &Position) {
-        self.start = start.clone();
-        self.end = end.clone();
+    pub fn is_start_selected(&self) -> bool {
+        self.start.selected
     }
+    pub fn is_start_highlighted(&self) -> bool {
+        self.start.highlighted
+    }
+
+    pub fn get_end_position(&self) -> Vec2 {
+        self.end.pos
+    }
+    pub fn get_end_saved_position(&self) -> Vec2 {
+        self.end.saved_pos
+    }
+    pub fn set_end_position(&mut self, end: Vec2) {
+        self.end.pos = end;
+    }
+    pub fn is_end_selected(&self) -> bool {
+        self.end.selected
+    }
+    pub fn is_end_highlighted(&self) -> bool {
+        self.end.highlighted
+    }
+
     pub fn get_position(&self) -> Vec2 {
         use D1Kind::*;
         match self.kind {
@@ -335,21 +380,23 @@ impl D1 {
         use SetEntityState::*;
         match set {
             SetSelect(value) => self.selected = value,
-            SelectFromPos(pos, grab, _precision) => {
+            SelectFromPos(pos, ..) => {
                 use D1Kind::*;
                 self.selected = match self.kind {
                     D1KLine | D1KArc | D1KCBez | D1KCBezSmooth | D1KQBez | D1KQBezSmooth => {
-                        distance_to_segment(self.start.pos, self.end.pos, pos) < grab
+                        distance_to_segment(self.start.pos, self.end.pos, pos)
+                            < 2. * Self::GRAB_RADIUS
                     }
                 };
             }
 
             SetHighlight(value) => self.highlighted = value,
-            HighlightFromPos(pos, grab, _precision) => {
+            HighlightFromPos(pos, ..) => {
                 use D1Kind::*;
                 self.highlighted = match self.kind {
                     D1KLine | D1KArc | D1KCBez | D1KCBezSmooth | D1KQBez | D1KQBezSmooth => {
-                        distance_to_segment(self.start.pos, self.end.pos, pos) < grab
+                        distance_to_segment(self.start.pos, self.end.pos, pos)
+                            < 2. * Self::GRAB_RADIUS
                     }
                 };
             }
@@ -370,23 +417,26 @@ impl D1 {
                     }
                 }
             }
-            SelectModifierFromPos(pos, grab, _precision) => {
-                self.start.selected = (self.start.pos - pos).hypot() < grab;
-                self.end.selected = (self.end.pos - pos).hypot() < grab;
+            SelectModifierFromPos(pos, ..) => {
+                self.start.selected = (self.start.pos - pos).hypot() < Self::GRAB_RADIUS;
+                self.end.selected = (self.end.pos - pos).hypot() < Self::GRAB_RADIUS;
 
                 use D1Kind::*;
                 match self.kind {
                     D1KLine => (),
                     D1KArc => {
                         self.arc_radius.radius.selected =
-                            (self.arc_radius.radius.pos - pos).hypot() < grab;
+                            (self.arc_radius.radius.pos - pos).hypot() < Self::GRAB_RADIUS;
                     }
                     D1KQBez | D1KQBezSmooth => {
-                        self.qbez_control.selected = (self.qbez_control.pos - pos).hypot() < grab;
+                        self.qbez_control.selected =
+                            (self.qbez_control.pos - pos).hypot() < Self::GRAB_RADIUS;
                     }
                     D1KCBez | D1KCBezSmooth => {
-                        self.cbez_control1.selected = (self.cbez_control1.pos - pos).hypot() < grab;
-                        self.cbez_control2.selected = (self.cbez_control2.pos - pos).hypot() < grab;
+                        self.cbez_control1.selected =
+                            (self.cbez_control1.pos - pos).hypot() < Self::GRAB_RADIUS;
+                        self.cbez_control2.selected =
+                            (self.cbez_control2.pos - pos).hypot() < Self::GRAB_RADIUS;
                     }
                 }
             }
@@ -407,27 +457,27 @@ impl D1 {
                     }
                 }
             }
-            HighlightModifierFromPos(pos, grab, _precision) => {
-                self.start.highlighted = (self.start.pos - pos).hypot() < grab;
-                self.end.highlighted = (self.end.pos - pos).hypot() < grab;
+            HighlightModifierFromPos(pos, ..) => {
+                self.start.highlighted = (self.start.pos - pos).hypot() < Self::GRAB_RADIUS;
+                self.end.highlighted = (self.end.pos - pos).hypot() < Self::GRAB_RADIUS;
 
                 use D1Kind::*;
                 match self.kind {
                     D1KLine => (),
                     D1KArc => {
                         self.arc_radius.radius.highlighted =
-                            (self.arc_radius.radius.pos - pos).hypot() < grab
+                            (self.arc_radius.radius.pos - pos).hypot() < Self::GRAB_RADIUS
                     }
 
                     D1KQBez | D1KQBezSmooth => {
                         self.qbez_control.highlighted =
-                            (self.qbez_control.pos - pos).hypot() < grab;
+                            (self.qbez_control.pos - pos).hypot() < Self::GRAB_RADIUS;
                     }
                     D1KCBez | D1KCBezSmooth => {
                         self.cbez_control1.highlighted =
-                            (self.cbez_control1.pos - pos).hypot() < grab;
+                            (self.cbez_control1.pos - pos).hypot() < Self::GRAB_RADIUS;
                         self.cbez_control2.highlighted =
-                            (self.cbez_control2.pos - pos).hypot() < grab;
+                            (self.cbez_control2.pos - pos).hypot() < Self::GRAB_RADIUS;
                     }
                 }
             }

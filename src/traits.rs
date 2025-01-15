@@ -1,5 +1,5 @@
 use crate::canvas::{CanvasText, Pattern};
-use kurbo::{BezPath, Size, Vec2};
+use kurbo::{BezPath, Rect, Size, Vec2};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,11 +65,19 @@ pub trait ObjectsFuncs: Debug + Clone {
     ) -> Option<Vec2>;
     fn get_position(&self) -> Vec2;
 
-    fn get_paths(&self, drawing_area_size: &Size) -> Vec<BezPath>;
-    fn get_paths_and_patterns(&self, canvas_size: &Size) -> Vec<(BezPath, Pattern)>;
-    fn get_modifiers_paths(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)>;
+    fn get_paths(&self, das: &Size) -> Vec<BezPath>;
+    fn get_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)>;
+    fn get_mod_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)>;
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>);
-    fn get_pattern_modifiers(&self, selected: bool, highlighted: bool) -> Pattern {
+    fn get_pattern_status(&self, selected: bool, highlighted: bool) -> Pattern {
         match (selected, highlighted) {
             (false, false) => Pattern::Modifiers,
             (false, true) => Pattern::ModifiersHighlighted,

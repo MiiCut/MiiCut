@@ -18,12 +18,12 @@ pub struct AddHelperAction {
 impl Action for AddHelperAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing shape creation: {:?}", self.helper.get_id());
-        pools.hp.delete_helper(self.helper.get_id());
+        pools.helpers.delete_helper(self.helper.get_id());
     }
 
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing shape creation: {:?}", self.helper.get_id());
-        pools.hp.add_helper(self.helper.clone());
+        pools.helpers.add_helper(self.helper.clone());
     }
 }
 
@@ -34,14 +34,14 @@ impl Action for DeleteHelperAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing shapes creation");
         self.helpers.iter().for_each(|helper| {
-            pools.hp.add_helper(helper.clone());
+            pools.helpers.add_helper(helper.clone());
         });
     }
 
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing shapes creation");
         self.helpers.iter().for_each(|helper| {
-            pools.hp.delete_helper(helper.get_id());
+            pools.helpers.delete_helper(helper.get_id());
         });
     }
 }
@@ -67,12 +67,11 @@ impl HelpersPool {
     }
     // Methods
     pub fn duplicate_helpers(&mut self, shapes: Vec<Helper>) -> Vec<Helper> {
+        use SetEntityState::*;
         let mut new_helpers = vec![];
         for mut helper in shapes.into_iter() {
             helper.set_new_id(DHid::new());
-            helper
-                .get_kind_mut()
-                .set_shape_highlighted_or_selected(true, HS::Select);
+            helper.get_kind_mut().set_state(SetSelect(true));
             self.add_helper(helper.clone());
             new_helpers.push(helper);
         }
@@ -109,44 +108,67 @@ impl HelpersPool {
         });
     }
 
-    pub fn set_helpers_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> bool {
+    pub fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2> {
+        use GetEntityState::*;
+        use SetEntityState::*;
         use HS::*;
-        let mut res = false;
         if let Highlight = hors {
-            // If Highlight, return the position of the last one
             self.helpers.values_mut().for_each(|helper| {
-                if let Some(_) = helper
+                helper
                     .get_kind_mut()
-                    .set_shape_highlighted_or_selected_from_pos(pos, snap, Highlight)
-                {
-                    res = true;
-                }
+                    .set_state(HighlightFromPos(pos, snap, 5.0))
             });
+            for helper in self.helpers.values_mut() {
+                if helper.get_kind().get_state(IsHighlighted).is_some() {
+                    return Some(helper.get_kind().get_position());
+                }
+            }
         } else {
-            // If Select, return the position of the last one
             self.helpers.values_mut().for_each(|helper| {
-                if let Some(_) = helper
+                helper
                     .get_kind_mut()
-                    .set_shape_highlighted_or_selected_from_pos(pos, snap, Select)
-                {
-                    res = true;
-                }
+                    .set_state(SelectFromPos(pos, snap, 5.0));
             });
+            for helper in self.helpers.values_mut() {
+                if helper.get_kind().get_state(IsSelected).is_some() {
+                    return Some(helper.get_kind().get_position());
+                }
+            }
         }
-        res
+        None
     }
-    pub fn set_helpers_hs(&mut self, value: bool, hors: HS) {
-        self.helpers.values_mut().for_each(|helper| {
-            helper
-                .get_kind_mut()
-                .set_shape_highlighted_or_selected(value, hors);
-        });
+    pub fn set_hs(&mut self, value: bool, hors: HS) {
+        use SetEntityState::*;
+        match hors {
+            HS::Highlight => {
+                self.helpers.values_mut().for_each(|helper| {
+                    helper.get_kind_mut().set_state(SetHighlight(value));
+                });
+            }
+            HS::Select => {
+                self.helpers.values_mut().for_each(|helper| {
+                    helper.get_kind_mut().set_state(SetSelect(value));
+                });
+            }
+        }
     }
     pub fn get_hs(&self, hors: HS) -> Vec<DHid> {
+        use GetEntityState::*;
         let mut result = vec![];
-        for helper in self.helpers.values() {
-            if helper.get_kind().get_shape_highlighted_or_selected(hors) {
-                result.push(helper.get_id());
+        match hors {
+            HS::Highlight => {
+                for helper in self.helpers.values() {
+                    if helper.get_kind().get_state(IsHighlighted).is_some() {
+                        result.push(helper.get_id());
+                    }
+                }
+            }
+            HS::Select => {
+                for helper in self.helpers.values() {
+                    if helper.get_kind().get_state(IsSelected).is_some() {
+                        result.push(helper.get_id());
+                    }
+                }
             }
         }
         result
@@ -160,52 +182,95 @@ impl HelpersPool {
         }
     }
     pub fn get_hs_vars(&self, hors: HS) -> Vec<(DHid, HelperKindvars)> {
+        use GetEntityState::*;
         let mut result = vec![];
-        for helper in self.helpers.values() {
-            if helper.get_kind().get_shape_highlighted_or_selected(hors) {
-                result.push((helper.get_id(), helper.get_kind().get_vars()));
+        match hors {
+            HS::Highlight => {
+                for helper in self.helpers.values() {
+                    if helper.get_kind().get_state(IsHighlighted).is_some() {
+                        result.push((helper.get_id(), helper.get_kind().get_vars()));
+                    }
+                }
+            }
+            HS::Select => {
+                for helper in self.helpers.values() {
+                    if helper.get_kind().get_state(IsSelected).is_some() {
+                        result.push((helper.get_id(), helper.get_kind().get_vars()));
+                    }
+                }
             }
         }
         result
     }
     pub fn set_hs_from_dhid(&mut self, dhid: DHid, value: bool, hors: HS) {
+        use SetEntityState::*;
         if let Some(helper) = self.helpers.get_mut(&dhid) {
-            helper
-                .get_kind_mut()
-                .set_shape_highlighted_or_selected(value, hors);
+            match hors {
+                HS::Highlight => {
+                    helper.get_kind_mut().set_state(SetHighlight(value));
+                }
+                HS::Select => {
+                    helper.get_kind_mut().set_state(SetSelect(value));
+                }
+            }
         }
     }
-
-    pub fn set_helpers_mod_hs_from_pos(
-        &mut self,
-        pos: Vec2,
-        snap: f64,
-        _precision: f64,
-        hors: HS,
-    ) -> bool {
-        for helper in self.helpers.values_mut() {
-            if helper
-                .get_kind_mut()
-                .set_modifiers_highlighted_or_selected_from_pos(pos, snap, hors)
-            {
-                return true;
+    pub fn set_mod_hs_from_pos(&mut self, pos: Vec2, snap: f64, _precision: f64, hors: HS) -> bool {
+        use GetEntityState::*;
+        use SetEntityState::*;
+        match hors {
+            HS::Highlight => {
+                self.helpers.values_mut().for_each(|helper| {
+                    helper
+                        .get_kind_mut()
+                        .set_state(HighlightModifierFromPos(pos, snap, 5.0));
+                });
+                for helper in self.helpers.values_mut() {
+                    if helper
+                        .get_kind()
+                        .get_state(IsAnyModifierHighlighted)
+                        .is_some()
+                    {
+                        return true;
+                    }
+                }
+            }
+            HS::Select => {
+                self.helpers.values_mut().for_each(|helper| {
+                    helper
+                        .get_kind_mut()
+                        .set_state(SelectModifierFromPos(pos, snap, 5.0));
+                });
+                for shape in self.helpers.values_mut() {
+                    if shape.get_kind().get_state(IsAnyModifierSelected).is_some() {
+                        return true;
+                    }
+                }
             }
         }
         false
     }
-    pub fn set_helpers_mod_hs(&mut self, value: bool, hors: HS) {
-        self.helpers.values_mut().for_each(|helper| {
-            helper
-                .get_kind_mut()
-                .set_modifier_highlighted_or_selected(value, hors);
-        });
+    pub fn set_mod_hs(&mut self, value: bool, hors: HS) {
+        use SetEntityState::*;
+        match hors {
+            HS::Highlight => {
+                self.helpers.values_mut().for_each(|helper| {
+                    helper
+                        .get_kind_mut()
+                        .set_state(HighlightAllModifiers(value));
+                });
+            }
+            HS::Select => {
+                self.helpers.values_mut().for_each(|helper| {
+                    helper.get_kind_mut().set_state(SelectAllModifiers(value));
+                });
+            }
+        }
     }
     pub fn get_first_selected_modifier_vars(&self) -> Option<(DHid, HelperKindvars)> {
+        use GetEntityState::*;
         for helper in self.helpers.values() {
-            if helper
-                .get_kind()
-                .get_modifiers_highlighted_or_selected(HS::Select)
-            {
+            if helper.get_kind().get_state(IsAnyModifierSelected).is_some() {
                 return Some((helper.get_id(), helper.get_kind().get_vars()));
             }
         }
@@ -240,22 +305,22 @@ impl HelpersPool {
     }
 
     pub fn delete_selection(&mut self) -> Option<Vec<Helper>> {
-        let helpers_deleted: Vec<Helper> = self
-            .helpers
-            .iter()
-            .filter(|(_, shape)| {
-                shape
-                    .get_kind()
-                    .get_shape_highlighted_or_selected(HS::Select)
-            })
-            .map(|(_, shape)| shape.clone())
-            .collect();
+        use GetEntityState::*;
+        let mut helpers_deleted = vec![];
+
+        for shape in self.helpers.values_mut() {
+            if shape.get_kind_mut().get_state(IsSelected).is_some() {
+                helpers_deleted.push(shape.clone());
+            }
+        }
+
         self.helpers
-            .retain(|_, v| !v.get_kind().get_shape_highlighted_or_selected(HS::Select));
-        if helpers_deleted.is_empty() {
-            None
-        } else {
+            .retain(|_, v| !v.get_kind_mut().get_state(IsSelected).is_some());
+
+        if !helpers_deleted.is_empty() {
             Some(helpers_deleted)
+        } else {
+            None
         }
     }
     pub fn magnet_to_helpers(&mut self, pos: Vec2) -> Vec2 {

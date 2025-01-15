@@ -7,7 +7,7 @@
 // }
 use crate::{math::*, prefab::*};
 use js_sys::Array;
-use kurbo::{BezPath, PathEl, Point, Size, Vec2};
+use kurbo::{BezPath, PathEl, Point, Rect, Size, Vec2};
 use std::vec;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CanvasRenderingContext2d, CssStyleDeclaration, HtmlCanvasElement, Window};
@@ -707,6 +707,18 @@ impl Canvases {
         Size::new(
             self.c_main.get_bounding_client_rect().width(),
             self.c_main.get_bounding_client_rect().height(),
+        )
+    }
+    pub fn get_canvas_infos(&self) -> (Rect, f64, Vec2) {
+        let tl = self.get_canvas_offset();
+        let br = Vec2::new(
+            tl.x + self.c_main.width() as f64,
+            tl.y + self.c_main.height() as f64,
+        );
+        (
+            Rect::from_points(tl.to_point(), br.to_point()),
+            self.drawing_scale,
+            self.drawing_offset,
         )
     }
 }

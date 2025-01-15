@@ -266,13 +266,13 @@ impl ObjectsFuncs for ShapeOblong {
             }
 
             SelectAllModifiers(value) => self.select_all_modifiers(value),
-            SelectModifierFromPos(pos, precision, _) => {
-                self.select_modifiers_from_pos(pos, precision);
+            SelectModifierFromPos(pos, ..) => {
+                self.select_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
 
             HighlightAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighlightModifierFromPos(pos, precision, _) => {
-                self.highlight_modifiers_from_pos(pos, precision);
+            HighlightModifierFromPos(pos, ..) => {
+                self.highlight_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
         }
     }
@@ -356,19 +356,23 @@ impl ObjectsFuncs for ShapeOblong {
         (self.start.pos + self.end.pos) / 2.
     }
 
-    fn get_modifiers_paths(&self, _: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_mod_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
         vec![
             (
                 modifiers_path(self.start.pos, 1., ShapeOblong::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.start.selected, self.start.highlighted),
+                self.get_pattern_status(self.start.selected, self.start.highlighted),
             ),
             (
                 modifiers_path(self.end.pos, 1., ShapeOblong::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.end.selected, self.end.highlighted),
+                self.get_pattern_status(self.end.selected, self.end.highlighted),
             ),
             (
                 modifiers_path(self.get_middle_modifier(), 1., ShapeOblong::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.width.selected, self.width.highlighted),
+                self.get_pattern_status(self.width.selected, self.width.highlighted),
             ),
             (
                 center_path(
@@ -376,7 +380,7 @@ impl ObjectsFuncs for ShapeOblong {
                     1.,
                     ShapeOblong::GRAB_RADIUS,
                 ),
-                self.get_pattern_modifiers(self.selected, self.highlighted),
+                self.get_pattern_status(self.selected, self.highlighted),
             ),
         ]
     }
@@ -417,7 +421,7 @@ impl ObjectsFuncs for ShapeOblong {
         paths.push(self.get_arc(true).to_path(ShapeOblong::TOLERANCE));
         paths
     }
-    fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_paths_and_patterns(&self, das: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         let pattern = match (self.selected, self.highlighted) {
             (false, false) => Pattern::BasicNormal,
             (false, true) => Pattern::BasicHighlighted,
@@ -425,7 +429,7 @@ impl ObjectsFuncs for ShapeOblong {
             (true, true) => Pattern::BasicSelected,
         };
 
-        let mut paths = self.get_paths(drawing_area_size);
+        let mut paths = self.get_paths(das);
         let result = paths
             .iter_mut()
             .map(|path| (path.clone(), pattern))

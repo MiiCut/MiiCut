@@ -335,8 +335,11 @@ impl ObjectsFuncs for ShapeRectRounded {
                     || self.top.selected
                     || self.right.selected
                     || self.bottom.selected
-                    || self.left.selected;
-
+                    || self.left.selected
+                    || self.radius_tl.selected
+                    || self.radius_tr.selected
+                    || self.radius_br.selected
+                    || self.radius_bl.selected;
                 if select {
                     Some(self.get_position())
                 } else {
@@ -351,7 +354,11 @@ impl ObjectsFuncs for ShapeRectRounded {
                     || self.top.highlighted
                     || self.right.highlighted
                     || self.bottom.highlighted
-                    || self.left.highlighted;
+                    || self.left.highlighted
+                    || self.radius_tl.highlighted
+                    || self.radius_tr.highlighted
+                    || self.radius_br.highlighted
+                    || self.radius_bl.highlighted;
                 if highlight {
                     Some(self.get_position())
                 } else {
@@ -373,13 +380,13 @@ impl ObjectsFuncs for ShapeRectRounded {
             }
 
             SelectAllModifiers(value) => self.select_all_modifiers(value),
-            SelectModifierFromPos(pos, precision, _) => {
-                self.select_modifiers_from_pos(pos, precision);
+            SelectModifierFromPos(pos, ..) => {
+                self.select_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
 
             HighlightAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighlightModifierFromPos(pos, precision, _) => {
-                self.highlight_modifiers_from_pos(pos, precision);
+            HighlightModifierFromPos(pos, ..) => {
+                self.highlight_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
         }
     }
@@ -570,7 +577,11 @@ impl ObjectsFuncs for ShapeRectRounded {
         (self.tl.pos + self.br.pos) / 2.
     }
 
-    fn get_modifiers_paths(&self, _: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_mod_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
         let tl = self.tl.pos;
         let tr = self.get_tr_modifier();
         let br = self.br.pos;
@@ -588,51 +599,51 @@ impl ObjectsFuncs for ShapeRectRounded {
         vec![
             (
                 modifiers_path(tl, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.tl.selected, self.tl.highlighted),
+                self.get_pattern_status(self.tl.selected, self.tl.highlighted),
             ),
             (
                 modifiers_path(tr, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.tr.selected, self.tr.highlighted),
+                self.get_pattern_status(self.tr.selected, self.tr.highlighted),
             ),
             (
                 modifiers_path(br, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.br.selected, self.br.highlighted),
+                self.get_pattern_status(self.br.selected, self.br.highlighted),
             ),
             (
                 modifiers_path(bl, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.bl.selected, self.bl.highlighted),
+                self.get_pattern_status(self.bl.selected, self.bl.highlighted),
             ),
             (
                 modifiers_path(top, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.top.selected, self.top.highlighted),
+                self.get_pattern_status(self.top.selected, self.top.highlighted),
             ),
             (
                 modifiers_path(right, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.right.selected, self.right.highlighted),
+                self.get_pattern_status(self.right.selected, self.right.highlighted),
             ),
             (
                 modifiers_path(bottom, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.bottom.selected, self.bottom.highlighted),
+                self.get_pattern_status(self.bottom.selected, self.bottom.highlighted),
             ),
             (
                 modifiers_path(left, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.left.selected, self.left.highlighted),
+                self.get_pattern_status(self.left.selected, self.left.highlighted),
             ),
             (
                 modifiers_path(rad_tl_center, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.radius_tl.selected, self.radius_tl.highlighted),
+                self.get_pattern_status(self.radius_tl.selected, self.radius_tl.highlighted),
             ),
             (
                 modifiers_path(rad_tr_center, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.radius_tr.selected, self.radius_tr.highlighted),
+                self.get_pattern_status(self.radius_tr.selected, self.radius_tr.highlighted),
             ),
             (
                 modifiers_path(rad_br_center, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.radius_br.selected, self.radius_br.highlighted),
+                self.get_pattern_status(self.radius_br.selected, self.radius_br.highlighted),
             ),
             (
                 modifiers_path(rad_bl_center, 1., ShapeRectRounded::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.radius_bl.selected, self.radius_bl.highlighted),
+                self.get_pattern_status(self.radius_bl.selected, self.radius_bl.highlighted),
             ),
             (
                 center_path(
@@ -640,7 +651,7 @@ impl ObjectsFuncs for ShapeRectRounded {
                     1.,
                     ShapeRectRounded::GRAB_RADIUS,
                 ),
-                self.get_pattern_modifiers(self.selected, self.highlighted),
+                self.get_pattern_status(self.selected, self.highlighted),
             ),
         ]
     }
@@ -719,7 +730,7 @@ impl ObjectsFuncs for ShapeRectRounded {
             vec![BezPath::new()]
         }
     }
-    fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_paths_and_patterns(&self, das: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         let pattern = match (self.selected, self.highlighted) {
             (false, false) => Pattern::BasicNormal,
             (false, true) => Pattern::BasicHighlighted,
@@ -727,7 +738,7 @@ impl ObjectsFuncs for ShapeRectRounded {
             (true, true) => Pattern::BasicSelected,
         };
 
-        let mut paths = self.get_paths(drawing_area_size);
+        let mut paths = self.get_paths(das);
         let result = paths
             .iter_mut()
             .map(|path| (path.clone(), pattern))

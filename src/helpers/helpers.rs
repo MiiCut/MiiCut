@@ -8,8 +8,8 @@ use crate::traits::*;
 use crate::Action;
 use crate::Position;
 use crate::Value;
-use crate::HS;
 use kurbo::BezPath;
+use kurbo::Rect;
 use kurbo::Size;
 use kurbo::Vec2;
 use std::fmt::Debug;
@@ -22,7 +22,7 @@ impl Action for MoveHelpersAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing last shapes move");
         for (dhid, vars) in &self.dhids_vars {
-            if let Some(shape) = pools.hp.get_helper_mut(*dhid) {
+            if let Some(shape) = pools.helpers.get_helper_mut(*dhid) {
                 shape.get_kind_mut().set_vars(vars);
                 shape.get_kind_mut().restore_saved();
             }
@@ -32,7 +32,7 @@ impl Action for MoveHelpersAction {
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing last shapes move");
         for (dhid, vars) in &self.dhids_vars {
-            if let Some(shape) = pools.hp.get_helper_mut(*dhid) {
+            if let Some(shape) = pools.helpers.get_helper_mut(*dhid) {
                 shape.get_kind_mut().set_vars(vars);
             }
         }
@@ -107,59 +107,18 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn set_shape_highlighted_or_selected_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2> {
+    fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.set_shape_highlighted_or_selected_from_pos(pos, snap, hors),
-            Circle(sh) => sh.set_shape_highlighted_or_selected_from_pos(pos, snap, hors),
+            Line(sh) => sh.get_state(get),
+            Circle(sh) => sh.get_state(get),
         }
     }
-    fn set_shape_highlighted_or_selected(&mut self, value: bool, hors: HS) {
+    fn set_state(&mut self, set: SetEntityState) {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.set_shape_highlighted_or_selected(value, hors),
-            Circle(sh) => sh.set_shape_highlighted_or_selected(value, hors),
-        }
-    }
-    fn get_shape_highlighted_or_selected(&self, hors: HS) -> bool {
-        use HelperKind::*;
-        match &self {
-            Line(sh) => sh.get_shape_highlighted_or_selected(hors),
-            Circle(sh) => sh.get_shape_highlighted_or_selected(hors),
-        }
-    }
-    fn get_hhss(&self) -> (bool, bool) {
-        use HelperKind::*;
-        match &self {
-            Line(sh) => sh.get_hhss(),
-            Circle(sh) => sh.get_hhss(),
-        }
-    }
-
-    fn set_modifiers_highlighted_or_selected_from_pos(
-        &mut self,
-        pos: Vec2,
-        snap: f64,
-        hors: HS,
-    ) -> bool {
-        use HelperKind::*;
-        match self {
-            Line(sh) => sh.set_modifiers_highlighted_or_selected_from_pos(pos, snap, hors),
-            Circle(sh) => sh.set_modifiers_highlighted_or_selected_from_pos(pos, snap, hors),
-        }
-    }
-    fn set_modifier_highlighted_or_selected(&mut self, value: bool, hors: HS) {
-        use HelperKind::*;
-        match self {
-            Line(sh) => sh.set_modifier_highlighted_or_selected(value, hors),
-            Circle(sh) => sh.set_modifier_highlighted_or_selected(value, hors),
-        }
-    }
-    fn get_modifiers_highlighted_or_selected(&self, hors: HS) -> bool {
-        use HelperKind::*;
-        match &self {
-            Line(sh) => sh.get_modifiers_highlighted_or_selected(hors),
-            Circle(sh) => sh.get_modifiers_highlighted_or_selected(hors),
+            Line(sh) => sh.set_state(set),
+            Circle(sh) => sh.set_state(set),
         }
     }
 
@@ -199,25 +158,33 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn get_paths(&self, drawing_area_size: &Size) -> Vec<BezPath> {
+    fn get_paths(&self, das: &Size) -> Vec<BezPath> {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.get_paths(drawing_area_size),
-            Circle(sh) => sh.get_paths(drawing_area_size),
+            Line(sh) => sh.get_paths(das),
+            Circle(sh) => sh.get_paths(das),
         }
     }
-    fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.get_paths_and_patterns(drawing_area_size),
-            Circle(sh) => sh.get_paths_and_patterns(drawing_area_size),
+            Line(sh) => sh.get_paths_and_patterns(das, cinfo),
+            Circle(sh) => sh.get_paths_and_patterns(das, cinfo),
         }
     }
-    fn get_modifiers_paths(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_mod_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.get_modifiers_paths(drawing_area_size),
-            Circle(sh) => sh.get_modifiers_paths(drawing_area_size),
+            Line(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
+            Circle(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
         }
     }
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {

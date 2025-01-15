@@ -23,12 +23,12 @@ pub struct AddShapeAction {
 impl Action for AddShapeAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing shape creation: {:?}", self.shape.get_id());
-        pools.sh.delete_shape(self.shape.get_id());
+        pools.shapes.delete_shape(self.shape.get_id());
     }
 
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing shape creation: {:?}", self.shape.get_id());
-        pools.sh.add_shape(self.shape.clone());
+        pools.shapes.add_shape(self.shape.clone());
     }
 }
 
@@ -39,14 +39,14 @@ impl Action for DeleteShapeAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing shapes creation");
         self.shapes.iter().for_each(|shape| {
-            pools.sh.add_shape(shape.clone());
+            pools.shapes.add_shape(shape.clone());
         });
     }
 
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing shapes creation");
         self.shapes.iter().for_each(|shape| {
-            pools.sh.delete_shape(shape.get_id());
+            pools.shapes.delete_shape(shape.get_id());
         });
     }
 }
@@ -125,7 +125,7 @@ impl ShapesPool {
         });
     }
 
-    pub fn set_shapes_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2> {
+    pub fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2> {
         use GetEntityState::*;
         use SetEntityState::*;
         use HS::*;
@@ -168,7 +168,7 @@ impl ShapesPool {
         }
         res
     }
-    pub fn set_shapes_hs(&mut self, value: bool, hors: HS) {
+    pub fn set_hs(&mut self, value: bool, hors: HS) {
         use SetEntityState::*;
         match hors {
             HS::Highlight => {
@@ -246,14 +246,7 @@ impl ShapesPool {
             }
         }
     }
-
-    pub fn set_shapes_mod_hs_from_pos(
-        &mut self,
-        pos: Vec2,
-        snap: f64,
-        _precision: f64,
-        hors: HS,
-    ) -> bool {
+    pub fn set_mod_hs_from_pos(&mut self, pos: Vec2, snap: f64, _precision: f64, hors: HS) -> bool {
         use GetEntityState::*;
         use SetEntityState::*;
         match hors {
@@ -261,33 +254,41 @@ impl ShapesPool {
                 self.shapes.values_mut().for_each(|shape| {
                     shape
                         .get_kind_mut()
-                        .set_state(HighlightFromPos(pos, snap, 5.0));
+                        .set_state(HighlightModifierFromPos(pos, snap, 5.0));
                 });
+
+                let mut highlighted = false;
+                for shape in self.shapes.values() {
+                    if shape
+                        .get_kind()
+                        .get_state(IsAnyModifierHighlighted)
+                        .is_some()
+                    {
+                        highlighted = true;
+                        break;
+                    }
+                }
+                highlighted
             }
             HS::Select => {
-                let mut overlapping_shapes = HashSet::new();
                 self.shapes.values_mut().for_each(|shape| {
                     shape
                         .get_kind_mut()
-                        .set_state(SelectFromPos(pos, snap, 5.0));
-                    if shape.get_kind().get_state(IsSelected).is_some() {
-                        overlapping_shapes.insert(shape.get_id());
-                    }
+                        .set_state(SelectModifierFromPos(pos, snap, 5.0));
                 });
-                self.shapes_selector.update_shapes(overlapping_shapes);
+
+                let mut selected = false;
+                for shape in self.shapes.values() {
+                    if shape.get_kind().get_state(IsAnyModifierSelected).is_some() {
+                        selected = true;
+                        break;
+                    }
+                }
+                selected
             }
         }
-        for shape in self.shapes.values_mut() {
-            shape
-                .get_kind_mut()
-                .set_state(SelectFromPos(pos, snap, 5.0));
-            if shape.get_kind().get_state(IsSelected).is_some() {
-                return true;
-            }
-        }
-        false
     }
-    pub fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
+    pub fn set_mod_hs(&mut self, value: bool, hors: HS) {
         use SetEntityState::*;
         match hors {
             HS::Highlight => {

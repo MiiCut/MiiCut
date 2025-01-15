@@ -294,13 +294,13 @@ impl ObjectsFuncs for ShapeRectangle {
             }
 
             SelectAllModifiers(value) => self.select_all_modifiers(value),
-            SelectModifierFromPos(pos, precision, _) => {
-                self.select_modifiers_from_pos(pos, precision);
+            SelectModifierFromPos(pos, ..) => {
+                self.select_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
 
             HighlightAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighlightModifierFromPos(pos, precision, _) => {
-                self.highlight_modifiers_from_pos(pos, precision);
+            HighlightModifierFromPos(pos, ..) => {
+                self.highlight_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
         }
     }
@@ -419,39 +419,43 @@ impl ObjectsFuncs for ShapeRectangle {
         (self.tl.pos + self.br.pos) / 2.
     }
 
-    fn get_modifiers_paths(&self, _: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_mod_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
         vec![
             (
                 modifiers_path(self.tl.pos, 1., ShapeRectangle::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.tl.selected, self.tl.highlighted),
+                self.get_pattern_status(self.tl.selected, self.tl.highlighted),
             ),
             (
                 modifiers_path(self.get_tr_modifier(), 1., ShapeRectangle::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.tr.selected, self.tr.highlighted),
+                self.get_pattern_status(self.tr.selected, self.tr.highlighted),
             ),
             (
                 modifiers_path(self.br.pos, 1., ShapeRectangle::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.br.selected, self.br.highlighted),
+                self.get_pattern_status(self.br.selected, self.br.highlighted),
             ),
             (
                 modifiers_path(self.get_bl_modifier(), 1., ShapeRectangle::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.bl.selected, self.bl.highlighted),
+                self.get_pattern_status(self.bl.selected, self.bl.highlighted),
             ),
             (
                 modifiers_path(self.get_top_modifier(), 1., ShapeRectangle::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.top.selected, self.top.highlighted),
+                self.get_pattern_status(self.top.selected, self.top.highlighted),
             ),
             (
                 modifiers_path(self.get_right_modifier(), 1., ShapeRectangle::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.right.selected, self.right.highlighted),
+                self.get_pattern_status(self.right.selected, self.right.highlighted),
             ),
             (
                 modifiers_path(self.get_bottom_modifier(), 1., ShapeRectangle::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.bottom.selected, self.bottom.highlighted),
+                self.get_pattern_status(self.bottom.selected, self.bottom.highlighted),
             ),
             (
                 modifiers_path(self.get_left_modifier(), 1., ShapeRectangle::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.left.selected, self.left.highlighted),
+                self.get_pattern_status(self.left.selected, self.left.highlighted),
             ),
             (
                 center_path(
@@ -459,7 +463,7 @@ impl ObjectsFuncs for ShapeRectangle {
                     1.,
                     ShapeRectangle::GRAB_RADIUS,
                 ),
-                self.get_pattern_modifiers(self.selected, self.highlighted),
+                self.get_pattern_status(self.selected, self.highlighted),
             ),
         ]
     }
@@ -494,7 +498,7 @@ impl ObjectsFuncs for ShapeRectangle {
             vec![BezPath::new()]
         }
     }
-    fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_paths_and_patterns(&self, das: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         let pattern = match (self.selected, self.highlighted) {
             (false, false) => Pattern::BasicNormal,
             (false, true) => Pattern::BasicHighlighted,
@@ -502,7 +506,7 @@ impl ObjectsFuncs for ShapeRectangle {
             (true, true) => Pattern::BasicSelected,
         };
 
-        let mut paths = self.get_paths(drawing_area_size);
+        let mut paths = self.get_paths(das);
         let result = paths
             .iter_mut()
             .map(|path| (path.clone(), pattern))

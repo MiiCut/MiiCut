@@ -45,7 +45,6 @@ use svg::read;
 use traits::*;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
 use web_sys::{
     window, Document, Element, Event, FileList, FileReader, HtmlCanvasElement, HtmlElement,
     HtmlInputElement, KeyboardEvent, MouseEvent, WheelEvent, Window,
@@ -1099,16 +1098,16 @@ fn on_window_keydown(av: RefAV, event: Event) {
                 avb.undo_redo.push(Box::new(DeleteShapeAction {
                     shapes: shapes_deleted,
                 }));
-                avb.pools.sh.recalc_full_segs();
+                avb.pools.shapes.recalc_full_segs();
             }
             if let Some(helpers_deleted) = avb.pools.delete_helpers_selection() {
                 // Push the DeleteShapesAction to the undo/redo system
                 avb.undo_redo.push(Box::new(DeleteHelperAction {
                     helpers: helpers_deleted,
                 }));
-                avb.pools.sh.recalc_full_segs();
+                avb.pools.shapes.recalc_full_segs();
             }
-            avb.pools.sh.recalc_full_segs();
+            avb.pools.shapes.recalc_full_segs();
         }
         if keyboard_event.key() == "Escape" {
             avb.on_creation = DrawObjects::Nope;
@@ -1122,14 +1121,14 @@ fn on_window_keydown(av: RefAV, event: Event) {
                 if let Icons::Arrow = avb.icon_selected.clone() {
                     if let DrawObjects::Nope = avb.on_creation {
                         // let cursor_pos = avb.mouse.get_draw_pos();
-                        let shapes_selected = avb.pools.sh.get_hs(HS::Select);
-                        let helpers_selected = avb.pools.hp.get_hs(HS::Select);
+                        let shapes_selected = avb.pools.shapes.get_hs(HS::Select);
+                        let helpers_selected = avb.pools.helpers.get_hs(HS::Select);
                         let pointer_pos = avb.pointer.pos.pos;
 
                         if shapes_selected.len() > 0 {
                             let mut to_copy = vec![];
                             for shid in shapes_selected.iter() {
-                                if let Some(shape) = avb.pools.sh.get_shape(*shid) {
+                                if let Some(shape) = avb.pools.shapes.get_shape(*shid) {
                                     to_copy.push(shape.clone());
                                 }
                             }
@@ -1138,7 +1137,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
                             if helpers_selected.len() > 0 {
                                 let mut to_copy = vec![];
                                 for shid in helpers_selected {
-                                    if let Some(helper) = avb.pools.hp.get_helper(shid) {
+                                    if let Some(helper) = avb.pools.helpers.get_helper(shid) {
                                         to_copy.push(helper.clone());
                                     }
                                 }
@@ -1159,7 +1158,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
                     let snap_value = avb.snap_value.val();
                     avb.clipboard.paste_item(cursor_pos, snap_value);
                     // Clear actual selection
-                    avb.pools.sh.set_shapes_hs(false, HS::Select);
+                    avb.pools.shapes.set_hs(false, HS::Select);
                 }
             }
         }
@@ -1175,7 +1174,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
                 // Put `undo_redo` back into `avb`
                 avb.undo_redo = undo_redo;
                 // Recalculate the full segments
-                avb.pools.sh.recalc_full_segs();
+                avb.pools.shapes.recalc_full_segs();
             }
         }
         if keyboard_event.key() == "Z" || keyboard_event.key() == "y" {
@@ -1188,7 +1187,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
                 // Put `undo_redo` back into `avb`
                 avb.undo_redo = undo_redo;
                 // Recalculate the full segments
-                avb.pools.sh.recalc_full_segs();
+                avb.pools.shapes.recalc_full_segs();
             }
         }
 
@@ -1212,9 +1211,9 @@ fn on_window_keydown(av: RefAV, event: Event) {
                 //         o_shid = Some((highlighted[0], shape.get_boolean_op()));
                 //     }
                 // } else {
-                let selected = avb.pools.sh.get_hs(HS::Select);
+                let selected = avb.pools.shapes.get_hs(HS::Select);
                 if selected.len() == 1 {
-                    if let Some(shape) = avb.pools.sh.get_shape_mut(selected[0]) {
+                    if let Some(shape) = avb.pools.shapes.get_shape_mut(selected[0]) {
                         o_shid = Some((selected[0], shape.get_boolean_op()));
                     }
                 }
@@ -1224,15 +1223,49 @@ fn on_window_keydown(av: RefAV, event: Event) {
                     avb.undo_redo.push(Box::new(ToogleBoolOpsShapesAction {
                         shid_toogle: (shid, bool_ops),
                     }));
-                    if let Some(shape) = avb.pools.sh.get_shape_mut(shid) {
+                    if let Some(shape) = avb.pools.shapes.get_shape_mut(shid) {
                         // Do the actual toogle
                         shape.toggle_boolean_op();
                     }
-                    avb.pools.sh.recalc_full_segs();
+                    avb.pools.shapes.recalc_full_segs();
                 }
             }
         }
-        if keyboard_event.key() == " " {}
+        if keyboard_event.key() == "Tab" {
+            let shift_pressed = avb.keys_states.shift_pressed;
+            let o_shid = avb
+                .pools
+                .shapes
+                .get_first_selected_modifier_vars()
+                .and_then(|(shid, _)| Some(shid));
+            if let Some(shid) = o_shid {
+                avb.pools
+                    .shapes
+                    .get_shape_mut(shid)
+                    .and_then(|shape| {
+                        if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
+                            Some(shape_custom)
+                        } else {
+                            None
+                        }
+                    })
+                    .map(|shape_custom| {
+                        let d1s = shape_custom.get_d1s_mut();
+                        d1s.iter_mut().for_each(|d1| {
+                            if d1.get_selected() {
+                                log!("D1: {:?}", d1.get_kind());
+                                if shift_pressed {
+                                    d1.get_kind_mut().prev_kind();
+                                } else {
+                                    d1.get_kind_mut().next_kind();
+                                }
+                            }
+                        });
+                        shape_custom.update_polygon();
+                    });
+                avb.pools.recalc_full_segs();
+            }
+        }
 
         render_drawing(&mut avb);
         drop(avb);
@@ -1261,8 +1294,8 @@ fn on_icon_click(av: RefAV, event: Event) {
                 if let Some(icon) = avb.user_icons.iter().find(|&&k| k.id() == id).cloned() {
                     avb.icon_selected = icon;
                     avb.on_creation = DrawObjects::Nope;
-                    avb.pools.sh.set_shapes_hs(false, HS::Select);
-                    avb.pools.sh.set_hs_modifiers(false, HS::Select);
+                    avb.pools.shapes.set_hs(false, HS::Select);
+                    avb.pools.shapes.set_mod_hs(false, HS::Select);
                     // avb.pool.set_hors_centers(false, HighLightOrSelect::Select);
 
                     avb.user_icons
@@ -1350,7 +1383,8 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
 
     let _scale = avb.canvases.get_drawing_scale();
     avb.canvases.clear_main_canvas();
-    let canvas_drawing_size = &avb.canvases.get_drawing_size();
+    let das = &avb.canvases.get_drawing_size();
+    let cinfo = avb.canvases.get_canvas_infos();
 
     // Draw pointer
     if avb.pointer.active {
@@ -1358,7 +1392,7 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     }
 
     // Draw the final contour shapes
-    let full_segs = avb.pools.sh.get_full_segs();
+    let full_segs = avb.pools.shapes.get_full_segs();
     avb.canvases.draw_closed_path(
         &CanvasKind::Draw,
         full_segs,
@@ -1368,8 +1402,8 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
 
     // SHAPES: Draw the outline of every shape
     // log!("START");
-    for shape in avb.pools.sh.values() {
-        let paths_patterns = shape.get_kind().get_paths_and_patterns(canvas_drawing_size);
+    for shape in avb.pools.shapes.values() {
+        let paths_patterns = shape.get_kind().get_paths_and_patterns(das, cinfo);
         // paths_patterns.iter().for_each(|(path, pattern)| {
         //     log!("Path: {:?}", path);
         // });
@@ -1378,17 +1412,17 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     }
 
     // SHAPES: Draw the modifiers points
-    for shape in avb.pools.sh.values() {
+    for shape in avb.pools.shapes.values() {
         avb.canvases.draw_path(
             &CanvasKind::Draw,
-            shape.get_kind().get_modifiers_paths(canvas_drawing_size),
+            shape.get_kind().get_mod_paths_and_patterns(das, cinfo),
             vec![],
         );
     }
 
     // SHAPES: Draw dimensions
     use GetEntityState::*;
-    for shape in avb.pools.sh.values() {
+    for shape in avb.pools.shapes.values() {
         if shape.get_kind().get_state(IsSelected).is_some()
             || shape.get_kind().get_state(IsHighlighted).is_some()
             || shape.get_kind().get_state(IsAnyModifierSelected).is_some()
@@ -1403,25 +1437,23 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     }
 
     // HELPERS: Draw the helpers
-    for helper in avb.pools.hp.values() {
+    for helper in avb.pools.helpers.values() {
         avb.canvases.draw_path(
             &CanvasKind::Draw,
-            helper
-                .get_kind()
-                .get_paths_and_patterns(canvas_drawing_size),
+            helper.get_kind().get_paths_and_patterns(das, cinfo),
             vec![],
         );
     }
     // HELPERS: Draw the modifiers points
-    for helper in avb.pools.hp.values() {
+    for helper in avb.pools.helpers.values() {
         avb.canvases.draw_path(
             &CanvasKind::Draw,
-            helper.get_kind().get_modifiers_paths(canvas_drawing_size),
+            helper.get_kind().get_mod_paths_and_patterns(das, cinfo),
             vec![],
         );
     }
     // HELPERS: Draw dimensions
-    for helper in avb.pools.hp.values() {
+    for helper in avb.pools.helpers.values() {
         if helper.get_kind().get_state(IsSelected).is_some()
             || helper.get_kind().get_state(IsHighlighted).is_some()
             || helper.get_kind().get_state(IsAnyModifierSelected).is_some()
@@ -1442,7 +1474,7 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                 for shape in shapes {
                     avb.canvases.draw_path(
                         &CanvasKind::Draw,
-                        shape.get_kind().get_paths_and_patterns(canvas_drawing_size),
+                        shape.get_kind().get_paths_and_patterns(das, cinfo),
                         vec![],
                     );
                 }
@@ -1451,9 +1483,7 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                 for helper in helpers {
                     avb.canvases.draw_path(
                         &CanvasKind::Draw,
-                        helper
-                            .get_kind()
-                            .get_paths_and_patterns(canvas_drawing_size),
+                        helper.get_kind().get_paths_and_patterns(das, cinfo),
                         vec![],
                     );
                 }
@@ -1465,13 +1495,13 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     if let Some(shape) = avb.on_creation.get_shape() {
         avb.canvases.draw_path(
             &CanvasKind::Draw,
-            shape.get_kind().get_paths_and_patterns(canvas_drawing_size),
+            shape.get_kind().get_paths_and_patterns(das, cinfo),
             vec![],
         );
         // With modifiers
         avb.canvases.draw_path(
             &CanvasKind::Draw,
-            shape.get_kind().get_modifiers_paths(canvas_drawing_size),
+            shape.get_kind().get_mod_paths_and_patterns(das, cinfo),
             vec![],
         );
         // With dimensions
@@ -1481,15 +1511,13 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
         if let Some(helper) = &avb.on_creation.get_helper() {
             avb.canvases.draw_path(
                 &CanvasKind::Draw,
-                helper
-                    .get_kind()
-                    .get_paths_and_patterns(canvas_drawing_size),
+                helper.get_kind().get_paths_and_patterns(das, cinfo),
                 vec![],
             );
             // With modifiers
             avb.canvases.draw_path(
                 &CanvasKind::Draw,
-                helper.get_kind().get_modifiers_paths(canvas_drawing_size),
+                helper.get_kind().get_mod_paths_and_patterns(das, cinfo),
                 vec![],
             );
             // With dimensions

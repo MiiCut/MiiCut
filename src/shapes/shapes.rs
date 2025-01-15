@@ -41,7 +41,7 @@ impl Action for MoveShapesAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing last shapes move");
         for (shid, vars) in &self.shids_vars {
-            if let Some(shape) = pools.sh.get_shape_mut(*shid) {
+            if let Some(shape) = pools.shapes.get_shape_mut(*shid) {
                 shape.get_kind_mut().set_vars(vars);
                 shape.get_kind_mut().restore_saved();
             }
@@ -51,7 +51,7 @@ impl Action for MoveShapesAction {
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing last shapes move");
         for (shid, vars) in &self.shids_vars {
-            if let Some(shape) = pools.sh.get_shape_mut(*shid) {
+            if let Some(shape) = pools.shapes.get_shape_mut(*shid) {
                 shape.get_kind_mut().set_vars(vars);
             }
         }
@@ -64,14 +64,14 @@ pub struct ToogleBoolOpsShapesAction {
 impl Action for ToogleBoolOpsShapesAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing last shapes toogle");
-        if let Some(shape) = pools.sh.get_shape_mut(self.shid_toogle.0) {
+        if let Some(shape) = pools.shapes.get_shape_mut(self.shid_toogle.0) {
             shape.set_boolean_op(self.shid_toogle.1);
         }
     }
 
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing last shapes toogle");
-        if let Some(shape) = pools.sh.get_shape_mut(self.shid_toogle.0) {
+        if let Some(shape) = pools.shapes.get_shape_mut(self.shid_toogle.0) {
             let mut toogle = self.shid_toogle.1;
             toogle.toggle();
             shape.set_boolean_op(toogle);
@@ -244,34 +244,42 @@ impl ObjectsFuncs for BSKind {
         }
     }
 
-    fn get_paths(&self, canvas_size: &Size) -> Vec<BezPath> {
+    fn get_paths(&self, das: &Size) -> Vec<BezPath> {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.get_paths(canvas_size),
-            RectangleRounded(sh) => sh.get_paths(canvas_size),
-            Disc(sh) => sh.get_paths(canvas_size),
-            Oblong(sh) => sh.get_paths(canvas_size),
-            Custom(sh) => sh.get_paths(canvas_size),
+            Rectangle(sh) => sh.get_paths(das),
+            RectangleRounded(sh) => sh.get_paths(das),
+            Disc(sh) => sh.get_paths(das),
+            Oblong(sh) => sh.get_paths(das),
+            Custom(sh) => sh.get_paths(das),
         }
     }
-    fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.get_paths_and_patterns(drawing_area_size),
-            RectangleRounded(sh) => sh.get_paths_and_patterns(drawing_area_size),
-            Disc(sh) => sh.get_paths_and_patterns(drawing_area_size),
-            Oblong(sh) => sh.get_paths_and_patterns(drawing_area_size),
-            Custom(sh) => sh.get_paths_and_patterns(drawing_area_size),
+            Rectangle(sh) => sh.get_paths_and_patterns(das, cinfo),
+            RectangleRounded(sh) => sh.get_paths_and_patterns(das, cinfo),
+            Disc(sh) => sh.get_paths_and_patterns(das, cinfo),
+            Oblong(sh) => sh.get_paths_and_patterns(das, cinfo),
+            Custom(sh) => sh.get_paths_and_patterns(das, cinfo),
         }
     }
-    fn get_modifiers_paths(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_mod_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.get_modifiers_paths(drawing_area_size),
-            RectangleRounded(sh) => sh.get_modifiers_paths(drawing_area_size),
-            Disc(sh) => sh.get_modifiers_paths(drawing_area_size),
-            Oblong(sh) => sh.get_modifiers_paths(drawing_area_size),
-            Custom(sh) => sh.get_modifiers_paths(drawing_area_size),
+            Rectangle(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
+            RectangleRounded(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
+            Disc(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
+            Oblong(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
+            Custom(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
         }
     }
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {

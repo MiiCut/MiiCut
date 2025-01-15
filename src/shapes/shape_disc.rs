@@ -191,13 +191,13 @@ impl ObjectsFuncs for ShapeDisc {
             }
 
             SelectAllModifiers(value) => self.select_all_modifiers(value),
-            SelectModifierFromPos(pos, precision, _) => {
-                self.select_modifiers_from_pos(pos, precision);
+            SelectModifierFromPos(pos, ..) => {
+                self.select_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
 
             HighlightAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighlightModifierFromPos(pos, precision, _) => {
-                self.highlight_modifiers_from_pos(pos, precision);
+            HighlightModifierFromPos(pos, ..) => {
+                self.highlight_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
         }
     }
@@ -233,15 +233,19 @@ impl ObjectsFuncs for ShapeDisc {
         self.center.pos
     }
 
-    fn get_modifiers_paths(&self, _: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_mod_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
         vec![
             (
                 modifiers_path(self.get_radius_modifier(), 1., ShapeDisc::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.radius.selected, self.radius.highlighted),
+                self.get_pattern_status(self.radius.selected, self.radius.highlighted),
             ),
             (
                 center_path(self.center.pos, 1., ShapeDisc::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.selected, self.highlighted),
+                self.get_pattern_status(self.selected, self.highlighted),
             ),
         ]
     }
@@ -259,7 +263,7 @@ impl ObjectsFuncs for ShapeDisc {
     fn get_paths(&self, _: &Size) -> Vec<BezPath> {
         vec![self.get_circle().to_path(Self::TOLERANCE)]
     }
-    fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
+    fn get_paths_and_patterns(&self, das: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         let pattern = match (self.selected, self.highlighted) {
             (false, false) => Pattern::BasicNormal,
             (false, true) => Pattern::BasicHighlighted,
@@ -267,7 +271,7 @@ impl ObjectsFuncs for ShapeDisc {
             (true, true) => Pattern::BasicSelected,
         };
 
-        let mut paths = self.get_paths(drawing_area_size);
+        let mut paths = self.get_paths(das);
         let result = paths
             .iter_mut()
             .map(|path| (path.clone(), pattern))
