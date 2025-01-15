@@ -31,7 +31,7 @@ impl HelperLine {
     pub fn new(position: Vec2, pos2: Vec2) -> HelperKind {
         let position = Position::new(position, true);
         let mut angle = Value::new((pos2 - position.get_pos()).atan2());
-        angle.select(true);
+        angle.value_action(HS::Select, true);
         HelperKind::Line(HelperLine {
             center: position,
             angle,
@@ -82,26 +82,39 @@ impl ObjectsFuncs for HelperLine {
         true
     }
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> bool {
+    fn set_shape_highlighted_or_selected_from_pos(
+        &mut self,
+        pos: Vec2,
+        _snap: f64,
+        hors: HS,
+    ) -> Option<Vec2> {
         let hs = (pos - self.center.get_pos()).hypot() < Self::GRAB_RADIUS;
         match hors {
             HS::Highlight => {
                 self.highlighted = hs;
-                self.highlighted
+                if self.highlighted {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
             }
             HS::Select => {
                 self.selected = hs;
-                self.selected
+                if self.selected {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
             }
         }
     }
-    fn set_hs(&mut self, value: bool, hors: HS) {
+    fn set_shape_highlighted_or_selected(&mut self, value: bool, hors: HS) {
         match hors {
             HS::Highlight => self.highlighted = value,
             HS::Select => self.selected = value,
         }
     }
-    fn get_hs(&self, hors: HS) -> bool {
+    fn get_shape_highlighted_or_selected(&self, hors: HS) -> bool {
         match hors {
             HS::Highlight => self.highlighted,
             HS::Select => self.selected,
@@ -110,48 +123,37 @@ impl ObjectsFuncs for HelperLine {
     fn get_hhss(&self) -> (bool, bool) {
         (self.selected, self.highlighted)
     }
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> Option<Vec2> {
+    fn set_modifiers_highlighted_or_selected_from_pos(
+        &mut self,
+        pos: Vec2,
+        _snap: f64,
+        hors: HS,
+    ) -> bool {
         let hs = is_near_line(
             self.center.get_pos(),
             self.angle.get_val(),
             pos,
             Self::GRAB_RADIUS,
         );
-        match hors {
-            HS::Highlight => self.angle.highlight(hs),
-            HS::Select => self.angle.select(hs),
-        }
-        if hs {
-            return Some(pos);
-        } else {
-            None
-        }
+        self.angle.value_action(hors, hs);
+        hs
     }
 
-    fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
-        match hors {
-            HS::Highlight => {
-                self.angle.highlight(value);
-            }
-            HS::Select => {
-                self.angle.select(value);
-            }
-        }
+    fn set_modifier_highlighted_or_selected(&mut self, value: bool, hors: HS) {
+        self.angle.value_action(hors, value);
     }
-    fn get_hs_modifiers(&self, hors: HS) -> bool {
-        match hors {
-            HS::Highlight => self.angle.is_highlighted(),
-            HS::Select => self.angle.is_selected(),
-        }
+    fn get_modifiers_highlighted_or_selected(&self, hors: HS) -> bool {
+        self.angle.get_highlighted_or_selected(hors)
     }
 
     fn toggle_prop(&mut self) {
         ()
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) {
+    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2> {
         self.center
             .set_pos(snap_pt(self.center.get_saved_pos() + dpos, snap));
+        Some(self.get_position())
     }
     fn move_modifier(
         &mut self,
@@ -160,7 +162,7 @@ impl ObjectsFuncs for HelperLine {
         snap: f64,
         _shift_pressed: bool,
     ) -> Option<Vec2> {
-        if self.angle.is_selected() {
+        if self.angle.get_highlighted_or_selected(HS::Select) {
             let angle = (pos - self.center.get_pos()).atan2();
             self.angle
                 .set_val(snap_val(angle / PI * 180., snap) / 180. * PI);
@@ -173,7 +175,10 @@ impl ObjectsFuncs for HelperLine {
     }
 
     fn get_modifiers_paths(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
-        let pattern_line = match (self.angle.is_selected(), self.angle.is_highlighted()) {
+        let pattern_line = match (
+            self.angle.get_highlighted_or_selected(HS::Select),
+            self.angle.get_highlighted_or_selected(HS::Highlight),
+        ) {
             (false, false) => Pattern::HelperNormalCircle,
             (false, true) => Pattern::HelperHighlightedCircle,
             (true, false) => Pattern::HelperSelectedCircle,

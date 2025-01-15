@@ -1,3 +1,4 @@
+pub mod shape_custom;
 pub mod shape_disc;
 pub mod shape_oblong;
 pub mod shape_rectangle;

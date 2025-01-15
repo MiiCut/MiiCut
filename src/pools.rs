@@ -8,7 +8,7 @@ use crate::{
         shapes_pool::{AddShapeAction, ShapesPool},
     },
     traits::*,
-    Action, ClipboardItem, PasteAction, HS,
+    Action, ClipboardItem, PasteAction,
 };
 use kurbo::Vec2;
 
@@ -48,6 +48,12 @@ impl Action for AddObjectAction {
             AddObjectAction::Helpers(action) => action.redo(pools),
         }
     }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum HS {
+    Highlight,
+    Select,
 }
 
 #[derive(Clone, Debug)]
@@ -129,8 +135,8 @@ impl Pools {
         });
     }
     pub fn set_hs_objects(&mut self, value: bool, hs: HS) {
-        self.sh.set_hs(value, hs);
-        self.hp.set_hs(value, hs);
+        self.sh.set_shapes_hs(value, hs);
+        self.hp.set_helpers_hs(value, hs);
     }
     pub fn set_hs_objects_in_order(
         &mut self,
@@ -139,37 +145,42 @@ impl Pools {
         grab: f64,
         hors: HS,
     ) -> Option<Vec2> {
-        if let Some(pos) = self
+        if self
             .sh
-            .set_hs_modifiers_from_pos(cursor_pos, snap, grab, hors)
+            .set_shapes_mod_hs_from_pos(cursor_pos, snap, grab, hors)
         {
-            self.sh.set_hs(false, hors);
-            self.hp.set_hs(false, hors);
-            self.hp.set_hs_modifiers(false, hors);
-            return Some(pos);
+            self.sh.set_shapes_hs(false, hors);
+            self.hp.set_helpers_hs(false, hors);
+            self.hp.set_helpers_mod_hs(false, hors);
+            log!("set_shapes_modifiers_highlighted_or_selected_from_pos");
+            return Some(cursor_pos);
         }
-        if self.hp.set_hs_from_pos(cursor_pos, snap, hors) {
-            self.sh.set_hs(false, hors);
-            self.hp.set_hs_modifiers(false, hors);
-            return None;
+        if self.hp.set_helpers_hs_from_pos(cursor_pos, snap, hors) {
+            self.sh.set_shapes_hs(false, hors);
+            self.hp.set_helpers_mod_hs(false, hors);
+            log!("set_helpers_highlighted_or_selected_from_pos");
+            return Some(cursor_pos);
         }
-
-        if let Some(pos) = self
+        if self
             .hp
-            .set_hs_modifiers_from_pos(cursor_pos, snap, grab, hors)
+            .set_helpers_mod_hs_from_pos(cursor_pos, snap, grab, hors)
         {
-            self.sh.set_hs(false, hors);
-            return Some(pos);
+            self.sh.set_shapes_hs(false, hors);
+            log!("set_helpers_modifiers_highlighted_or_selected_from_pos");
+            return Some(cursor_pos);
         }
-
-        self.sh.set_hs_from_pos(cursor_pos, snap, hors);
-        None
+        if let Some(_) = self.sh.set_shapes_hs_from_pos(cursor_pos, snap, hors) {
+            log!("set_shapes_highlighted_or_selected_from_pos");
+            return Some(cursor_pos);
+        } else {
+            None
+        }
     }
     pub fn clear_all_hs(&mut self) {
-        self.sh.set_hs(false, HS::Select);
+        self.sh.set_shapes_hs(false, HS::Select);
         self.sh.set_hs_modifiers(false, HS::Select);
-        self.hp.set_hs(false, HS::Select);
-        self.hp.set_hs_modifiers(false, HS::Select);
+        self.hp.set_helpers_hs(false, HS::Select);
+        self.hp.set_helpers_mod_hs(false, HS::Select);
     }
     pub fn select_all_shapes_connected(&mut self) -> bool {
         self.sh.select_all_connected()
@@ -207,9 +218,13 @@ impl Pools {
 
         let shapes_selected = self.sh.get_hs(HS::Select);
         if shapes_selected.len() == 1 {
-            self.sh
-                .move_position(shapes_selected[0], pos_dwn, cursor_pos, snap, shift_pressed);
-            return None;
+            return self.sh.move_position(
+                shapes_selected[0],
+                pos_dwn,
+                cursor_pos,
+                snap,
+                shift_pressed,
+            );
         } else {
             if shapes_selected.len() > 0 {
                 for shid in shapes_selected {
@@ -221,18 +236,26 @@ impl Pools {
         }
 
         let helpers_selected = self.hp.get_hs(HS::Select);
-        if helpers_selected.len() > 0 {
+        if helpers_selected.len() == 1 {
+            return self.hp.move_position(
+                helpers_selected[0],
+                pos_dwn,
+                cursor_pos,
+                snap,
+                shift_pressed,
+            );
+        } else {
             if helpers_selected.len() > 0 {
                 for dhid in helpers_selected {
                     self.hp
                         .move_position(dhid, pos_dwn, cursor_pos, snap, shift_pressed);
                 }
                 return None;
-            }
-        } else {
-            if let Some((hpid, _)) = self.hp.get_first_selected_modifier_vars() {
-                self.hp
-                    .move_modifier(hpid, pos_dwn, cursor_pos, snap, shift_pressed);
+            } else {
+                if let Some((hpid, _)) = self.hp.get_first_selected_modifier_vars() {
+                    self.hp
+                        .move_modifier(hpid, pos_dwn, cursor_pos, snap, shift_pressed);
+                }
             }
         }
         None

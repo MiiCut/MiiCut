@@ -70,7 +70,9 @@ impl HelpersPool {
         let mut new_helpers = vec![];
         for mut helper in shapes.into_iter() {
             helper.set_new_id(DHid::new());
-            helper.get_kind_mut().set_hs(true, HS::Select);
+            helper
+                .get_kind_mut()
+                .set_shape_highlighted_or_selected(true, HS::Select);
             self.add_helper(helper.clone());
             new_helpers.push(helper);
         }
@@ -107,31 +109,43 @@ impl HelpersPool {
         });
     }
 
-    pub fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> bool {
+    pub fn set_helpers_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> bool {
         use HS::*;
+        let mut res = false;
         if let Highlight = hors {
-            let mut res = false;
+            // If Highlight, return the position of the last one
             self.helpers.values_mut().for_each(|helper| {
-                res |= helper.get_kind_mut().set_hs_from_pos(pos, snap, Highlight);
+                if let Some(_) = helper
+                    .get_kind_mut()
+                    .set_shape_highlighted_or_selected_from_pos(pos, snap, Highlight)
+                {
+                    res = true;
+                }
             });
-            return res;
         } else {
-            let mut res = false;
+            // If Select, return the position of the last one
             self.helpers.values_mut().for_each(|helper| {
-                res |= helper.get_kind_mut().set_hs_from_pos(pos, snap, Select);
+                if let Some(_) = helper
+                    .get_kind_mut()
+                    .set_shape_highlighted_or_selected_from_pos(pos, snap, Select)
+                {
+                    res = true;
+                }
             });
-            return res;
         }
+        res
     }
-    pub fn set_hs(&mut self, value: bool, hors: HS) {
+    pub fn set_helpers_hs(&mut self, value: bool, hors: HS) {
         self.helpers.values_mut().for_each(|helper| {
-            helper.get_kind_mut().set_hs(value, hors);
+            helper
+                .get_kind_mut()
+                .set_shape_highlighted_or_selected(value, hors);
         });
     }
     pub fn get_hs(&self, hors: HS) -> Vec<DHid> {
         let mut result = vec![];
         for helper in self.helpers.values() {
-            if helper.get_kind().get_hs(hors) {
+            if helper.get_kind().get_shape_highlighted_or_selected(hors) {
                 result.push(helper.get_id());
             }
         }
@@ -148,7 +162,7 @@ impl HelpersPool {
     pub fn get_hs_vars(&self, hors: HS) -> Vec<(DHid, HelperKindvars)> {
         let mut result = vec![];
         for helper in self.helpers.values() {
-            if helper.get_kind().get_hs(hors) {
+            if helper.get_kind().get_shape_highlighted_or_selected(hors) {
                 result.push((helper.get_id(), helper.get_kind().get_vars()));
             }
         }
@@ -156,35 +170,42 @@ impl HelpersPool {
     }
     pub fn set_hs_from_dhid(&mut self, dhid: DHid, value: bool, hors: HS) {
         if let Some(helper) = self.helpers.get_mut(&dhid) {
-            helper.get_kind_mut().set_hs(value, hors);
+            helper
+                .get_kind_mut()
+                .set_shape_highlighted_or_selected(value, hors);
         }
     }
 
-    pub fn set_hs_modifiers_from_pos(
+    pub fn set_helpers_mod_hs_from_pos(
         &mut self,
         pos: Vec2,
         snap: f64,
         _precision: f64,
         hors: HS,
-    ) -> Option<Vec2> {
+    ) -> bool {
         for helper in self.helpers.values_mut() {
-            if let Some(pos) = helper
+            if helper
                 .get_kind_mut()
-                .set_hs_modifiers_from_pos(pos, snap, hors)
+                .set_modifiers_highlighted_or_selected_from_pos(pos, snap, hors)
             {
-                return Some(pos);
+                return true;
             }
         }
-        None
+        false
     }
-    pub fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
+    pub fn set_helpers_mod_hs(&mut self, value: bool, hors: HS) {
         self.helpers.values_mut().for_each(|helper| {
-            helper.get_kind_mut().set_hs_modifiers(value, hors);
+            helper
+                .get_kind_mut()
+                .set_modifier_highlighted_or_selected(value, hors);
         });
     }
     pub fn get_first_selected_modifier_vars(&self) -> Option<(DHid, HelperKindvars)> {
         for helper in self.helpers.values() {
-            if helper.get_kind().get_hs_modifiers(HS::Select) {
+            if helper
+                .get_kind()
+                .get_modifiers_highlighted_or_selected(HS::Select)
+            {
                 return Some((helper.get_id(), helper.get_kind().get_vars()));
             }
         }
@@ -198,10 +219,10 @@ impl HelpersPool {
         pos: Vec2,
         snap: f64,
         _shift_pressed: bool,
-    ) {
-        if let Some(helper) = self.helpers.get_mut(&dhid) {
-            helper.get_kind_mut().move_position(pos - pos_init, snap);
-        }
+    ) -> Option<Vec2> {
+        self.helpers.get_mut(&dhid).and_then(|helper| {
+            return helper.get_kind_mut().move_position(pos - pos_init, snap);
+        })
     }
     pub fn move_modifier(
         &mut self,
@@ -222,10 +243,15 @@ impl HelpersPool {
         let helpers_deleted: Vec<Helper> = self
             .helpers
             .iter()
-            .filter(|(_, shape)| shape.get_kind().get_hs(HS::Select))
+            .filter(|(_, shape)| {
+                shape
+                    .get_kind()
+                    .get_shape_highlighted_or_selected(HS::Select)
+            })
             .map(|(_, shape)| shape.clone())
             .collect();
-        self.helpers.retain(|_, v| !v.get_kind().get_hs(HS::Select));
+        self.helpers
+            .retain(|_, v| !v.get_kind().get_shape_highlighted_or_selected(HS::Select));
         if helpers_deleted.is_empty() {
             None
         } else {

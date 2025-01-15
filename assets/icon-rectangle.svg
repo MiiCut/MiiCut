@@ -1,3 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
     <rect x="1" y="4" width="30" height="24" fill="none" stroke="black" stroke-width="2"/>
+    <!-- Small black cross at the center -->
+    <line x1="13" y1="16" x2="19" y2="16" stroke="black" stroke-width="1"/>
+    <line x1="16" y1="13" x2="16" y2="19" stroke="black" stroke-width="1"/>
 </svg>

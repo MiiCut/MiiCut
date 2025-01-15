@@ -12,8 +12,8 @@
     --canvas-modifiers-selected-color: #ff00008c;
     /*  */
     --canvas-basic-normal-color: #424242;
-    --canvas-basic-highlight-color:  #ffea0016;
-    --canvas-basic-selected-color:  #ff000025;
+    --canvas-basic-highlight-color:  #ffea00;
+    --canvas-basic-selected-color:  #ff0000;
     --canvas-basic-normal-color-dark: #424242;
     --canvas-basic-highlight-color-dark:  #ffffff;
     --canvas-basic-selected-color-dark:  #ff0000;
@@ -268,6 +268,9 @@ canvas {
 }
 #icon-oblong {
     background-image: url('../assets/icon-oblong.svg');
+}
+#icon-custom {
+    background-image: url('../assets/icon-custom.svg');
 }
 #icon-quarter-ellipse {
     background-image: url('../assets/icon-quarter-ellipse.svg');

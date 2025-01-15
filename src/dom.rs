@@ -9,6 +9,7 @@ pub enum IconsShapes {
     RectangleRounded,
     Disc,
     Oblong,
+    Custom,
 }
 impl IconsShapes {
     pub fn id(&self) -> &'static str {
@@ -18,6 +19,7 @@ impl IconsShapes {
             RectangleRounded => "icon-rectangle-rounded",
             Disc => "icon-circle",
             Oblong => "icon-oblong",
+            Custom => "icon-custom",
         }
     }
 }

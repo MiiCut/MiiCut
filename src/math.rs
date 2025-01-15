@@ -831,15 +831,15 @@ pub fn is_point_near_path(path: &BezPath, point: Vec2, threshold: f64) -> bool {
 }
 
 /// Calculate the shortest distance from a point to a line segment.
-pub fn distance_to_line(point: Vec2, line: Line) -> f64 {
-    let a = line.p0;
-    let b = line.p1;
+pub fn distance_to_segment(start: Vec2, end: Vec2, pos: Vec2) -> f64 {
+    let a = start;
+    let b = end;
 
     // Vector from a to b
     let ab = (b.x - a.x, b.y - a.y);
 
     // Vector from a to the point
-    let ap = (point.x - a.x, point.y - a.y);
+    let ap = (pos.x - a.x, pos.y - a.y);
 
     // Project point onto the line segment, clamping t to [0, 1]
     let ab_length_squared = ab.0 * ab.0 + ab.1 * ab.1;
@@ -853,7 +853,7 @@ pub fn distance_to_line(point: Vec2, line: Line) -> f64 {
     let closest = Vec2::new(a.x + t * ab.0, a.y + t * ab.1);
 
     // Distance to the closest point
-    (point - closest).hypot()
+    (pos - closest).hypot()
 }
 
 pub fn compute_winding_number(path: &BezPath, point: Vec2) -> i32 {
@@ -1189,4 +1189,15 @@ pub fn snap_angle_hv(angle: f64) -> f64 {
         return -FRAC_PI_2;
     }
     angle
+}
+
+pub fn angle_from(v1: Vec2, v2: Vec2) -> f64 {
+    let cross = v1.x * v2.y - v1.y * v2.x; // Cross product
+    cross.atan2(v1.dot(v2)) // Returns the signed angle in radians
+}
+pub fn is_near_arc(start: Vec2, end: Vec2, radius: f64, pos: Vec2, precision: f64) -> bool {
+    let center = (start + end) / 2.0;
+    let angle = angle_from(pos - center, start - center);
+    let dist = (pos - center).hypot();
+    dist > radius - precision && dist < radius + precision && angle.abs() < std::f64::consts::PI
 }

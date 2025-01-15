@@ -32,7 +32,7 @@ impl HelperCircle {
     pub fn new(center: Vec2, _pos2: Vec2) -> HelperKind {
         let center = Position::new(center, true);
         let mut radius = Value::new(0.);
-        radius.select(true);
+        radius.value_action(HS::Select, true);
 
         HelperKind::Circle(HelperCircle {
             center,
@@ -92,26 +92,39 @@ impl ObjectsFuncs for HelperCircle {
         true
     }
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> bool {
+    fn set_shape_highlighted_or_selected_from_pos(
+        &mut self,
+        pos: Vec2,
+        _snap: f64,
+        hors: HS,
+    ) -> Option<Vec2> {
         let hs = (self.center.get_pos() - pos).hypot() < Self::GRAB_RADIUS;
         match hors {
             HS::Highlight => {
                 self.highlighted = hs;
-                self.highlighted
+                if self.highlighted {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
             }
             HS::Select => {
                 self.selected = hs;
-                self.selected
+                if self.selected {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
             }
         }
     }
-    fn set_hs(&mut self, value: bool, hors: HS) {
+    fn set_shape_highlighted_or_selected(&mut self, value: bool, hors: HS) {
         match hors {
             HS::Highlight => self.highlighted = value,
             HS::Select => self.selected = value,
         }
     }
-    fn get_hs(&self, hors: HS) -> bool {
+    fn get_shape_highlighted_or_selected(&self, hors: HS) -> bool {
         match hors {
             HS::Highlight => self.highlighted,
             HS::Select => self.selected,
@@ -121,50 +134,40 @@ impl ObjectsFuncs for HelperCircle {
         (self.selected, self.highlighted)
     }
 
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> Option<Vec2> {
+    fn set_modifiers_highlighted_or_selected_from_pos(
+        &mut self,
+        pos: Vec2,
+        _snap: f64,
+        hors: HS,
+    ) -> bool {
         let hs: bool = ((pos - self.center.get_pos()).hypot() - self.radius.get_val()).abs()
             < Self::GRAB_RADIUS;
         if hs {
-            match hors {
-                HS::Highlight => self.radius.highlight(true),
-                HS::Select => self.radius.select(true),
-            }
+            self.radius.value_action(hors, true);
             let angle = (pos - self.center.get_pos()).atan2();
             let pos = self.center.get_pos() + Vec2::from_angle(angle) * self.radius.get_val();
-            return Some(pos);
+            return true;
         } else {
-            match hors {
-                HS::Highlight => self.radius.highlight(false),
-                HS::Select => self.radius.select(false),
-            }
+            self.radius.value_action(hors, false);
         }
-        None
+        false
     }
 
-    fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
-        match hors {
-            HS::Highlight => {
-                self.radius.highlight(value);
-            }
-            HS::Select => {
-                self.radius.select(value);
-            }
-        }
+    fn set_modifier_highlighted_or_selected(&mut self, value: bool, hors: HS) {
+        self.radius.value_action(hors, value);
     }
-    fn get_hs_modifiers(&self, hors: HS) -> bool {
-        match hors {
-            HS::Highlight => self.radius.is_highlighted(),
-            HS::Select => self.radius.is_selected(),
-        }
+    fn get_modifiers_highlighted_or_selected(&self, hors: HS) -> bool {
+        self.radius.get_highlighted_or_selected(hors)
     }
 
     fn toggle_prop(&mut self) {
         ()
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) {
+    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2> {
         self.center
             .set_pos(snap_pt(self.center.get_saved_pos() + dpos, snap));
+        Some(self.get_position())
     }
     fn move_modifier(
         &mut self,
@@ -186,7 +189,10 @@ impl ObjectsFuncs for HelperCircle {
     }
 
     fn get_modifiers_paths(&self, _: &Size) -> Vec<(BezPath, Pattern)> {
-        let pattern_circle = match (self.radius.is_selected(), self.radius.is_highlighted()) {
+        let pattern_circle = match (
+            self.radius.get_highlighted_or_selected(HS::Select),
+            self.radius.get_highlighted_or_selected(HS::Highlight),
+        ) {
             (false, false) => Pattern::HelperNormalCircle,
             (false, true) => Pattern::HelperHighlightedCircle,
             (true, false) => Pattern::HelperSelectedCircle,

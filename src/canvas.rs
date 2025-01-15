@@ -5,7 +5,7 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
-use crate::math::*;
+use crate::{math::*, prefab::*};
 use js_sys::Array;
 use kurbo::{BezPath, PathEl, Point, Size, Vec2};
 use std::vec;
@@ -358,9 +358,9 @@ impl Canvases {
             c_grid_ctx,
             c_main_ctx,
             drawing_area_size: drawing_size,
-            drawing_offset_saved: Vec2::new(50., 50.),
-            drawing_offset: Vec2::new(50., 50.),
-            drawing_scale: 2.,
+            drawing_offset_saved: Vec2::ZERO,
+            drawing_offset: Vec2::ZERO,
+            drawing_scale: 1.,
             grid_rules: GridRules::new(),
             grid_size: 10.,
             grid_snap: 1.,
@@ -415,6 +415,20 @@ impl Canvases {
         );
     }
 
+    pub fn draw_origin(&self) {
+        self.c_grid_ctx.clear_rect(
+            0.,
+            0.,
+            self.c_main.width() as f64,
+            self.c_main.height() as f64,
+        );
+        let origin = to_draw(self.drawing_offset, self.drawing_scale, self.drawing_offset);
+        self.draw_path(
+            &CanvasKind::Grid,
+            vec![(helper_point_path(origin, 5.), Pattern::Rules)],
+            vec![],
+        );
+    }
     pub fn draw_text(&self, canvas_kind: &CanvasKind, text: &CanvasText) {
         let ctx = self.get_context(canvas_kind);
         let scale = self.get_drawing_scale();
@@ -637,6 +651,12 @@ impl Canvases {
         self.c_main.set_height(height);
         // Update the drawing area
     }
+    pub fn reset_origin(&mut self) {
+        self.drawing_offset = Vec2::new(
+            (self.c_main.width() / 2) as f64,
+            (self.c_main.height() / 2) as f64,
+        );
+    }
     pub fn get_drawing_scale(&self) -> f64 {
         self.drawing_scale
     }
@@ -829,9 +849,9 @@ impl DrawStyles {
             ComposedNormal(filled) => (&self.pattern_solid, 3., filled),
             ComposedHighlighted(filled) => (&self.pattern_solid, 3., filled),
             ComposedSelected(filled) => (&self.pattern_solid, 3., filled),
-            BasicNormal => (&self.pattern_dashed, 1., true),
-            BasicHighlighted => (&self.pattern_dashed, 1., true),
-            BasicSelected => (&self.pattern_solid, 1., true),
+            BasicNormal => (&self.pattern_dashed, 1., false),
+            BasicHighlighted => (&self.pattern_dashed, 3., false),
+            BasicSelected => (&self.pattern_dashed, 3., false),
 
             HelperNormal => (&self.pattern_solid, 1., true),
             HelperHighlighted => (&self.pattern_solid, 1., true),

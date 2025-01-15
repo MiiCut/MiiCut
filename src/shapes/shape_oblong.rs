@@ -9,7 +9,7 @@ use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
-    positions::{Position, Value, HS},
+    positions::{Position, Value},
     prefab::{center_path, modifiers_path},
     traits::*,
 };
@@ -21,39 +21,6 @@ use std::{
     f64::consts::{FRAC_PI_2, PI},
     fmt::Display,
 };
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ShapeOblongVars {
-    start: Position,
-    end: Position,
-    width: Value,
-}
-impl ShapeOblongVars {
-    pub fn save(&mut self) {
-        self.start.save_pos();
-        self.end.save_pos();
-        self.width.save_val();
-    }
-    pub fn restore_saved(&mut self) {
-        self.start.restore_saved();
-        self.end.restore_saved();
-        self.width.restore_saved();
-    }
-    pub fn highlight(&mut self, value: bool) {
-        self.start.highlight(value);
-        self.end.highlight(value);
-        self.width.highlight(value);
-    }
-    pub fn select(&mut self, value: bool) {
-        self.start.select(value);
-        self.end.select(value);
-        self.width.select(value);
-    }
-    pub fn move_position(&mut self, dpos: Vec2) {
-        self.start.set_pos(self.start.get_saved_pos() + dpos);
-        self.end.set_pos(self.end.get_saved_pos() + dpos);
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeOblong {
@@ -75,7 +42,7 @@ impl ShapeOblong {
         // let pos2 = pos2 + Vec2::new(30., 0.);
         let start = Position::new(pos1, true);
         let mut end = Position::new(pos2, true);
-        end.select(true);
+        end.selected = true;
         let width = Value::new(10.);
         BSKind::Oblong(ShapeOblong {
             start,
@@ -97,17 +64,17 @@ impl ShapeOblong {
     }
 
     fn get_width(&self) -> f64 {
-        self.width.get_val()
+        self.width.value
     }
     fn get_saved_width(&self) -> f64 {
-        self.width.get_saved_val()
+        self.width.saved_val
     }
     fn get_length(&self) -> f64 {
-        (self.start.get_pos() - self.end.get_pos()).hypot()
+        (self.start.pos - self.end.pos).hypot()
     }
     fn get_arc(&self, start_arc: bool) -> Arc {
         let width = self.get_width();
-        let (start, end, width) = (self.start.get_pos(), self.end.get_pos(), width);
+        let (start, end, width) = (self.start.pos, self.end.pos, width);
         let radius = width / 2.;
         let angle = (end - start).atan2();
         if start_arc {
@@ -138,18 +105,35 @@ impl ShapeOblong {
         }
     }
     fn get_middle_modifier(&self) -> Vec2 {
-        get_middle_from_start_end_positions(
-            self.start.get_pos(),
-            self.end.get_pos(),
-            self.get_width(),
-        )
+        get_middle_from_start_end_positions(self.start.pos, self.end.pos, self.get_width())
     }
     fn get_middle_modifier_saved(&self) -> Vec2 {
         get_middle_from_start_end_positions(
-            self.start.get_saved_pos(),
-            self.end.get_saved_pos(),
+            self.start.saved_pos,
+            self.end.saved_pos,
             self.get_saved_width(),
         )
+    }
+    fn highlight_all_modifiers(&mut self, value: bool) {
+        self.start.highlighted = value;
+        self.end.highlighted = value;
+        self.width.highlighted = value;
+    }
+    fn select_all_modifiers(&mut self, value: bool) {
+        self.start.selected = value;
+        self.end.selected = value;
+        self.width.selected = value;
+    }
+
+    fn highlight_modifiers_from_pos(&mut self, pos: Vec2, grab: f64) {
+        self.start.highlighted = (pos - self.start.pos).hypot() < grab;
+        self.end.highlighted = (pos - self.end.pos).hypot() < grab;
+        self.width.highlighted = (pos - self.get_middle_modifier()).hypot() < grab;
+    }
+    fn select_modifiers_from_pos(&mut self, pos: Vec2, grab: f64) {
+        self.start.selected = (pos - self.start.pos).hypot() < grab;
+        self.end.selected = (pos - self.end.pos).hypot() < grab;
+        self.width.selected = (pos - self.get_middle_modifier()).hypot() < grab;
     }
 }
 impl Display for ShapeOblong {
@@ -206,14 +190,14 @@ impl ObjectsFuncs for ShapeOblong {
     type Kindvars = BSKindvars;
 
     fn save_vars(&mut self) {
-        self.start.save_pos();
-        self.end.save_pos();
-        self.width.save_val();
+        self.start.saved_pos = self.start.pos;
+        self.end.saved_pos = self.end.pos;
+        self.width.saved_val = self.width.value;
     }
     fn restore_saved(&mut self) {
-        self.start.restore_saved();
-        self.end.restore_saved();
-        self.width.restore_saved();
+        self.start.pos = self.start.saved_pos;
+        self.end.pos = self.end.saved_pos;
+        self.width.value = self.width.saved_val;
         self.update_polygon();
     }
     fn get_vars(&self) -> BSKindvars {
@@ -233,96 +217,62 @@ impl ObjectsFuncs for ShapeOblong {
             && self.get_length() >= ShapeOblong::MIN_LENGTH_SIZE - 0.1
     }
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> bool {
-        match hors {
-            HS::Highlight => {
-                self.highlighted = self.contains(pos.to_point());
-                self.highlighted
+    fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
+        use GetEntityState::*;
+        match get {
+            IsSelected => {
+                if self.selected {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
             }
-            HS::Select => {
+            IsHighlighted => {
+                if self.highlighted {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
+            }
+            IsAnyModifierSelected => {
+                let select = self.start.selected || self.end.selected || self.width.selected;
+                if select {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
+            }
+            IsAnyModifierHighlighted => {
+                let highlight =
+                    self.start.highlighted || self.end.highlighted || self.width.highlighted;
+                if highlight {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
+            }
+        }
+    }
+    fn set_state(&mut self, set: SetEntityState) {
+        use SetEntityState::*;
+        match set {
+            SetSelect(value) => self.selected = value,
+            SelectFromPos(pos, ..) => {
                 self.selected = self.contains(pos.to_point());
-                self.selected
             }
-        }
-    }
-    fn set_hs(&mut self, value: bool, hors: HS) {
-        match hors {
-            HS::Highlight => self.highlighted = value,
-            HS::Select => self.selected = value,
-        }
-    }
-    fn get_hs(&self, hors: HS) -> bool {
-        match hors {
-            HS::Highlight => self.highlighted,
-            HS::Select => self.selected,
-        }
-    }
-    fn get_hhss(&self) -> (bool, bool) {
-        (self.selected, self.highlighted)
-    }
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> Option<Vec2> {
-        if (pos - self.start.get_pos()).hypot() < Self::GRAB_RADIUS {
-            match hors {
-                HS::Highlight => self.start.highlight(true),
-                HS::Select => self.start.select(true),
+            SetHighlight(value) => self.highlighted = value,
+            HighlightFromPos(pos, ..) => {
+                self.highlighted = self.contains(pos.to_point());
             }
-            return Some(self.start.get_pos());
-        } else {
-            match hors {
-                HS::Highlight => self.start.highlight(false),
-                HS::Select => self.start.select(false),
-            }
-        }
-        if (pos - self.end.get_pos()).hypot() < Self::GRAB_RADIUS {
-            match hors {
-                HS::Highlight => self.end.highlight(true),
-                HS::Select => self.end.select(true),
-            }
-            return Some(self.end.get_pos());
-        } else {
-            match hors {
-                HS::Highlight => self.end.highlight(false),
-                HS::Select => self.end.select(false),
-            }
-        }
-        if (pos - self.get_middle_modifier()).hypot() < Self::GRAB_RADIUS {
-            match hors {
-                HS::Highlight => self.width.highlight(true),
-                HS::Select => self.width.select(true),
-            }
-            return Some(self.get_middle_modifier());
-        } else {
-            match hors {
-                HS::Highlight => self.width.highlight(false),
-                HS::Select => self.width.select(false),
-            }
-        }
-        None
-    }
 
-    fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
-        match hors {
-            HS::Highlight => {
-                self.start.highlight(value);
-                self.end.highlight(value);
-                self.width.highlight(value);
+            SelectAllModifiers(value) => self.select_all_modifiers(value),
+            SelectModifierFromPos(pos, precision, _) => {
+                self.select_modifiers_from_pos(pos, precision);
             }
-            HS::Select => {
-                self.start.select(value);
-                self.end.select(value);
-                self.width.select(value);
-            }
-        }
-    }
-    fn get_hs_modifiers(&self, hors: HS) -> bool {
-        match hors {
-            HS::Highlight => {
-                self.start.is_highlighted()
-                    || self.end.is_highlighted()
-                    || self.width.is_highlighted()
-            }
-            HS::Select => {
-                self.start.is_selected() || self.end.is_selected() || self.width.is_selected()
+
+            HighlightAllModifiers(value) => self.highlight_all_modifiers(value),
+            HighlightModifierFromPos(pos, precision, _) => {
+                self.highlight_modifiers_from_pos(pos, precision);
             }
         }
     }
@@ -331,11 +281,12 @@ impl ObjectsFuncs for ShapeOblong {
         ()
     }
 
-    fn move_position(&mut self, mut dpos: Vec2, snap: f64) {
+    fn move_position(&mut self, mut dpos: Vec2, snap: f64) -> Option<Vec2> {
         dpos = snap_pt(dpos, snap);
-        self.start.set_pos(self.start.get_saved_pos() + dpos);
-        self.end.set_pos(self.end.get_saved_pos() + dpos);
+        self.start.pos = self.start.saved_pos + dpos;
+        self.end.pos = self.end.saved_pos + dpos;
         self.update_polygon();
+        Some(self.get_position())
     }
     fn move_modifier(
         &mut self,
@@ -344,14 +295,14 @@ impl ObjectsFuncs for ShapeOblong {
         snap: f64,
         _shift_pressed: bool,
     ) -> Option<Vec2> {
-        let start_saved = self.start.get_saved_pos();
-        let end_saved = self.end.get_saved_pos();
+        let start_saved = self.start.saved_pos;
+        let end_saved = self.end.saved_pos;
         let middle_saved = self.get_middle_modifier_saved();
         let center_saved = (start_saved + end_saved) / 2.;
 
-        let start_sel = self.start.is_selected();
-        let end_sel = self.end.is_selected();
-        let width_sel = self.width.is_selected();
+        let start_sel = self.start.selected;
+        let end_sel = self.end.selected;
+        let width_sel = self.width.selected;
 
         let dpos = pos - pos_init;
         let (dpos_proj, _) = project_to_perpendicular(start_saved, end_saved, dpos);
@@ -365,9 +316,9 @@ impl ObjectsFuncs for ShapeOblong {
                 let start = end_saved - Vec2::from_angle(angle) * length;
 
                 if (start - end_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
-                    self.start.set_pos(start);
+                    self.start.pos = start;
                     self.update_polygon();
-                    return Some(self.start.get_pos());
+                    return Some(self.start.pos);
                 }
             }
             (false, true, false) => {
@@ -378,9 +329,9 @@ impl ObjectsFuncs for ShapeOblong {
                 let end = start_saved + Vec2::from_angle(angle) * length;
 
                 if (end - start_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
-                    self.end.set_pos(end);
+                    self.end.pos = end;
                     self.update_polygon();
-                    return Some(self.end.get_pos());
+                    return Some(self.end.pos);
                 }
             }
             (false, false, true) => {
@@ -392,7 +343,7 @@ impl ObjectsFuncs for ShapeOblong {
 
                 let width = snap_val((middle - center_saved).hypot() * 2., snap);
                 if width >= ShapeOblong::MIN_WIDTH_SIZE && dir1 * dir2 > 0. {
-                    self.width.set_val(width);
+                    self.width.value = width;
                     self.update_polygon();
                     return Some(self.get_middle_modifier());
                 }
@@ -402,26 +353,26 @@ impl ObjectsFuncs for ShapeOblong {
         None
     }
     fn get_position(&self) -> Vec2 {
-        (self.start.get_pos() + self.end.get_pos()) / 2.
+        (self.start.pos + self.end.pos) / 2.
     }
 
     fn get_modifiers_paths(&self, _: &Size) -> Vec<(BezPath, Pattern)> {
         vec![
             (
-                modifiers_path(self.start.get_pos(), 1., ShapeOblong::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.start.is_selected(), self.start.is_highlighted()),
+                modifiers_path(self.start.pos, 1., ShapeOblong::GRAB_RADIUS),
+                self.get_pattern_modifiers(self.start.selected, self.start.highlighted),
             ),
             (
-                modifiers_path(self.end.get_pos(), 1., ShapeOblong::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.end.is_selected(), self.end.is_highlighted()),
+                modifiers_path(self.end.pos, 1., ShapeOblong::GRAB_RADIUS),
+                self.get_pattern_modifiers(self.end.selected, self.end.highlighted),
             ),
             (
                 modifiers_path(self.get_middle_modifier(), 1., ShapeOblong::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.width.is_selected(), self.width.is_highlighted()),
+                self.get_pattern_modifiers(self.width.selected, self.width.highlighted),
             ),
             (
                 center_path(
-                    (self.start.get_pos() + self.end.get_pos()) / 2.,
+                    (self.start.pos + self.end.pos) / 2.,
                     1.,
                     ShapeOblong::GRAB_RADIUS,
                 ),
@@ -432,8 +383,8 @@ impl ObjectsFuncs for ShapeOblong {
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         let mut paths = vec![];
         let mut texts = vec![];
-        let start = self.start.get_pos();
-        let end = self.end.get_pos();
+        let start = self.start.pos;
+        let end = self.end.pos;
         let length = self.get_length();
         let width = self.get_width();
         let middle1_pt = self.get_middle_modifier();
@@ -467,8 +418,7 @@ impl ObjectsFuncs for ShapeOblong {
         paths
     }
     fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
-        let hs = self.get_hhss();
-        let pattern = match (hs.0, hs.1) {
+        let pattern = match (self.selected, self.highlighted) {
             (false, false) => Pattern::BasicNormal,
             (false, true) => Pattern::BasicHighlighted,
             (true, false) => Pattern::BasicSelected,

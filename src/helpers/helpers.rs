@@ -107,25 +107,25 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> bool {
+    fn set_shape_highlighted_or_selected_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2> {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.set_hs_from_pos(pos, snap, hors),
-            Circle(sh) => sh.set_hs_from_pos(pos, snap, hors),
+            Line(sh) => sh.set_shape_highlighted_or_selected_from_pos(pos, snap, hors),
+            Circle(sh) => sh.set_shape_highlighted_or_selected_from_pos(pos, snap, hors),
         }
     }
-    fn set_hs(&mut self, value: bool, hors: HS) {
+    fn set_shape_highlighted_or_selected(&mut self, value: bool, hors: HS) {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.set_hs(value, hors),
-            Circle(sh) => sh.set_hs(value, hors),
+            Line(sh) => sh.set_shape_highlighted_or_selected(value, hors),
+            Circle(sh) => sh.set_shape_highlighted_or_selected(value, hors),
         }
     }
-    fn get_hs(&self, hors: HS) -> bool {
+    fn get_shape_highlighted_or_selected(&self, hors: HS) -> bool {
         use HelperKind::*;
         match &self {
-            Line(sh) => sh.get_hs(hors),
-            Circle(sh) => sh.get_hs(hors),
+            Line(sh) => sh.get_shape_highlighted_or_selected(hors),
+            Circle(sh) => sh.get_shape_highlighted_or_selected(hors),
         }
     }
     fn get_hhss(&self) -> (bool, bool) {
@@ -136,25 +136,30 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2> {
+    fn set_modifiers_highlighted_or_selected_from_pos(
+        &mut self,
+        pos: Vec2,
+        snap: f64,
+        hors: HS,
+    ) -> bool {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
-            Circle(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
+            Line(sh) => sh.set_modifiers_highlighted_or_selected_from_pos(pos, snap, hors),
+            Circle(sh) => sh.set_modifiers_highlighted_or_selected_from_pos(pos, snap, hors),
         }
     }
-    fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
+    fn set_modifier_highlighted_or_selected(&mut self, value: bool, hors: HS) {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.set_hs_modifiers(value, hors),
-            Circle(sh) => sh.set_hs_modifiers(value, hors),
+            Line(sh) => sh.set_modifier_highlighted_or_selected(value, hors),
+            Circle(sh) => sh.set_modifier_highlighted_or_selected(value, hors),
         }
     }
-    fn get_hs_modifiers(&self, hors: HS) -> bool {
+    fn get_modifiers_highlighted_or_selected(&self, hors: HS) -> bool {
         use HelperKind::*;
         match &self {
-            Line(sh) => sh.get_hs_modifiers(hors),
-            Circle(sh) => sh.get_hs_modifiers(hors),
+            Line(sh) => sh.get_modifiers_highlighted_or_selected(hors),
+            Circle(sh) => sh.get_modifiers_highlighted_or_selected(hors),
         }
     }
 
@@ -166,7 +171,7 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) {
+    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2> {
         use HelperKind::*;
         match self {
             Line(sh) => sh.move_position(dpos, snap),

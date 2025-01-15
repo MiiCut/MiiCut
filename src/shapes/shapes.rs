@@ -4,6 +4,8 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
+use super::shape_custom::ShapeCustom;
+use super::shape_custom::ShapeCustomIter;
 use super::shape_disc::ShapeDisc;
 use super::shape_oblong::ShapeOblong;
 use super::shape_oblong::ShapeOblongIter;
@@ -14,12 +16,12 @@ use super::shape_rectangle_rounded::ShapeRectRoundedIter;
 use super::shapes_pool::BSid;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
+use crate::d1::d1::D1;
 use crate::pools::Pools;
 use crate::traits::*;
 use crate::Action;
 use crate::Position;
 use crate::Value;
-use crate::HS;
 use geo::{OpType, Polygon};
 use kurbo::Circle;
 use kurbo::CirclePathIter;
@@ -82,6 +84,7 @@ pub enum BSKindvars {
     RectangleRounded(Position, Position, Value, Value, Value, Value),
     Disc(Position, Value),
     Oblong(Position, Position, Value),
+    Custom(Vec<D1>),
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +93,7 @@ pub enum BSKind {
     RectangleRounded(ShapeRectRounded),
     Disc(ShapeDisc),
     Oblong(ShapeOblong),
+    Custom(ShapeCustom),
 }
 impl BSKind {
     pub fn get_polygon(&self) -> Polygon<f64> {
@@ -99,6 +103,7 @@ impl BSKind {
             RectangleRounded(sh) => sh.get_polygon(),
             Disc(sh) => sh.get_polygon(),
             Oblong(sh) => sh.get_polygon(),
+            Custom(sh) => sh.get_polygon(),
         }
     }
 }
@@ -110,6 +115,7 @@ impl Display for BSKind {
             RectangleRounded(sh) => write!(f, "{sh}"),
             Disc(sh) => write!(f, "{sh}"),
             Oblong(sh) => write!(f, "{sh}"),
+            Custom(sh) => write!(f, "{sh}"),
         }
     }
 }
@@ -125,6 +131,7 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.save_vars(),
             Disc(sh) => sh.save_vars(),
             Oblong(sh) => sh.save_vars(),
+            Custom(sh) => sh.save_vars(),
         }
     }
     fn restore_saved(&mut self) {
@@ -134,6 +141,7 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.restore_saved(),
             Disc(sh) => sh.restore_saved(),
             Oblong(sh) => sh.restore_saved(),
+            Custom(sh) => sh.restore_saved(),
         }
     }
     fn get_vars(&self) -> BSKindvars {
@@ -143,6 +151,7 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.get_vars(),
             Disc(sh) => sh.get_vars(),
             Oblong(sh) => sh.get_vars(),
+            Custom(sh) => sh.get_vars(),
         }
     }
     fn set_vars(&mut self, vars: &BSKindvars) {
@@ -152,6 +161,7 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.set_vars(vars),
             Disc(sh) => sh.set_vars(vars),
             Oblong(sh) => sh.set_vars(vars),
+            Custom(sh) => sh.set_vars(vars),
         }
     }
     fn good_size(&self) -> bool {
@@ -161,71 +171,28 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.good_size(),
             Disc(sh) => sh.good_size(),
             Oblong(sh) => sh.good_size(),
+            Custom(sh) => sh.good_size(),
         }
     }
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> bool {
+    fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.set_hs_from_pos(pos, snap, hors),
-            RectangleRounded(sh) => sh.set_hs_from_pos(pos, snap, hors),
-            Disc(sh) => sh.set_hs_from_pos(pos, snap, hors),
-            Oblong(sh) => sh.set_hs_from_pos(pos, snap, hors),
+            Rectangle(sh) => sh.get_state(get),
+            RectangleRounded(sh) => sh.get_state(get),
+            Disc(sh) => sh.get_state(get),
+            Oblong(sh) => sh.get_state(get),
+            Custom(sh) => sh.get_state(get),
         }
     }
-    fn set_hs(&mut self, value: bool, hors: HS) {
+    fn set_state(&mut self, set: SetEntityState) {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.set_hs(value, hors),
-            RectangleRounded(sh) => sh.set_hs(value, hors),
-            Disc(sh) => sh.set_hs(value, hors),
-            Oblong(sh) => sh.set_hs(value, hors),
-        }
-    }
-    fn get_hs(&self, hors: HS) -> bool {
-        use BSKind::*;
-        match &self {
-            Rectangle(sh) => sh.get_hs(hors),
-            RectangleRounded(sh) => sh.get_hs(hors),
-            Disc(sh) => sh.get_hs(hors),
-            Oblong(sh) => sh.get_hs(hors),
-        }
-    }
-    fn get_hhss(&self) -> (bool, bool) {
-        use BSKind::*;
-        match &self {
-            Rectangle(sh) => sh.get_hhss(),
-            RectangleRounded(sh) => sh.get_hhss(),
-            Disc(sh) => sh.get_hhss(),
-            Oblong(sh) => sh.get_hhss(),
-        }
-    }
-
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2> {
-        use BSKind::*;
-        match self {
-            Rectangle(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
-            RectangleRounded(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
-            Disc(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
-            Oblong(sh) => sh.set_hs_modifiers_from_pos(pos, snap, hors),
-        }
-    }
-    fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
-        use BSKind::*;
-        match self {
-            Rectangle(sh) => sh.set_hs_modifiers(value, hors),
-            RectangleRounded(sh) => sh.set_hs_modifiers(value, hors),
-            Disc(sh) => sh.set_hs_modifiers(value, hors),
-            Oblong(sh) => sh.set_hs_modifiers(value, hors),
-        }
-    }
-    fn get_hs_modifiers(&self, hors: HS) -> bool {
-        use BSKind::*;
-        match &self {
-            Rectangle(sh) => sh.get_hs_modifiers(hors),
-            RectangleRounded(sh) => sh.get_hs_modifiers(hors),
-            Disc(sh) => sh.get_hs_modifiers(hors),
-            Oblong(sh) => sh.get_hs_modifiers(hors),
+            Rectangle(sh) => sh.set_state(set),
+            RectangleRounded(sh) => sh.set_state(set),
+            Disc(sh) => sh.set_state(set),
+            Oblong(sh) => sh.set_state(set),
+            Custom(sh) => sh.set_state(set),
         }
     }
 
@@ -236,16 +203,18 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.toggle_prop(),
             Disc(sh) => sh.toggle_prop(),
             Oblong(sh) => sh.toggle_prop(),
+            Custom(sh) => sh.toggle_prop(),
         }
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) {
+    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2> {
         use BSKind::*;
         match self {
             Rectangle(sh) => sh.move_position(dpos, snap),
             RectangleRounded(sh) => sh.move_position(dpos, snap),
             Disc(sh) => sh.move_position(dpos, snap),
             Oblong(sh) => sh.move_position(dpos, snap),
+            Custom(sh) => sh.move_position(dpos, snap),
         }
     }
     fn move_modifier(
@@ -261,6 +230,7 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
             Disc(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
             Oblong(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
+            Custom(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
         }
     }
     fn get_position(&self) -> Vec2 {
@@ -270,6 +240,7 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.get_position(),
             Disc(sh) => sh.get_position(),
             Oblong(sh) => sh.get_position(),
+            Custom(sh) => sh.get_position(),
         }
     }
 
@@ -280,6 +251,7 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.get_paths(canvas_size),
             Disc(sh) => sh.get_paths(canvas_size),
             Oblong(sh) => sh.get_paths(canvas_size),
+            Custom(sh) => sh.get_paths(canvas_size),
         }
     }
     fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
@@ -289,6 +261,7 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.get_paths_and_patterns(drawing_area_size),
             Disc(sh) => sh.get_paths_and_patterns(drawing_area_size),
             Oblong(sh) => sh.get_paths_and_patterns(drawing_area_size),
+            Custom(sh) => sh.get_paths_and_patterns(drawing_area_size),
         }
     }
     fn get_modifiers_paths(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
@@ -298,6 +271,7 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.get_modifiers_paths(drawing_area_size),
             Disc(sh) => sh.get_modifiers_paths(drawing_area_size),
             Oblong(sh) => sh.get_modifiers_paths(drawing_area_size),
+            Custom(sh) => sh.get_modifiers_paths(drawing_area_size),
         }
     }
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
@@ -307,6 +281,7 @@ impl ObjectsFuncs for BSKind {
             RectangleRounded(sh) => sh.get_dimensions_paths(),
             Disc(sh) => sh.get_dimensions_paths(),
             Oblong(sh) => sh.get_dimensions_paths(),
+            Custom(sh) => sh.get_dimensions_paths(),
         }
     }
 }
@@ -320,6 +295,7 @@ impl Shape for BSKind {
             RectangleRounded(sh) => BSKindIter::RectangleRoundedIter(sh.path_elements(tolerance)),
             Disc(sh) => BSKindIter::DiscIter(sh.path_elements(tolerance)),
             Oblong(sh) => BSKindIter::OblongIter(sh.path_elements(tolerance)),
+            Custom(sh) => BSKindIter::CustomIter(sh.path_elements(tolerance)),
         }
     }
     #[inline]
@@ -330,6 +306,7 @@ impl Shape for BSKind {
             RectangleRounded(sh) => sh.area(),
             Disc(sh) => sh.area(),
             Oblong(sh) => sh.area(),
+            Custom(sh) => sh.area(),
         }
     }
     #[inline]
@@ -340,6 +317,7 @@ impl Shape for BSKind {
             RectangleRounded(sh) => sh.perimeter(accuracy),
             Disc(sh) => sh.perimeter(accuracy),
             Oblong(sh) => sh.perimeter(accuracy),
+            Custom(sh) => sh.perimeter(accuracy),
         }
     }
     #[inline]
@@ -350,6 +328,7 @@ impl Shape for BSKind {
             RectangleRounded(sh) => sh.winding(pt),
             Disc(sh) => sh.winding(pt),
             Oblong(sh) => sh.winding(pt),
+            Custom(sh) => sh.winding(pt),
         }
     }
     #[inline]
@@ -360,6 +339,7 @@ impl Shape for BSKind {
             RectangleRounded(sh) => sh.bounding_box(),
             Disc(sh) => sh.bounding_box(),
             Oblong(sh) => sh.bounding_box(),
+            Custom(sh) => sh.bounding_box(),
         }
     }
     #[inline]
@@ -370,6 +350,7 @@ impl Shape for BSKind {
             RectangleRounded(sh) => sh.as_circle(),
             Disc(sh) => sh.as_circle(),
             Oblong(sh) => sh.as_circle(),
+            Custom(sh) => sh.as_circle(),
         }
     }
     #[inline]
@@ -380,6 +361,7 @@ impl Shape for BSKind {
             RectangleRounded(sh) => sh.contains(pt),
             Disc(sh) => sh.contains(pt),
             Oblong(sh) => sh.contains(pt),
+            Custom(sh) => sh.contains(pt),
         }
     }
 }
@@ -388,16 +370,19 @@ pub enum BSKindIter {
     RectangleRoundedIter(ShapeRectRoundedIter),
     DiscIter(CirclePathIter),
     OblongIter(ShapeOblongIter),
+    CustomIter(ShapeCustomIter),
 }
 impl Iterator for BSKindIter {
     type Item = PathEl;
     fn next(&mut self) -> Option<Self::Item> {
         use BSKindIter::*;
+        log!("BSKindIter::next");
         match self {
             RectangleIter(sh) => sh.next(),
             RectangleRoundedIter(sh) => sh.next(),
             DiscIter(sh) => sh.next(),
             OblongIter(sh) => sh.next(),
+            CustomIter(sh) => sh.next(),
         }
     }
 }
@@ -447,7 +432,6 @@ impl BoolOps {
 pub struct BasicShape {
     shid: BSid,
     shape_kind: BSKind,
-
     boolean_op: BoolOps,
 }
 impl BasicShape {

@@ -1,9 +1,27 @@
-use crate::{
-    canvas::{CanvasText, Pattern},
-    HS,
-};
+use crate::canvas::{CanvasText, Pattern};
 use kurbo::{BezPath, Size, Vec2};
 use std::fmt::Debug;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GetEntityState {
+    IsSelected,
+    IsHighlighted,
+    IsAnyModifierSelected,
+    IsAnyModifierHighlighted,
+}
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SetEntityState {
+    SetSelect(bool),
+    SelectFromPos(Vec2, f64, f64),
+    SetHighlight(bool),
+    HighlightFromPos(Vec2, f64, f64),
+
+    SelectAllModifiers(bool),
+    SelectModifierFromPos(Vec2, f64, f64),
+
+    HighlightAllModifiers(bool),
+    HighlightModifierFromPos(Vec2, f64, f64),
+}
 
 pub trait NewId {
     fn new() -> Self;
@@ -32,18 +50,12 @@ pub trait ObjectsFuncs: Debug + Clone {
     fn set_vars(&mut self, vars: &Self::Kindvars);
     fn good_size(&self) -> bool;
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> bool;
-    fn set_hs(&mut self, value: bool, hors: HS);
-    fn get_hs(&self, hors: HS) -> bool;
-    fn get_hhss(&self) -> (bool, bool);
-
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2>;
-    fn set_hs_modifiers(&mut self, value: bool, hors: HS);
-    fn get_hs_modifiers(&self, hors: HS) -> bool;
+    fn get_state(&self, get: GetEntityState) -> Option<Vec2>;
+    fn set_state(&mut self, set: SetEntityState);
 
     fn toggle_prop(&mut self);
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64);
+    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2>;
     fn move_modifier(
         &mut self,
         pos_init: Vec2,

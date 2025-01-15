@@ -9,7 +9,7 @@ use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
-    positions::{Position, Value, HS},
+    positions::{Position, Value},
     prefab::{center_path, modifiers_path},
     traits::*,
 };
@@ -34,7 +34,7 @@ impl ShapeDisc {
     pub fn new(center: Vec2, _pos2: Vec2) -> BSKind {
         let center = Position::new(center, false);
         let mut radius = Value::new(0.);
-        radius.select(true);
+        radius.selected = true;
 
         BSKind::Disc(ShapeDisc {
             center,
@@ -55,14 +55,28 @@ impl ShapeDisc {
     }
 
     fn get_circle(&self) -> Circle {
-        let center = self.center.get_pos();
-        let radius = self.radius.get_val();
+        let center = self.center.pos;
+        let radius = self.radius.value;
         Circle::new(center.to_point(), radius)
     }
     fn get_radius_modifier(&self) -> Vec2 {
-        let center = self.center.get_pos();
-        let radius = self.radius.get_val();
+        let center = self.center.pos;
+        let radius = self.radius.value;
         center + Vec2::new(radius, 0.)
+    }
+
+    fn highlight_all_modifiers(&mut self, value: bool) {
+        self.radius.highlighted = value;
+    }
+    fn select_all_modifiers(&mut self, value: bool) {
+        self.radius.selected = value;
+    }
+
+    fn highlight_modifiers_from_pos(&mut self, pos: Vec2, grab: f64) {
+        self.radius.highlighted = (pos - self.get_radius_modifier()).hypot() < grab;
+    }
+    fn select_modifiers_from_pos(&mut self, pos: Vec2, grab: f64) {
+        self.radius.selected = (pos - self.get_radius_modifier()).hypot() < grab;
     }
 }
 impl Display for ShapeDisc {
@@ -107,12 +121,12 @@ impl ObjectsFuncs for ShapeDisc {
     type Kindvars = BSKindvars;
 
     fn save_vars(&mut self) {
-        self.center.save_pos();
-        self.radius.save_val();
+        self.center.saved_pos = self.center.pos;
+        self.radius.saved_val = self.radius.value;
     }
     fn restore_saved(&mut self) {
-        self.center.restore_saved();
-        self.radius.restore_saved();
+        self.center.pos = self.center.saved_pos;
+        self.radius.value = self.radius.saved_val;
         self.update_polygon();
     }
     fn get_vars(&self) -> BSKindvars {
@@ -126,66 +140,65 @@ impl ObjectsFuncs for ShapeDisc {
         self.update_polygon();
     }
     fn good_size(&self) -> bool {
-        self.radius.get_val() >= ShapeDisc::MIN_RADIUS
+        self.radius.value >= ShapeDisc::MIN_RADIUS
     }
 
-    fn set_hs_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> bool {
-        match hors {
-            HS::Highlight => {
-                self.highlighted = self.contains(pos.to_point());
-                self.highlighted
+    fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
+        use GetEntityState::*;
+        match get {
+            IsSelected => {
+                if self.selected {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
             }
-            HS::Select => {
+            IsHighlighted => {
+                if self.highlighted {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
+            }
+            IsAnyModifierSelected => {
+                let select = self.radius.selected;
+                if select {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
+            }
+            IsAnyModifierHighlighted => {
+                let highlight = self.radius.highlighted;
+                if highlight {
+                    Some(self.get_position())
+                } else {
+                    None
+                }
+            }
+        }
+    }
+    fn set_state(&mut self, set: SetEntityState) {
+        use SetEntityState::*;
+        match set {
+            SetSelect(value) => self.selected = value,
+            SelectFromPos(pos, ..) => {
                 self.selected = self.contains(pos.to_point());
-                self.selected
             }
-        }
-    }
-    fn set_hs(&mut self, value: bool, hors: HS) {
-        match hors {
-            HS::Highlight => self.highlighted = value,
-            HS::Select => self.selected = value,
-        }
-    }
-    fn get_hs(&self, hors: HS) -> bool {
-        match hors {
-            HS::Highlight => self.highlighted,
-            HS::Select => self.selected,
-        }
-    }
-    fn get_hhss(&self) -> (bool, bool) {
-        (self.selected, self.highlighted)
-    }
-    fn set_hs_modifiers_from_pos(&mut self, pos: Vec2, _snap: f64, hors: HS) -> Option<Vec2> {
-        let hs: bool = (pos - self.get_radius_modifier()).hypot() < Self::GRAB_RADIUS;
-        if hs {
-            match hors {
-                HS::Highlight => self.radius.highlight(true),
-                HS::Select => self.radius.select(true),
+            SetHighlight(value) => self.highlighted = value,
+            HighlightFromPos(pos, ..) => {
+                self.highlighted = self.contains(pos.to_point());
             }
-            return Some(self.get_radius_modifier());
-        } else {
-            match hors {
-                HS::Highlight => self.radius.highlight(false),
-                HS::Select => self.radius.select(false),
+
+            SelectAllModifiers(value) => self.select_all_modifiers(value),
+            SelectModifierFromPos(pos, precision, _) => {
+                self.select_modifiers_from_pos(pos, precision);
             }
-        }
-        None
-    }
-    fn set_hs_modifiers(&mut self, value: bool, hors: HS) {
-        match hors {
-            HS::Highlight => {
-                self.radius.highlight(value);
+
+            HighlightAllModifiers(value) => self.highlight_all_modifiers(value),
+            HighlightModifierFromPos(pos, precision, _) => {
+                self.highlight_modifiers_from_pos(pos, precision);
             }
-            HS::Select => {
-                self.radius.select(value);
-            }
-        }
-    }
-    fn get_hs_modifiers(&self, hors: HS) -> bool {
-        match hors {
-            HS::Highlight => self.radius.is_highlighted(),
-            HS::Select => self.radius.is_selected(),
         }
     }
 
@@ -193,10 +206,10 @@ impl ObjectsFuncs for ShapeDisc {
         ()
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) {
-        self.center
-            .set_pos(snap_pt(self.center.get_saved_pos() + dpos, snap));
+    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2> {
+        self.center.pos = snap_pt(self.center.saved_pos + dpos, snap);
         self.update_polygon();
+        Some(self.get_position())
     }
     fn move_modifier(
         &mut self,
@@ -206,10 +219,10 @@ impl ObjectsFuncs for ShapeDisc {
         _shift_pressed: bool,
     ) -> Option<Vec2> {
         let dpos = pos - pos_init;
-        let saved_radius = self.radius.get_saved_val();
+        let saved_radius = self.radius.saved_val;
         let radius = snap_val(saved_radius + dpos.x, snap);
         if radius >= ShapeDisc::MIN_RADIUS {
-            self.radius.set_val(radius);
+            self.radius.value = radius;
             self.update_polygon();
             Some(self.get_radius_modifier())
         } else {
@@ -217,17 +230,17 @@ impl ObjectsFuncs for ShapeDisc {
         }
     }
     fn get_position(&self) -> Vec2 {
-        self.center.get_pos()
+        self.center.pos
     }
 
     fn get_modifiers_paths(&self, _: &Size) -> Vec<(BezPath, Pattern)> {
         vec![
             (
                 modifiers_path(self.get_radius_modifier(), 1., ShapeDisc::GRAB_RADIUS),
-                self.get_pattern_modifiers(self.radius.is_selected(), self.radius.is_highlighted()),
+                self.get_pattern_modifiers(self.radius.selected, self.radius.highlighted),
             ),
             (
-                center_path(self.center.get_pos(), 1., ShapeDisc::GRAB_RADIUS),
+                center_path(self.center.pos, 1., ShapeDisc::GRAB_RADIUS),
                 self.get_pattern_modifiers(self.selected, self.highlighted),
             ),
         ]
@@ -235,15 +248,10 @@ impl ObjectsFuncs for ShapeDisc {
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         let mut paths = vec![];
         let mut texts = vec![];
-        let offset = self.radius.get_val() / 2_f64.sqrt();
-        let end = self.center.get_pos() + Vec2::new(offset, -offset);
-        let (path, text) = Dimension::new(
-            DimKind::Radius,
-            self.center.get_pos(),
-            end,
-            self.radius.get_val(),
-        )
-        .get_path();
+        let offset = self.radius.value / 2_f64.sqrt();
+        let end = self.center.pos + Vec2::new(offset, -offset);
+        let (path, text) =
+            Dimension::new(DimKind::Radius, self.center.pos, end, self.radius.value).get_path();
         paths.push(path);
         texts.push(text);
         (paths, texts)
@@ -252,8 +260,7 @@ impl ObjectsFuncs for ShapeDisc {
         vec![self.get_circle().to_path(Self::TOLERANCE)]
     }
     fn get_paths_and_patterns(&self, drawing_area_size: &Size) -> Vec<(BezPath, Pattern)> {
-        let hs = self.get_hhss();
-        let pattern = match (hs.0, hs.1) {
+        let pattern = match (self.selected, self.highlighted) {
             (false, false) => Pattern::BasicNormal,
             (false, true) => Pattern::BasicHighlighted,
             (true, false) => Pattern::BasicSelected,
