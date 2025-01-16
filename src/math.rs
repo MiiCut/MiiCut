@@ -1201,3 +1201,114 @@ pub fn is_near_arc(start: Vec2, end: Vec2, radius: f64, pos: Vec2, precision: f6
     let dist = (pos - center).hypot();
     dist > radius - precision && dist < radius + precision && angle.abs() < std::f64::consts::PI
 }
+
+// pub fn get_arc_center(start: Vec2, end: Vec2, radius: f64, up: bool) -> Vec2 {
+//     let midpoint = (start + end) / 2.0;
+//     let segment = end - start;
+//     let direction = Vec2::new(-segment.y, segment.x).normalize();
+//     midpoint + direction * if up { radius } else { -radius }
+// }
+pub fn get_arc_center(start: Vec2, end: Vec2, radius: f64, up: bool) -> Vec2 {
+    let chord_midpoint = (start + end) / 2.0;
+    let chord_vector = end - start;
+    let perpendicular = Vec2::new(-chord_vector.y, chord_vector.x).normalize();
+    let chord_length = chord_vector.hypot() / 2.0;
+
+    // Compute the distance from the midpoint to the center
+    let height = (radius.powi(2) - chord_length.powi(2)).sqrt();
+
+    if up {
+        chord_midpoint + perpendicular * height
+    } else {
+        chord_midpoint - perpendicular * height
+    }
+}
+
+pub fn create_arc(start: Vec2, end: Vec2, radius: f64, up: bool) -> Arc {
+    // Determine the arc center based on `up` boolean
+    let center = get_arc_center(start, end, radius, up);
+
+    // Calculate the angles for the arc and normalize to [0, 2π]
+    let start_angle = (start - center)
+        .atan2()
+        .rem_euclid(2.0 * std::f64::consts::PI);
+    let end_angle = (end - center)
+        .atan2()
+        .rem_euclid(2.0 * std::f64::consts::PI);
+
+    // Calculate the sweep angle
+    let sweep_angle = if up {
+        (end_angle - start_angle).rem_euclid(2.0 * std::f64::consts::PI)
+    } else {
+        -(start_angle - end_angle).rem_euclid(2.0 * std::f64::consts::PI)
+    };
+
+    // Create the arc
+    Arc {
+        center: center.to_point(),
+        radii: Vec2::new(radius, radius),
+        start_angle,
+        sweep_angle,
+        x_rotation: 0.0,
+    }
+}
+
+pub fn is_point_near_arc(arc: &Arc, point: Vec2, tolerance: f64) -> bool {
+    // Calculate the center-to-point vector
+    let center_to_point = point - arc.center.to_vec2();
+
+    // Calculate the distance from the center to the point
+    let distance = center_to_point.hypot();
+
+    // Check if the distance is within the radius ± tolerance
+    if (distance - arc.radii.x).abs() > tolerance {
+        return false;
+    }
+
+    // Calculate the angle from the center to the point and normalize to [0, 2π]
+    let point_angle = center_to_point
+        .atan2()
+        .rem_euclid(2.0 * std::f64::consts::PI);
+
+    // Normalize the arc's start and end angles to [0, 2π]
+    let start_angle = arc.start_angle.rem_euclid(2.0 * std::f64::consts::PI);
+    let end_angle = (arc.start_angle + arc.sweep_angle).rem_euclid(2.0 * std::f64::consts::PI);
+
+    // Check if the point's angle is within the arc's angle range
+    if arc.sweep_angle > 0.0 {
+        // Counterclockwise arc
+        if start_angle <= end_angle {
+            point_angle >= start_angle && point_angle <= end_angle
+        } else {
+            // Wrapped around 0
+            point_angle >= start_angle || point_angle <= end_angle
+        }
+    } else {
+        // Clockwise arc
+        if end_angle <= start_angle {
+            point_angle <= start_angle && point_angle >= end_angle
+        } else {
+            // Wrapped around 0
+            point_angle <= start_angle || point_angle >= end_angle
+        }
+    }
+}
+
+/// Get the middle point of an arc
+pub fn middle_point_of_arc(arc: &Arc) -> Vec2 {
+    // Calculate the mid-angle
+    let mid_angle = arc.start_angle + arc.sweep_angle / 2.0;
+
+    // Calculate the x and y coordinates of the middle point
+    Vec2::new(
+        arc.center.x + mid_angle.cos() * arc.radii.x,
+        arc.center.y + mid_angle.sin() * arc.radii.y,
+    )
+}
+
+pub fn get_arc_radius(start: Vec2, end: Vec2, current_radius: f64, pos: Vec2, up: bool) -> f64 {
+    // Compute the current arc center
+    let current_center = get_arc_center(start, end, current_radius, up);
+    // Compute the new radius based on the cursor's distance to the current center
+    (pos - current_center).hypot()
+}

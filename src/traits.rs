@@ -5,22 +5,22 @@ use std::fmt::Debug;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GetEntityState {
     IsSelected,
-    IsHighlighted,
+    IsHighligh,
     IsAnyModifierSelected,
-    IsAnyModifierHighlighted,
+    IsAnyModifierHighligh,
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SetEntityState {
     SetSelect(bool),
     SelectFromPos(Vec2, f64, f64),
-    SetHighlight(bool),
-    HighlightFromPos(Vec2, f64, f64),
+    SetHighli(bool),
+    HighliFromPos(Vec2, f64, f64),
 
     SelectAllModifiers(bool),
     SelectModifierFromPos(Vec2, f64, f64),
 
-    HighlightAllModifiers(bool),
-    HighlightModifierFromPos(Vec2, f64, f64),
+    HighliAllModifiers(bool),
+    HighliModifierFromPos(Vec2, f64, f64),
 }
 
 pub trait NewId {

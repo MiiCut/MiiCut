@@ -107,7 +107,7 @@ impl ObjectsFuncs for HelperLine {
                     None
                 }
             }
-            IsHighlighted => {
+            IsHighligh => {
                 if self.highlighted {
                     Some(self.get_position())
                 } else {
@@ -122,7 +122,7 @@ impl ObjectsFuncs for HelperLine {
                     None
                 }
             }
-            IsAnyModifierHighlighted => {
+            IsAnyModifierHighligh => {
                 let highlight = self.angle.highlighted;
                 if highlight {
                     Some(self.get_position())
@@ -139,8 +139,8 @@ impl ObjectsFuncs for HelperLine {
             SelectFromPos(pos, ..) => {
                 self.selected = (pos - self.center.pos).hypot() < Self::GRAB_RADIUS;
             }
-            SetHighlight(value) => self.highlighted = value,
-            HighlightFromPos(pos, ..) => {
+            SetHighli(value) => self.highlighted = value,
+            HighliFromPos(pos, ..) => {
                 self.highlighted = (pos - self.center.pos).hypot() < Self::GRAB_RADIUS;
             }
 
@@ -149,8 +149,8 @@ impl ObjectsFuncs for HelperLine {
                 self.select_modifiers_from_pos(pos, precision);
             }
 
-            HighlightAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighlightModifierFromPos(pos, precision, _) => {
+            HighliAllModifiers(value) => self.highlight_all_modifiers(value),
+            HighliModifierFromPos(pos, precision, _) => {
                 self.highlight_modifiers_from_pos(pos, precision);
             }
         }

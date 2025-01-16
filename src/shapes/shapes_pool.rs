@@ -134,7 +134,7 @@ impl ShapesPool {
             self.shapes.values_mut().for_each(|shape| {
                 shape
                     .get_kind_mut()
-                    .set_state(HighlightFromPos(pos, snap, 5.0))
+                    .set_state(HighliFromPos(pos, snap, 5.0))
             });
         } else {
             // If Select, update the ShapeSelector and return the position of the selected shape
@@ -173,7 +173,7 @@ impl ShapesPool {
         match hors {
             HS::Highlight => {
                 self.shapes.values_mut().for_each(|shape| {
-                    shape.get_kind_mut().set_state(SetHighlight(value));
+                    shape.get_kind_mut().set_state(SetHighli(value));
                 });
             }
             HS::Select => {
@@ -189,7 +189,7 @@ impl ShapesPool {
         match hors {
             HS::Highlight => {
                 for shape in self.shapes.values() {
-                    if shape.get_kind().get_state(IsHighlighted).is_some() {
+                    if shape.get_kind().get_state(IsHighligh).is_some() {
                         result.push(shape.get_id());
                     }
                 }
@@ -218,7 +218,7 @@ impl ShapesPool {
         match hors {
             HS::Highlight => {
                 for shape in self.shapes.values() {
-                    if shape.get_kind().get_state(IsHighlighted).is_some() {
+                    if shape.get_kind().get_state(IsHighligh).is_some() {
                         result.push((shape.get_id(), shape.get_kind().get_vars()));
                     }
                 }
@@ -238,7 +238,7 @@ impl ShapesPool {
         if let Some(shape) = self.shapes.get_mut(&shid) {
             match hors {
                 HS::Highlight => {
-                    shape.get_kind_mut().set_state(SetHighlight(value));
+                    shape.get_kind_mut().set_state(SetHighli(value));
                 }
                 HS::Select => {
                     shape.get_kind_mut().set_state(SetSelect(value));
@@ -254,14 +254,14 @@ impl ShapesPool {
                 self.shapes.values_mut().for_each(|shape| {
                     shape
                         .get_kind_mut()
-                        .set_state(HighlightModifierFromPos(pos, snap, 5.0));
+                        .set_state(HighliModifierFromPos(pos, snap, 5.0));
                 });
 
                 let mut highlighted = false;
                 for shape in self.shapes.values() {
                     if shape
                         .get_kind()
-                        .get_state(IsAnyModifierHighlighted)
+                        .get_state(IsAnyModifierHighligh)
                         .is_some()
                     {
                         highlighted = true;
@@ -293,7 +293,7 @@ impl ShapesPool {
         match hors {
             HS::Highlight => {
                 self.shapes.values_mut().for_each(|shape| {
-                    shape.get_kind_mut().set_state(HighlightAllModifiers(value));
+                    shape.get_kind_mut().set_state(HighliAllModifiers(value));
                 });
             }
             HS::Select => {

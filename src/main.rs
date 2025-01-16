@@ -1232,6 +1232,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
             }
         }
         if keyboard_event.key() == "Tab" {
+            use GetEntityState::*;
             let shift_pressed = avb.keys_states.shift_pressed;
             let o_shid = avb
                 .pools
@@ -1239,6 +1240,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
                 .get_first_selected_modifier_vars()
                 .and_then(|(shid, _)| Some(shid));
             if let Some(shid) = o_shid {
+                let mut pointer = None;
                 avb.pools
                     .shapes
                     .get_shape_mut(shid)
@@ -1252,17 +1254,55 @@ fn on_window_keydown(av: RefAV, event: Event) {
                     .map(|shape_custom| {
                         let d1s = shape_custom.get_d1s_mut();
                         d1s.iter_mut().for_each(|d1| {
-                            if d1.get_selected() {
-                                log!("D1: {:?}", d1.get_kind());
+                            if d1.get_state(IsSelected).is_some() {
                                 if shift_pressed {
-                                    d1.get_kind_mut().prev_kind();
+                                    pointer = Some(d1.set_d1_kind_prev());
                                 } else {
-                                    d1.get_kind_mut().next_kind();
+                                    pointer = Some(d1.set_d1_kind_next());
                                 }
+                                log!("Switched to: {:?}", d1.get_d1_kind());
                             }
                         });
                         shape_custom.update_polygon();
                     });
+                pointer.map(|pos| {
+                    avb.pointer.pos.pos = pos;
+                });
+                avb.pools.recalc_full_segs();
+            }
+        }
+        if keyboard_event.key() == " " {
+            use GetEntityState::*;
+            let o_shid = avb
+                .pools
+                .shapes
+                .get_first_selected_modifier_vars()
+                .and_then(|(shid, _)| Some(shid));
+            if let Some(shid) = o_shid {
+                let mut pointer = None;
+                avb.pools
+                    .shapes
+                    .get_shape_mut(shid)
+                    .and_then(|shape| {
+                        if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
+                            Some(shape_custom)
+                        } else {
+                            None
+                        }
+                    })
+                    .map(|shape_custom| {
+                        let d1s = shape_custom.get_d1s_mut();
+                        d1s.iter_mut().for_each(|d1| {
+                            if d1.get_state(IsSelected).is_some() {
+                                pointer = Some(d1.toogle());
+                                log!("toogle");
+                            }
+                        });
+                        shape_custom.update_polygon();
+                    });
+                if let Some(pos) = pointer {
+                    avb.pointer.pos.pos = pos;
+                };
                 avb.pools.recalc_full_segs();
             }
         }
@@ -1424,12 +1464,9 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     use GetEntityState::*;
     for shape in avb.pools.shapes.values() {
         if shape.get_kind().get_state(IsSelected).is_some()
-            || shape.get_kind().get_state(IsHighlighted).is_some()
+            || shape.get_kind().get_state(IsHighligh).is_some()
             || shape.get_kind().get_state(IsAnyModifierSelected).is_some()
-            || shape
-                .get_kind()
-                .get_state(IsAnyModifierHighlighted)
-                .is_some()
+            || shape.get_kind().get_state(IsAnyModifierHighligh).is_some()
         {
             let (path, texts) = shape.get_kind().get_dimensions_paths();
             avb.canvases.draw_path(&CanvasKind::Draw, path, texts);
@@ -1455,12 +1492,9 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     // HELPERS: Draw dimensions
     for helper in avb.pools.helpers.values() {
         if helper.get_kind().get_state(IsSelected).is_some()
-            || helper.get_kind().get_state(IsHighlighted).is_some()
+            || helper.get_kind().get_state(IsHighligh).is_some()
             || helper.get_kind().get_state(IsAnyModifierSelected).is_some()
-            || helper
-                .get_kind()
-                .get_state(IsAnyModifierHighlighted)
-                .is_some()
+            || helper.get_kind().get_state(IsAnyModifierHighligh).is_some()
         {
             let (path, texts) = helper.get_kind().get_dimensions_paths();
             avb.canvases.draw_path(&CanvasKind::Draw, path, texts);

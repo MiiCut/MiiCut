@@ -241,7 +241,7 @@ impl ObjectsFuncs for ShapeRectangle {
                     None
                 }
             }
-            IsHighlighted => {
+            IsHighligh => {
                 if self.highlighted {
                     Some(self.get_position())
                 } else {
@@ -264,7 +264,7 @@ impl ObjectsFuncs for ShapeRectangle {
                     None
                 }
             }
-            IsAnyModifierHighlighted => {
+            IsAnyModifierHighligh => {
                 let highlight = self.tl.highlighted
                     || self.tr.highlighted
                     || self.br.highlighted
@@ -288,8 +288,8 @@ impl ObjectsFuncs for ShapeRectangle {
             SelectFromPos(pos, ..) => {
                 self.selected = self.contains(pos.to_point());
             }
-            SetHighlight(value) => self.highlighted = value,
-            HighlightFromPos(pos, ..) => {
+            SetHighli(value) => self.highlighted = value,
+            HighliFromPos(pos, ..) => {
                 self.highlighted = self.contains(pos.to_point());
             }
 
@@ -298,8 +298,8 @@ impl ObjectsFuncs for ShapeRectangle {
                 self.select_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
 
-            HighlightAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighlightModifierFromPos(pos, ..) => {
+            HighliAllModifiers(value) => self.highlight_all_modifiers(value),
+            HighliModifierFromPos(pos, ..) => {
                 self.highlight_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
         }

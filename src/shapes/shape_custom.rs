@@ -7,7 +7,7 @@
 use super::shapes::{BSKind, BSKindvars};
 use crate::{
     canvas::{CanvasText, Pattern},
-    d1::d1::{D1Kind, D1},
+    d1::{d1::D1, primitives::D1Kind},
     math::*,
     positions::Position,
     prefab::{center_path, modifiers_path},
@@ -44,11 +44,11 @@ impl ShapeCustom {
     pub fn add_point(&mut self, pos: Vec2) {
         // Get the last line drawn
         if let Some(last_line) = self.d1s.last_mut() {
-            if let D1Kind::D1KLine = last_line.get_kind() {
+            if let D1Kind::D1KLine = last_line.get_d1_kind() {
                 if let Some(current_pos) = &mut self.current_creation_pos {
                     current_pos.pos = pos;
                     current_pos.saved_pos = pos;
-                    last_line.set_end(pos);
+                    last_line.set_end_position(pos);
                     self.d1s.push(D1::new(D1Kind::D1KLine, pos, pos));
                     self.update_polygon();
                 }
@@ -60,8 +60,8 @@ impl ShapeCustom {
             self.current_creation_pos = None;
             let first_pos = self.d1s.first().unwrap().get_start_position();
             if let Some(last_d1) = self.d1s.last_mut() {
-                if let D1Kind::D1KLine = last_d1.get_kind() {
-                    last_d1.set_end(first_pos);
+                if let D1Kind::D1KLine = last_d1.get_d1_kind() {
+                    last_d1.set_end_position(first_pos);
                 }
             }
             self.update_polygon();
@@ -72,7 +72,6 @@ impl ShapeCustom {
             false
         }
     }
-
     pub fn get_polygon(&self) -> Polygon<f64> {
         self.polygon.clone()
     }
@@ -115,9 +114,15 @@ impl ShapeCustom {
         }
         Rect::new(min_x, min_y, max_x, max_y)
     }
-
     pub fn get_d1s_mut(&mut self) -> &mut Vec<D1> {
         &mut self.d1s
+    }
+    fn get_vertices_centroid(&self) -> Vec2 {
+        let mut centroid = Vec2::ZERO;
+        self.d1s.iter().for_each(|d1kind| {
+            centroid += d1kind.get_start_position();
+        });
+        centroid / self.d1s.len() as f64
     }
 }
 impl Display for ShapeCustom {
@@ -207,7 +212,7 @@ impl ObjectsFuncs for ShapeCustom {
                     None
                 }
             }
-            IsHighlighted => {
+            IsHighligh => {
                 if self.highlighted {
                     Some(self.get_position())
                 } else {
@@ -225,10 +230,10 @@ impl ObjectsFuncs for ShapeCustom {
                     None
                 }
             }
-            IsAnyModifierHighlighted => {
+            IsAnyModifierHighligh => {
                 let highlighted = self.d1s.iter().any(|d1kind| {
-                    d1kind.get_state(IsAnyModifierHighlighted).is_some()
-                        || d1kind.get_state(IsHighlighted).is_some()
+                    d1kind.get_state(IsAnyModifierHighligh).is_some()
+                        || d1kind.get_state(IsHighligh).is_some()
                 });
                 if highlighted {
                     Some(self.get_position())
@@ -239,59 +244,58 @@ impl ObjectsFuncs for ShapeCustom {
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
-        use GetEntityState::*;
         use SetEntityState::*;
         match set {
-            SetHighlight(value) => self.highlighted = value,
-            HighlightFromPos(pos, ..) => {
+            SetHighli(value) => self.highlighted = value,
+            SetSelect(value) => self.selected = value,
+
+            HighliFromPos(pos, ..) => {
+                log!("contains");
                 self.highlighted = self.contains(pos.to_point());
             }
-            SetSelect(value) => self.selected = value,
             SelectFromPos(pos, ..) => self.selected = self.contains(pos.to_point()),
 
             SelectAllModifiers(value) => {
                 self.d1s.iter_mut().for_each(|d1kind| {
-                    d1kind.set_state(SelectAllModifiers(value));
+                    d1kind.set_state(SetSelect(value));
                 });
             }
+            HighliAllModifiers(value) => {
+                self.d1s.iter_mut().for_each(|d1kind| {
+                    d1kind.set_state(SetHighli(value));
+                });
+            }
+
             SelectModifierFromPos(pos, ..) => {
+                // Reset d1 selection and d1 modifiers selection
                 self.d1s.iter_mut().for_each(|d1kind| {
                     d1kind.set_state(SelectAllModifiers(false));
                     d1kind.set_state(SetSelect(false));
                 });
+
                 for d1kind in self.d1s.iter_mut() {
                     d1kind.set_state(SelectModifierFromPos(
                         pos,
                         Self::GRAB_RADIUS,
                         Self::GRAB_RADIUS,
                     ));
-                }
-                for d1kind in self.d1s.iter_mut() {
                     d1kind.set_state(SelectFromPos(pos, Self::GRAB_RADIUS, Self::GRAB_RADIUS));
                 }
             }
-
-            HighlightAllModifiers(value) => {
+            HighliModifierFromPos(pos, ..) => {
+                // Reset d1 highlight and d1 modifiers highlight
                 self.d1s.iter_mut().for_each(|d1kind| {
-                    d1kind.set_state(HighlightAllModifiers(value));
+                    d1kind.set_state(HighliAllModifiers(false));
+                    d1kind.set_state(SetHighli(false));
                 });
-            }
-            HighlightModifierFromPos(pos, ..) => {
+
                 for d1kind in self.d1s.iter_mut() {
-                    d1kind.set_state(HighlightModifierFromPos(
+                    d1kind.set_state(HighliModifierFromPos(
                         pos,
                         Self::GRAB_RADIUS,
                         Self::GRAB_RADIUS,
                     ));
-                    d1kind.set_state(HighlightFromPos(pos, Self::GRAB_RADIUS, Self::GRAB_RADIUS));
-                }
-                let mut modifier_highlighted = false;
-                self.d1s.iter_mut().for_each(|d1kind| {
-                    modifier_highlighted |= d1kind.get_state(IsHighlighted).is_some();
-                });
-
-                if modifier_highlighted {
-                    self.highlighted = false;
+                    d1kind.set_state(HighliFromPos(pos, Self::GRAB_RADIUS, Self::GRAB_RADIUS));
                 }
             }
         }
@@ -325,8 +329,8 @@ impl ObjectsFuncs for ShapeCustom {
             current_pos.pos = current_pos.saved_pos + dpos;
             // Update the last line
             if let Some(last_line) = self.d1s.last_mut() {
-                if let D1Kind::D1KLine = last_line.get_kind() {
-                    last_line.set_end(current_pos.pos);
+                if let D1Kind::D1KLine = last_line.get_d1_kind() {
+                    last_line.set_end_position(current_pos.pos);
                 }
             }
             let pos = current_pos.pos;
@@ -351,12 +355,7 @@ impl ObjectsFuncs for ShapeCustom {
         }
     }
     fn get_position(&self) -> Vec2 {
-        // Geometrical center (from line segments)
-        let mut geo_center = Vec2::ZERO;
-        self.d1s.iter().for_each(|d1kind| {
-            geo_center += d1kind.get_start_position();
-        });
-        geo_center / self.d1s.len() as f64
+        self.get_vertices_centroid()
     }
     fn get_mod_paths_and_patterns(
         &self,

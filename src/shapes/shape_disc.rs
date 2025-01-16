@@ -153,7 +153,7 @@ impl ObjectsFuncs for ShapeDisc {
                     None
                 }
             }
-            IsHighlighted => {
+            IsHighligh => {
                 if self.highlighted {
                     Some(self.get_position())
                 } else {
@@ -168,7 +168,7 @@ impl ObjectsFuncs for ShapeDisc {
                     None
                 }
             }
-            IsAnyModifierHighlighted => {
+            IsAnyModifierHighligh => {
                 let highlight = self.radius.highlighted;
                 if highlight {
                     Some(self.get_position())
@@ -185,8 +185,8 @@ impl ObjectsFuncs for ShapeDisc {
             SelectFromPos(pos, ..) => {
                 self.selected = self.contains(pos.to_point());
             }
-            SetHighlight(value) => self.highlighted = value,
-            HighlightFromPos(pos, ..) => {
+            SetHighli(value) => self.highlighted = value,
+            HighliFromPos(pos, ..) => {
                 self.highlighted = self.contains(pos.to_point());
             }
 
@@ -195,8 +195,8 @@ impl ObjectsFuncs for ShapeDisc {
                 self.select_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
 
-            HighlightAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighlightModifierFromPos(pos, ..) => {
+            HighliAllModifiers(value) => self.highlight_all_modifiers(value),
+            HighliModifierFromPos(pos, ..) => {
                 self.highlight_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
         }

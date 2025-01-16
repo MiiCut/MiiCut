@@ -227,7 +227,7 @@ impl ObjectsFuncs for ShapeOblong {
                     None
                 }
             }
-            IsHighlighted => {
+            IsHighligh => {
                 if self.highlighted {
                     Some(self.get_position())
                 } else {
@@ -242,7 +242,7 @@ impl ObjectsFuncs for ShapeOblong {
                     None
                 }
             }
-            IsAnyModifierHighlighted => {
+            IsAnyModifierHighligh => {
                 let highlight =
                     self.start.highlighted || self.end.highlighted || self.width.highlighted;
                 if highlight {
@@ -260,8 +260,8 @@ impl ObjectsFuncs for ShapeOblong {
             SelectFromPos(pos, ..) => {
                 self.selected = self.contains(pos.to_point());
             }
-            SetHighlight(value) => self.highlighted = value,
-            HighlightFromPos(pos, ..) => {
+            SetHighli(value) => self.highlighted = value,
+            HighliFromPos(pos, ..) => {
                 self.highlighted = self.contains(pos.to_point());
             }
 
@@ -270,8 +270,8 @@ impl ObjectsFuncs for ShapeOblong {
                 self.select_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
 
-            HighlightAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighlightModifierFromPos(pos, ..) => {
+            HighliAllModifiers(value) => self.highlight_all_modifiers(value),
+            HighliModifierFromPos(pos, ..) => {
                 self.highlight_modifiers_from_pos(pos, Self::GRAB_RADIUS);
             }
         }

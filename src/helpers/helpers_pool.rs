@@ -116,10 +116,10 @@ impl HelpersPool {
             self.helpers.values_mut().for_each(|helper| {
                 helper
                     .get_kind_mut()
-                    .set_state(HighlightFromPos(pos, snap, 5.0))
+                    .set_state(HighliFromPos(pos, snap, 5.0))
             });
             for helper in self.helpers.values_mut() {
-                if helper.get_kind().get_state(IsHighlighted).is_some() {
+                if helper.get_kind().get_state(IsHighligh).is_some() {
                     return Some(helper.get_kind().get_position());
                 }
             }
@@ -142,7 +142,7 @@ impl HelpersPool {
         match hors {
             HS::Highlight => {
                 self.helpers.values_mut().for_each(|helper| {
-                    helper.get_kind_mut().set_state(SetHighlight(value));
+                    helper.get_kind_mut().set_state(SetHighli(value));
                 });
             }
             HS::Select => {
@@ -158,7 +158,7 @@ impl HelpersPool {
         match hors {
             HS::Highlight => {
                 for helper in self.helpers.values() {
-                    if helper.get_kind().get_state(IsHighlighted).is_some() {
+                    if helper.get_kind().get_state(IsHighligh).is_some() {
                         result.push(helper.get_id());
                     }
                 }
@@ -187,7 +187,7 @@ impl HelpersPool {
         match hors {
             HS::Highlight => {
                 for helper in self.helpers.values() {
-                    if helper.get_kind().get_state(IsHighlighted).is_some() {
+                    if helper.get_kind().get_state(IsHighligh).is_some() {
                         result.push((helper.get_id(), helper.get_kind().get_vars()));
                     }
                 }
@@ -207,7 +207,7 @@ impl HelpersPool {
         if let Some(helper) = self.helpers.get_mut(&dhid) {
             match hors {
                 HS::Highlight => {
-                    helper.get_kind_mut().set_state(SetHighlight(value));
+                    helper.get_kind_mut().set_state(SetHighli(value));
                 }
                 HS::Select => {
                     helper.get_kind_mut().set_state(SetSelect(value));
@@ -223,12 +223,12 @@ impl HelpersPool {
                 self.helpers.values_mut().for_each(|helper| {
                     helper
                         .get_kind_mut()
-                        .set_state(HighlightModifierFromPos(pos, snap, 5.0));
+                        .set_state(HighliModifierFromPos(pos, snap, 5.0));
                 });
                 for helper in self.helpers.values_mut() {
                     if helper
                         .get_kind()
-                        .get_state(IsAnyModifierHighlighted)
+                        .get_state(IsAnyModifierHighligh)
                         .is_some()
                     {
                         return true;
@@ -255,9 +255,7 @@ impl HelpersPool {
         match hors {
             HS::Highlight => {
                 self.helpers.values_mut().for_each(|helper| {
-                    helper
-                        .get_kind_mut()
-                        .set_state(HighlightAllModifiers(value));
+                    helper.get_kind_mut().set_state(HighliAllModifiers(value));
                 });
             }
             HS::Select => {

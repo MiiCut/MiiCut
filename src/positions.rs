@@ -65,16 +65,16 @@ pub struct Pointer {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct RadiusPosition {
-    pub radius: Position,
+pub struct RadiusValue {
+    pub radius: Value,
     pub up: bool,
     pub saved_up: bool,
 }
 
-impl RadiusPosition {
-    pub fn new(radius: Vec2, up: bool) -> Self {
+impl RadiusValue {
+    pub fn new(radius: f64, up: bool) -> Self {
         Self {
-            radius: Position::new(radius, true),
+            radius: Value::new(radius),
             up,
             saved_up: up,
         }
