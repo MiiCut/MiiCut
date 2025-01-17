@@ -954,6 +954,25 @@ pub fn symmetric_point_to_segment(p1: Vec2, p2: Vec2, q: Vec2) -> Vec2 {
     symmetric
 }
 
+pub fn project_to_segment(p1: Vec2, p2: Vec2, q: Vec2) -> Vec2 {
+    // First segment vector
+    let v1 = p2 - p1;
+
+    // Second segment vector (q already starts at the origin)
+    let v2 = q;
+
+    // Dot product of v2 and v1
+    let dot_product = v2.dot(v1);
+
+    // Magnitude squared of v1
+    let v1_magnitude_squared = v1.length_squared();
+
+    // Projection formula
+    let projection_length = dot_product / v1_magnitude_squared;
+
+    projection_length * v1
+}
+
 pub fn project_to_segment_with_direction(p1: Vec2, p2: Vec2, q: Vec2) -> (f64, f64) {
     // First segment vector
     let v1 = p2 - p1;
@@ -1224,7 +1243,7 @@ pub fn get_arc_center(start: Vec2, end: Vec2, radius: f64, up: bool) -> Vec2 {
     }
 }
 
-pub fn create_arc(start: Vec2, end: Vec2, radius: f64, up: bool) -> Arc {
+pub fn create_arc_from_radius(start: Vec2, end: Vec2, radius: f64, up: bool) -> Arc {
     // Determine the arc center based on `up` boolean
     let center = get_arc_center(start, end, radius, up);
 
@@ -1311,4 +1330,97 @@ pub fn get_arc_radius(start: Vec2, end: Vec2, current_radius: f64, pos: Vec2, up
     let current_center = get_arc_center(start, end, current_radius, up);
     // Compute the new radius based on the cursor's distance to the current center
     (pos - current_center).hypot()
+}
+
+pub fn move_arc_middle(start: Vec2, end: Vec2, old_center: Vec2, new_middle: Vec2) -> Vec2 {
+    // Compute the chord midpoint (old middle point)
+    let old_middle = (start + end) / 2.0;
+
+    // Compute the vector from the old middle to the new middle
+    let adjustment = new_middle - old_middle;
+
+    // Adjust the old center by the same adjustment vector
+    let new_center = old_center + adjustment;
+
+    // Ensure the radius remains constant
+    let radius = (start - old_center).hypot();
+    let current_radius = (start - new_center).hypot();
+    if (current_radius - radius).abs() > EPSILON {
+        log!("Radius has changed! Ensure the new middle point is valid.");
+        return old_center;
+    }
+
+    new_center
+}
+
+pub fn perpendicular_point(start: Vec2, end: Vec2, dist: f64, up: bool) -> Vec2 {
+    // Midpoint of the segment
+    let midpoint = (start + end) / 2.0;
+
+    // Vector of the segment
+    let segment_vector = end - start;
+
+    if segment_vector.hypot() < EPSILON {
+        return start;
+    }
+
+    // Perpendicular vectors
+    let perp = if up {
+        Vec2::new(-segment_vector.y, segment_vector.x).normalize()
+    } else {
+        Vec2::new(segment_vector.y, -segment_vector.x).normalize()
+    };
+
+    midpoint + perp * dist
+}
+
+pub fn perpendicular_point_with_projection(start: Vec2, end: Vec2, dpos: Vec2, up: bool) -> Vec2 {
+    // Midpoint of the segment
+    let midpoint = (start + end) / 2.0;
+
+    // Vector of the segment
+    let segment_vector = end - start;
+
+    // Handle degenerate case: start and end are the same
+    if segment_vector.hypot() < f64::EPSILON {
+        return start;
+    }
+
+    // Perpendicular vectors
+    let perp = if up {
+        Vec2::new(-segment_vector.y, segment_vector.x).normalize()
+    } else {
+        Vec2::new(segment_vector.y, -segment_vector.x).normalize()
+    };
+
+    // Project dpos onto the perpendicular vector
+    let projection = dpos.dot(perp);
+
+    // Move the midpoint by the projected distance along the perpendicular
+    midpoint + perp * projection
+}
+
+pub fn create_arc_from_center(start: Vec2, end: Vec2, center: Vec2, concavity: bool) -> Arc {
+    // Calculate the radius
+    let radius = (start - center).hypot();
+
+    // Calculate the start and end angles
+    let start_angle = (start - center).atan2();
+    let end_angle = (end - center).atan2();
+
+    // Calculate the sweep angle based on the concavity
+    let sweep_angle = if concavity {
+        (end_angle - start_angle).rem_euclid(2.0 * std::f64::consts::PI)
+    } else {
+        (start_angle - end_angle).rem_euclid(2.0 * std::f64::consts::PI) * -1.0
+    };
+
+    // Construct the arc
+    Arc {
+        center: center.to_point(),
+        radii: Vec2::new(radius, radius),
+        start_angle,
+        sweep_angle,
+        x_rotation: 0.0,
+    }
 }

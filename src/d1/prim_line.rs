@@ -1,25 +1,25 @@
 use crate::{canvas::Pattern, math::*, GetEntityState, SetEntityState};
 
 use super::{d1::D1KindIter, primitives::PrimitiveControls};
-use kurbo::{Line, Shape, Vec2};
+use kurbo::{BezPath, Line, Shape, Size, Vec2};
 
 #[derive(Debug, Clone)]
 pub struct PrimLine {
-    highlighted: bool,
-    selected: bool,
+    pub highlighted: bool,
+    pub selected: bool,
 }
 
 impl PrimitiveControls for PrimLine {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 5.;
 
-    fn new(_: Vec2, _: Vec2) -> Self {
-        PrimLine {
-            highlighted: false,
-            selected: false,
-        }
-    }
     fn toggle(&mut self) {
+        ()
+    }
+    fn save_vars(&mut self) {
+        ()
+    }
+    fn restore_saved(&mut self) {
         ()
     }
     fn update_vars(&mut self, start: Vec2, end: Vec2) -> Vec2 {
@@ -65,19 +65,33 @@ impl PrimitiveControls for PrimLine {
             HighliModifierFromPos(..) => (),
         }
     }
-    fn move_control_selected(&mut self, _start: Vec2, _end: Vec2, _pos: Vec2) -> Option<Vec2> {
+    fn move_control_selected(
+        &mut self,
+        _start: Vec2,
+        _end: Vec2,
+        _pos_init: Vec2,
+        _pos: Vec2,
+        _snap: f64,
+        _shift_pressed: bool,
+    ) -> Option<Vec2> {
         None
     }
 
     fn path_elements(&self, start: Vec2, end: Vec2) -> D1KindIter {
         D1KindIter::Line(Line::new(start.to_point(), end.to_point()).path_elements(Self::TOLERANCE))
     }
-    fn get_pattern(&self) -> Pattern {
-        match (self.selected, self.highlighted) {
-            (false, false) => Pattern::BasicNormal,
-            (false, true) => Pattern::BasicHighlighted,
-            (true, false) => Pattern::BasicSelected,
-            (true, true) => Pattern::BasicSelected,
-        }
+    fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, _das: &Size) -> (BezPath, Pattern) {
+        (
+            self.path_elements(start, end).collect(),
+            self.get_pattern(self.selected, self.highlighted),
+        )
+    }
+    fn get_mod_paths_and_patterns(
+        &self,
+        _start: Vec2,
+        _end: Vec2,
+        _das: &Size,
+    ) -> Vec<(BezPath, Pattern)> {
+        vec![]
     }
 }

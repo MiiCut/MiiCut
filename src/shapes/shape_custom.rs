@@ -10,7 +10,7 @@ use crate::{
     d1::{d1::D1, primitives::D1Kind},
     math::*,
     positions::Position,
-    prefab::{center_path, modifiers_path},
+    prefab::center_path,
     traits::*,
 };
 use geo::{LineString, Polygon};
@@ -250,7 +250,6 @@ impl ObjectsFuncs for ShapeCustom {
             SetSelect(value) => self.selected = value,
 
             HighliFromPos(pos, ..) => {
-                log!("contains");
                 self.highlighted = self.contains(pos.to_point());
             }
             SelectFromPos(pos, ..) => self.selected = self.contains(pos.to_point()),
@@ -267,7 +266,6 @@ impl ObjectsFuncs for ShapeCustom {
             }
 
             SelectModifierFromPos(pos, ..) => {
-                // Reset d1 selection and d1 modifiers selection
                 self.d1s.iter_mut().for_each(|d1kind| {
                     d1kind.set_state(SelectAllModifiers(false));
                     d1kind.set_state(SetSelect(false));
@@ -283,7 +281,6 @@ impl ObjectsFuncs for ShapeCustom {
                 }
             }
             HighliModifierFromPos(pos, ..) => {
-                // Reset d1 highlight and d1 modifiers highlight
                 self.d1s.iter_mut().for_each(|d1kind| {
                     d1kind.set_state(HighliAllModifiers(false));
                     d1kind.set_state(SetHighli(false));
@@ -308,10 +305,7 @@ impl ObjectsFuncs for ShapeCustom {
     fn move_position(&mut self, mut dpos: Vec2, snap: f64) -> Option<Vec2> {
         dpos = snap_pt(dpos, snap);
         self.d1s.iter_mut().for_each(|d1kind| {
-            let saved_pos = d1kind.get_start_saved_position();
-            d1kind.set_start_position(saved_pos + dpos);
-            let saved_pos = d1kind.get_end_saved_position();
-            d1kind.set_end_position(saved_pos + dpos);
+            d1kind.move_position(dpos, snap);
         });
         self.update_polygon();
         Some(self.get_position())
@@ -321,7 +315,7 @@ impl ObjectsFuncs for ShapeCustom {
         pos_init: Vec2,
         pos: Vec2,
         snap: f64,
-        _shift_pressed: bool,
+        shift_pressed: bool,
     ) -> Option<Vec2> {
         let dpos = snap_pt(pos - pos_init, snap);
         // Check if we are in creation mode
@@ -337,9 +331,8 @@ impl ObjectsFuncs for ShapeCustom {
             self.update_polygon();
             Some(pos)
         } else {
-            // Move the first hs found in case of multiples (normally not the case)
+            // Move the first polygon vertex found in case of multiples (normally not the case)
             let len = self.d1s.len();
-            let mut pos_moved = None;
             for i in 0..self.d1s.len() {
                 if self.d1s[i].is_start_selected() {
                     let pos_saved = self.d1s[i].get_start_saved_position();
@@ -347,34 +340,24 @@ impl ObjectsFuncs for ShapeCustom {
                     let prev_index = if i == 0 { len - 1 } else { (i - 1) % len };
                     self.d1s[prev_index].set_end_position(snap_pt(pos_saved + dpos, snap));
                     self.update_polygon();
-                    pos_moved = Some(self.d1s[i].get_start_position());
+                    return Some(self.d1s[i].get_start_position());
+                }
+            }
+
+            // Move d1 modifiers if selected
+            let mut prim_moved = None;
+            for d1 in self.d1s.iter_mut() {
+                if let Some(pos) = d1.move_control_selected(pos_init, pos, snap, shift_pressed) {
+                    prim_moved = Some(pos);
+                    self.update_polygon();
                     break;
                 }
             }
-            pos_moved
+            prim_moved
         }
     }
     fn get_position(&self) -> Vec2 {
         self.get_vertices_centroid()
-    }
-    fn get_mod_paths_and_patterns(
-        &self,
-        _: &Size,
-        _: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
-        let mut paths: Vec<(BezPath, Pattern)> = vec![];
-        for d1kind in self.d1s.iter() {
-            let pos = d1kind.get_start_position();
-            paths.push((
-                modifiers_path(pos, 1., ShapeCustom::GRAB_RADIUS),
-                self.get_pattern_status(d1kind.is_start_selected(), d1kind.is_start_highlighted()),
-            ));
-        }
-        paths.push((
-            center_path(self.get_position(), 1., ShapeCustom::GRAB_RADIUS),
-            self.get_pattern_status(self.selected, self.highlighted),
-        ));
-        paths
     }
     fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         let mut _paths = vec![];
@@ -400,6 +383,7 @@ impl ObjectsFuncs for ShapeCustom {
         // texts.push(text);
         (_paths, _texts)
     }
+
     fn get_paths(&self, _: &Size) -> Vec<BezPath> {
         let mut paths: Vec<BezPath> = vec![];
         for d1kind in self.d1s.iter() {
@@ -423,6 +407,21 @@ impl ObjectsFuncs for ShapeCustom {
                 paths_patterns.push(path_pattern);
             }
         }
+        paths_patterns
+    }
+    fn get_mod_paths_and_patterns(
+        &self,
+        das: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
+        let mut paths_patterns: Vec<(BezPath, Pattern)> = vec![];
+        for d1kind in self.d1s.iter() {
+            paths_patterns.extend(d1kind.get_mod_paths_and_patterns(das));
+        }
+        paths_patterns.push((
+            center_path(self.get_position(), 1., ShapeCustom::GRAB_RADIUS),
+            self.get_pattern_status(self.selected, self.highlighted),
+        ));
         paths_patterns
     }
 }
