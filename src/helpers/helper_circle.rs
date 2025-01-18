@@ -29,7 +29,7 @@ pub struct HelperCircle {
     selected: bool,
 }
 impl HelperCircle {
-    const MIN_RADIUS: f64 = 2.;
+    const MIN_RADIUS: f64 = 10.;
 
     pub fn new(center: Vec2, _pos2: Vec2) -> HelperKind {
         let center = Position::new(center, true);
@@ -103,7 +103,7 @@ impl ObjectsFuncs for HelperCircle {
         }
     }
     fn good_size(&self) -> bool {
-        true
+        self.radius.value >= Self::MIN_RADIUS
     }
 
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {

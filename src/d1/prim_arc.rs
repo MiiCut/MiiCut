@@ -2,9 +2,7 @@ use super::{
     d1::{D1KindIter, VertexChange},
     primitives::PrimitiveControls,
 };
-use crate::{
-    canvas::Pattern, math::*, prefab::modifiers_path, GetEntityState, SetEntityState, Value,
-};
+use crate::{canvas::Pattern, math::*, prefab::*, GetEntityState, SetEntityState, Value};
 use kurbo::{BezPath, Shape, Size, Vec2};
 
 #[derive(Debug, Clone)]
@@ -31,10 +29,19 @@ impl PrimArc {
     }
     pub fn get_center(&mut self, start: Vec2, end: Vec2) -> Vec2 {
         // Validate the radius
-        if self.radius.value < (start - end).hypot() / 2.0 {
-            self.radius.value = (start - end).hypot() / 2.0 + EPSILON;
-        }
+        self.validate_radius(start, end);
         find_circle_center(start, end, self.radius.value, self.concavity)
+    }
+    pub fn validate_radius(&mut self, start: Vec2, end: Vec2) {
+        if self.radius.value.signum() > 0. {
+            if self.radius.value < (start - end).hypot() / 2.0 {
+                self.radius.value = (start - end).hypot() / 2.0 + EPSILON;
+            }
+        } else {
+            if self.radius.value > -(start - end).hypot() / 2.0 {
+                self.radius.value = -(start - end).hypot() / 2.0 - EPSILON;
+            }
+        }
     }
 }
 impl PrimitiveControls for PrimArc {
@@ -53,10 +60,7 @@ impl PrimitiveControls for PrimArc {
         self.concavity = self.concavity_saved;
     }
     fn update_vars(&mut self, start: Vec2, end: Vec2, _changed: VertexChange) -> Vec2 {
-        // Validate the radius
-        if self.radius.value < (start - end).hypot() / 2.0 {
-            self.radius.value = (start - end).hypot() / 2.0 + EPSILON;
-        }
+        self.validate_radius(start, end);
         find_circle_center(start, end, self.radius.value, self.concavity)
     }
     fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2> {
@@ -149,9 +153,12 @@ impl PrimitiveControls for PrimArc {
                 dpos,
                 self.concavity,
             );
-            log!("dpos_proj: ({:.2},{:.2})", dpos_proj.x, dpos_proj.y);
-            self.radius.value = (center + dpos_proj - start).hypot();
-            log!("radius: {:.2}", self.radius.value);
+            let sign = if self.concavity {
+                -(pos - start).cross(end - start).signum()
+            } else {
+                (pos - start).cross(end - start).signum()
+            };
+            self.radius.value = sign * (center + dpos_proj - start).hypot();
             Some(find_circle_center(
                 start,
                 end,

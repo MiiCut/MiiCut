@@ -1490,7 +1490,7 @@ pub fn find_circle_center(pt1: Vec2, pt2: Vec2, r: f64, concavity: bool) -> Vec2
     let perpendicular = Vec2::new(-chord.y, chord.x).normalize();
 
     // Distance from the midpoint to the circle centers
-    let h = (r.powi(2) - (chord_length / 2.0).powi(2)).sqrt();
+    let h = r.signum() * (r.powi(2) - (chord_length / 2.0).powi(2)).sqrt();
 
     // Calculate the two centers
     if concavity {
