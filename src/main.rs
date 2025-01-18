@@ -1295,7 +1295,6 @@ fn on_window_keydown(av: RefAV, event: Event) {
                         d1s.iter_mut().for_each(|d1| {
                             if d1.get_state(IsSelected).is_some() {
                                 pointer = Some(d1.toogle());
-                                log!("toogle");
                             }
                         });
                         shape_custom.update_polygon();

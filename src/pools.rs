@@ -149,7 +149,7 @@ impl Pools {
             .shapes
             .set_mod_hs_from_pos(cursor_pos, snap, grab, hors)
         {
-            log!("set_mod_hs_from_pos");
+            // log!("S set_mod_hs_from_pos");
             self.shapes.set_hs(false, hors);
             self.helpers.set_hs(false, hors);
             self.helpers.set_mod_hs(false, hors);
@@ -160,7 +160,7 @@ impl Pools {
             .set_hs_from_pos(cursor_pos, snap, hors)
             .is_some()
         {
-            log!("set_hs_from_pos");
+            // log!("H set_hs_from_pos");
             self.shapes.set_hs(false, hors);
             self.helpers.set_mod_hs(false, hors);
             return Some(cursor_pos);
@@ -169,12 +169,12 @@ impl Pools {
             .helpers
             .set_mod_hs_from_pos(cursor_pos, snap, grab, hors)
         {
-            log!("set_mod_hs_from_pos");
+            // log!("H set_mod_hs_from_pos");
             self.shapes.set_hs(false, hors);
             return Some(cursor_pos);
         }
         if let Some(_) = self.shapes.set_hs_from_pos(cursor_pos, snap, hors) {
-            log!("set_hs_from_pos");
+            // log!("S set_hs_from_pos");
             return Some(cursor_pos);
         } else {
             None

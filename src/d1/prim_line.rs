@@ -1,14 +1,24 @@
 use crate::{canvas::Pattern, math::*, GetEntityState, SetEntityState};
 
-use super::{d1::D1KindIter, primitives::PrimitiveControls};
+use super::{
+    d1::{D1KindIter, VertexChange},
+    primitives::PrimitiveControls,
+};
 use kurbo::{BezPath, Line, Shape, Size, Vec2};
 
 #[derive(Debug, Clone)]
 pub struct PrimLine {
-    pub highlighted: bool,
-    pub selected: bool,
+    highlighted: bool,
+    selected: bool,
 }
-
+impl PrimLine {
+    pub fn new() -> Self {
+        PrimLine {
+            highlighted: false,
+            selected: false,
+        }
+    }
+}
 impl PrimitiveControls for PrimLine {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 5.;
@@ -22,7 +32,7 @@ impl PrimitiveControls for PrimLine {
     fn restore_saved(&mut self) {
         ()
     }
-    fn update_vars(&mut self, start: Vec2, end: Vec2) -> Vec2 {
+    fn update_vars(&mut self, start: Vec2, end: Vec2, _changed: VertexChange) -> Vec2 {
         (start + end) / 2.
     }
     fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2> {

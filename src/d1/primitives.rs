@@ -1,6 +1,6 @@
 use crate::{canvas::Pattern, GetEntityState, SetEntityState};
 
-use super::d1::D1KindIter;
+use super::d1::{D1KindIter, VertexChange};
 use kurbo::{BezPath, Size, Vec2};
 
 #[derive(Debug, Clone)]
@@ -44,7 +44,7 @@ pub trait PrimitiveControls {
     fn toggle(&mut self);
     fn save_vars(&mut self);
     fn restore_saved(&mut self);
-    fn update_vars(&mut self, start: Vec2, end: Vec2) -> Vec2;
+    fn update_vars(&mut self, start: Vec2, end: Vec2, changed: VertexChange) -> Vec2;
     fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2>;
     fn set_state(&mut self, start: Vec2, end: Vec2, state: SetEntityState);
 
@@ -74,11 +74,11 @@ pub trait PrimitiveControls {
             (true, true) => Pattern::ModifiersSelected,
         }
     }
-    fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, _das: &Size) -> (BezPath, Pattern);
+    fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, das: &Size) -> (BezPath, Pattern);
     fn get_mod_paths_and_patterns(
         &self,
         start: Vec2,
         end: Vec2,
-        _das: &Size,
+        das: &Size,
     ) -> Vec<(BezPath, Pattern)>;
 }

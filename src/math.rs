@@ -17,7 +17,7 @@ use std::{
     fmt::{self},
 };
 
-const EPSILON: f64 = 1e-9;
+pub const EPSILON: f64 = 1e-9;
 // Snap the angle to horizontal or vertical
 const THREAS_ANGLE: f64 = 2. / 180. * PI;
 
@@ -202,6 +202,7 @@ pub fn get_unit_vector_perpendicular(pt1: &Vec2, pt2: &Vec2, pos: &Vec2) -> Opti
     let v1 = *pos - *pt2;
     let v2 = *pt2 - *pt1;
     if v2.hypot2() == 0. {
+        log!("WARNING: Degenerate case, get_unit_vector_perpendicular()");
         return None;
     }
     let pv2 = Vec2::new(-v2.y, v2.x).normalize();
@@ -249,7 +250,7 @@ pub fn get_dist_to_segment(pt1: Vec2, pt2: Vec2, pos: Vec2) -> f64 {
 pub fn get_intersection(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
     let v1 = pt2 - pt1; // Vector representing pt1-pt2
     if v1.hypot() == 0.0 {
-        // return None; // Handle edge case where pt1 and pt2 are the same
+        log!("WARNING: Degenerate case get_intersection()");
         return pt1;
     }
 
@@ -279,7 +280,7 @@ pub fn get_intersection(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
 pub fn symmetric_point(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
     let v1 = pt2 - pt1; // Vector representing pt1-pt2
     if v1.hypot() == 0.0 {
-        // return None; // Handle edge case where pt1 and pt2 are the same
+        log!("WARNING: Degenerate case symmetric_point()");
         return pt1;
     }
 
@@ -302,7 +303,7 @@ pub fn symmetric_point(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
 pub fn projection_to_perpendicular(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
     let v1 = pt2 - pt1; // Vector from pt1 to pt2
     if v1.hypot() == 0.0 {
-        // return None; // Handle edge case where pt1 and pt2 are the same
+        log!("WARNING: Degenerate case projection_to_perpendicular()");
         return pt1;
     }
 
@@ -324,7 +325,7 @@ pub fn projection_to_perpendicular(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
 pub fn point_at_distance(pt1: Vec2, pt2: Vec2, distance: f64) -> Vec2 {
     let v1 = pt2 - pt1; // Vector from pt1 to pt2
     if v1.hypot() == 0.0 {
-        // return None; // Handle edge case where pt1 and pt2 are the same
+        log!("WARNING: Degenerate case point_at_distance()");
         return pt1;
     }
 
@@ -930,6 +931,11 @@ pub fn unit_perpendicular(p1: Vec2, p2: Vec2, clockwise: bool) -> Vec2 {
         Vec2::new(v.y, -v.x) // Counterclockwise
     };
 
+    if perp.hypot() == 0.0 {
+        log!("WARNING: Degenerate case unit_perpendicular()");
+        return p1;
+    }
+
     // Normalize to unit length
     perp.normalize()
 }
@@ -937,6 +943,11 @@ pub fn unit_perpendicular(p1: Vec2, p2: Vec2, clockwise: bool) -> Vec2 {
 pub fn symmetric_point_to_segment(p1: Vec2, p2: Vec2, q: Vec2) -> Vec2 {
     // Segment midpoint
     let midpoint = (p1 + p2) / 2.0;
+
+    if (p2 - p1).hypot() == 0.0 {
+        log!("WARNING: Degenerate case symmetric_point_to_segment()");
+        return p1;
+    }
 
     // Segment direction vector
     let direction = (p2 - p1).normalize();
@@ -1221,20 +1232,30 @@ pub fn is_near_arc(start: Vec2, end: Vec2, radius: f64, pos: Vec2, precision: f6
     dist > radius - precision && dist < radius + precision && angle.abs() < std::f64::consts::PI
 }
 
-// pub fn get_arc_center(start: Vec2, end: Vec2, radius: f64, up: bool) -> Vec2 {
-//     let midpoint = (start + end) / 2.0;
-//     let segment = end - start;
-//     let direction = Vec2::new(-segment.y, segment.x).normalize();
-//     midpoint + direction * if up { radius } else { -radius }
-// }
 pub fn get_arc_center(start: Vec2, end: Vec2, radius: f64, up: bool) -> Vec2 {
     let chord_midpoint = (start + end) / 2.0;
     let chord_vector = end - start;
+
+    // Handle degenerate case: start and end are the same
+    if chord_vector.hypot() < f64::EPSILON {
+        log!("WARNING: Degenerate case in get_arc_center()");
+        return start;
+    }
+
     let perpendicular = Vec2::new(-chord_vector.y, chord_vector.x).normalize();
     let chord_length = chord_vector.hypot() / 2.0;
 
+    // Check if the radius is valid
+    let radius_squared = radius.powi(2);
+    let chord_length_squared = chord_length.powi(2);
+
+    if radius_squared < chord_length_squared {
+        log!("WARNING: Invalid radius. Radius is too small to form an arc.");
+        return (start + end) / 2.0;
+    }
+
     // Compute the distance from the midpoint to the center
-    let height = (radius.powi(2) - chord_length.powi(2)).sqrt();
+    let height = (radius_squared - chord_length_squared).sqrt();
 
     if up {
         chord_midpoint + perpendicular * height
@@ -1361,6 +1382,7 @@ pub fn perpendicular_point(start: Vec2, end: Vec2, dist: f64, up: bool) -> Vec2 
     let segment_vector = end - start;
 
     if segment_vector.hypot() < EPSILON {
+        log!("WARNING: Degenerate case, perpendicular_point()");
         return start;
     }
 
@@ -1379,10 +1401,12 @@ pub fn perpendicular_point_with_projection(start: Vec2, end: Vec2, dpos: Vec2, u
     let midpoint = (start + end) / 2.0;
 
     // Vector of the segment
-    let segment_vector = end - start;
+
+    let segment_vector = end - start; // if up { end - start } else { start - end };
 
     // Handle degenerate case: start and end are the same
     if segment_vector.hypot() < f64::EPSILON {
+        log!("WARNING: Degenerate case, perpendicular_point_with_projection()");
         return start;
     }
 
@@ -1422,5 +1446,56 @@ pub fn create_arc_from_center(start: Vec2, end: Vec2, center: Vec2, concavity: b
         start_angle,
         sweep_angle,
         x_rotation: 0.0,
+    }
+}
+
+pub fn perpendicular_points_with_distance(
+    pt1: Vec2,
+    pt2: Vec2,
+    dist: f64,
+    concavity: bool,
+) -> Vec2 {
+    // Compute the vector of the segment
+    let segment_vector = pt2 - pt1;
+    let segment_length = segment_vector.hypot();
+
+    // Compute the midpoint of the segment
+    let midpoint = (pt1 + pt2) / 2.0;
+    // Ensure dist is valid
+    if dist < segment_length / 2.0 {
+        log!("WARNING: Invalid distance in perpendicular_points_with_distance()");
+        return midpoint;
+    }
+
+    // Perpendicular vector (normalized)
+    let perpendicular = Vec2::new(-segment_vector.y, segment_vector.x).normalize();
+
+    // Two points on the perpendicular bisector at the given distance
+    if concavity {
+        midpoint + perpendicular * dist
+    } else {
+        midpoint - perpendicular * dist
+    }
+}
+
+pub fn find_circle_center(pt1: Vec2, pt2: Vec2, r: f64, concavity: bool) -> Vec2 {
+    // Calculate the midpoint of the chord
+    let midpoint = (pt1 + pt2) / 2.0;
+
+    // Vector of the chord
+    let chord = pt2 - pt1;
+    let chord_length = chord.hypot();
+
+    // Perpendicular vector to the chord
+    let perpendicular = Vec2::new(-chord.y, chord.x).normalize();
+
+    // Distance from the midpoint to the circle centers
+    let h = (r.powi(2) - (chord_length / 2.0).powi(2)).sqrt();
+
+    // Calculate the two centers
+    if concavity {
+        midpoint + perpendicular * h
+    } else {
+        midpoint - perpendicular * h
     }
 }

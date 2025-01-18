@@ -244,6 +244,7 @@ impl ObjectsFuncs for ShapeCustom {
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
+        use GetEntityState::*;
         use SetEntityState::*;
         match set {
             SetHighli(value) => self.highlighted = value,
@@ -266,6 +267,7 @@ impl ObjectsFuncs for ShapeCustom {
             }
 
             SelectModifierFromPos(pos, ..) => {
+                // log!("SelectModifierFromPos");
                 self.d1s.iter_mut().for_each(|d1kind| {
                     d1kind.set_state(SelectAllModifiers(false));
                     d1kind.set_state(SetSelect(false));
@@ -277,7 +279,9 @@ impl ObjectsFuncs for ShapeCustom {
                         Self::GRAB_RADIUS,
                         Self::GRAB_RADIUS,
                     ));
-                    d1kind.set_state(SelectFromPos(pos, Self::GRAB_RADIUS, Self::GRAB_RADIUS));
+                    if !d1kind.get_state(IsAnyModifierSelected).is_some() {
+                        d1kind.set_state(SelectFromPos(pos, Self::GRAB_RADIUS, Self::GRAB_RADIUS));
+                    }
                 }
             }
             HighliModifierFromPos(pos, ..) => {
@@ -332,6 +336,8 @@ impl ObjectsFuncs for ShapeCustom {
             Some(pos)
         } else {
             // Move the first polygon vertex found in case of multiples (normally not the case)
+            // Also, since each primitive has start/end vertices, we need to move the end vertex
+            // of the previous primitive
             let len = self.d1s.len();
             for i in 0..self.d1s.len() {
                 if self.d1s[i].is_start_selected() {
