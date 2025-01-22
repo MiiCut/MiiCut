@@ -91,12 +91,12 @@ impl Dimension {
     pub fn get_text_val(&self) -> String {
         format!("{:.2}", self.get_length())
     }
-    pub fn get_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
+    fn get_text_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
         match (selected, highlighted) {
-            (false, false) => Pattern::DimensionNormal,
-            (false, true) => Pattern::DimensionHighlighted,
-            (true, false) => Pattern::DimensionSelected,
-            (true, true) => Pattern::DimensionSelected,
+            (false, false) => Pattern::DimensionTextNormal,
+            (false, true) => Pattern::DimensionTextHighlighted,
+            (true, false) => Pattern::DimensionTextSelected,
+            (true, true) => Pattern::DimensionTextSelected,
         }
     }
     pub fn get_text(&self) -> CanvasText {
@@ -104,7 +104,7 @@ impl Dimension {
             self.get_text_val(),
             self.get_text_pos(),
             CanvasTextConfig::new(
-                self.get_pattern(self.selected, self.highlighted),
+                self.get_text_pattern(self.selected, self.highlighted),
                 self.get_text_angle(),
                 self.get_text_align(),
                 14,
@@ -112,7 +112,7 @@ impl Dimension {
             ),
         )
     }
-    pub fn get_path(&self) -> ((BezPath, Pattern), CanvasText) {
+    pub fn get_path_and_pattern(&self) -> ((BezPath, Pattern), CanvasText) {
         match self.kind {
             DimKind::Radius => self.get_radius_path(),
             DimKind::Linear => self.get_linear_path(),
@@ -132,7 +132,13 @@ impl Dimension {
         let text = CanvasText::new(
             format!("{:.2}", value),
             TextPos::PosCustom(Vec2::new(self.get_center().x, pos_y - 2.)),
-            CanvasTextConfig::new(Pattern::DimensionNormal, 0., TextAlign::Center, 14, 0.5),
+            CanvasTextConfig::new(
+                self.get_text_pattern(false, false),
+                0.,
+                TextAlign::Center,
+                14,
+                0.5,
+            ),
         );
 
         let start = Vec2::new(self.start.x, pos_y);
@@ -161,7 +167,7 @@ impl Dimension {
             format!("{:.2}", value),
             TextPos::PosCustom(Vec2::new(self.get_center().x - 12., self.get_center().y)),
             CanvasTextConfig::new(
-                Pattern::DimensionNormal,
+                self.get_text_pattern(false, false),
                 -PI / 2.,
                 TextAlign::Center,
                 14,
@@ -194,7 +200,13 @@ impl Dimension {
         let text = CanvasText::new(
             format!("r: {:.2}", value),
             TextPos::PosCustom(Vec2::new(end.x + 2., end.y - 2.)),
-            CanvasTextConfig::new(Pattern::DimensionNormal, 0., TextAlign::Left, 14, 0.5),
+            CanvasTextConfig::new(
+                self.get_text_pattern(false, false),
+                0.,
+                TextAlign::Left,
+                14,
+                0.5,
+            ),
         );
 
         path.move_to(self.start.to_point());
@@ -212,13 +224,15 @@ impl Dimension {
         let ratio = self.get_length() * 0.4;
         let angle_pt = start + unit_vec * ratio;
         let angle = (self.end - self.start).atan2();
+        let text_pos_angle = get_point_at_dist_from_angle(start, angle / 2., 10.);
+
         let text = CanvasText::new(
             format!("a: {:.1}", -angle / PI * 180.),
-            TextPos::PosCustom(Vec2::new(angle_pt.x + 2., angle_pt.y - 2.)),
+            TextPos::PosCustom(text_pos_angle),
             CanvasTextConfig::new(
-                Pattern::DimensionNormal,
-                self.get_text_angle(),
-                TextAlign::Right,
+                self.get_text_pattern(false, false),
+                0., //self.get_text_angle(),
+                TextAlign::Left,
                 14,
                 0.5,
             ),
@@ -245,7 +259,7 @@ impl Dimension {
             format!("{:.1}", value),
             TextPos::PosCustom(self.get_center() + unit_perp * (self.dim_offset + 10.)),
             CanvasTextConfig::new(
-                Pattern::DimensionNormal,
+                self.get_text_pattern(false, false),
                 self.get_text_angle(),
                 TextAlign::Center,
                 14,

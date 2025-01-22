@@ -4,8 +4,10 @@ use super::helpers_pool::DHid;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
 use crate::pools::Pools;
+use crate::pools::PoolsFunctions;
 use crate::traits::*;
 use crate::Action;
+use crate::Pointer;
 use crate::Position;
 use crate::Value;
 use kurbo::BezPath;
@@ -22,7 +24,7 @@ impl Action for MoveHelpersAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing last shapes move");
         for (dhid, vars) in &self.dhids_vars {
-            if let Some(shape) = pools.helpers.get_helper_mut(*dhid) {
+            if let Some(shape) = pools.helpers.get_mut(*dhid) {
                 shape.get_kind_mut().set_vars(vars);
                 shape.get_kind_mut().restore_saved();
             }
@@ -32,7 +34,7 @@ impl Action for MoveHelpersAction {
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing last shapes move");
         for (dhid, vars) in &self.dhids_vars {
-            if let Some(shape) = pools.helpers.get_helper_mut(*dhid) {
+            if let Some(shape) = pools.helpers.get_mut(*dhid) {
                 shape.get_kind_mut().set_vars(vars);
             }
         }
@@ -48,15 +50,6 @@ pub enum HelperKindvars {
 pub enum HelperKind {
     Line(HelperLine),
     Circle(HelperCircle),
-}
-impl HelperKind {
-    pub fn magnet_to(&self, pos: Vec2) -> Option<Vec2> {
-        use HelperKind::*;
-        match self {
-            Line(sh) => sh.magnet_to(pos),
-            Circle(sh) => sh.magnet_to(pos),
-        }
-    }
 }
 impl Display for HelperKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -121,6 +114,13 @@ impl ObjectsFuncs for HelperKind {
             Circle(sh) => sh.set_state(set),
         }
     }
+    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
+        use HelperKind::*;
+        match self {
+            Line(sh) => sh.set_state_from_pos(pointer, set),
+            Circle(sh) => sh.set_state_from_pos(pointer, set),
+        }
+    }
 
     fn toggle_prop(&mut self) {
         use HelperKind::*;
@@ -130,24 +130,18 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2> {
+    fn move_position(&mut self, pointer: &mut Pointer, shift_pressed: bool) -> bool {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.move_position(dpos, snap),
-            Circle(sh) => sh.move_position(dpos, snap),
+            Line(sh) => sh.move_position(pointer, shift_pressed),
+            Circle(sh) => sh.move_position(pointer, shift_pressed),
         }
     }
-    fn move_modifier(
-        &mut self,
-        pos_init: Vec2,
-        pos: Vec2,
-        snap: f64,
-        _shift_pressed: bool,
-    ) -> Option<Vec2> {
+    fn move_modifier(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
-            Circle(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
+            Line(sh) => sh.move_modifier(pointer, _shift_pressed),
+            Circle(sh) => sh.move_modifier(pointer, _shift_pressed),
         }
     }
     fn get_position(&self) -> Vec2 {
@@ -187,11 +181,15 @@ impl ObjectsFuncs for HelperKind {
             Circle(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
         }
     }
-    fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+    fn get_dimensions_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.get_dimensions_paths(),
-            Circle(sh) => sh.get_dimensions_paths(),
+            Line(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
+            Circle(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
         }
     }
 }

@@ -16,10 +16,12 @@ use super::shape_rectangle_rounded::ShapeRectRoundedIter;
 use super::shapes_pool::BSid;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
-use crate::d1::d1::D1;
 use crate::pools::Pools;
+use crate::pools::PoolsFunctions;
+use crate::primitives::primitives::Privitive;
 use crate::traits::*;
 use crate::Action;
+use crate::Pointer;
 use crate::Position;
 use crate::Value;
 use geo::{OpType, Polygon};
@@ -41,7 +43,7 @@ impl Action for MoveShapesAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing last shapes move");
         for (shid, vars) in &self.shids_vars {
-            if let Some(shape) = pools.shapes.get_shape_mut(*shid) {
+            if let Some(shape) = pools.shapes.get_mut(*shid) {
                 shape.get_kind_mut().set_vars(vars);
                 shape.get_kind_mut().restore_saved();
             }
@@ -51,7 +53,7 @@ impl Action for MoveShapesAction {
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing last shapes move");
         for (shid, vars) in &self.shids_vars {
-            if let Some(shape) = pools.shapes.get_shape_mut(*shid) {
+            if let Some(shape) = pools.shapes.get_mut(*shid) {
                 shape.get_kind_mut().set_vars(vars);
             }
         }
@@ -64,14 +66,14 @@ pub struct ToogleBoolOpsShapesAction {
 impl Action for ToogleBoolOpsShapesAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing last shapes toogle");
-        if let Some(shape) = pools.shapes.get_shape_mut(self.shid_toogle.0) {
+        if let Some(shape) = pools.shapes.get_mut(self.shid_toogle.0) {
             shape.set_boolean_op(self.shid_toogle.1);
         }
     }
 
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing last shapes toogle");
-        if let Some(shape) = pools.shapes.get_shape_mut(self.shid_toogle.0) {
+        if let Some(shape) = pools.shapes.get_mut(self.shid_toogle.0) {
             let mut toogle = self.shid_toogle.1;
             toogle.toggle();
             shape.set_boolean_op(toogle);
@@ -84,7 +86,7 @@ pub enum BSKindvars {
     RectangleRounded(Position, Position, Value, Value, Value, Value),
     Disc(Position, Value),
     Oblong(Position, Position, Value),
-    Custom(Vec<D1>),
+    Custom(Vec<Privitive>),
 }
 
 #[derive(Debug, Clone)]
@@ -195,6 +197,16 @@ impl ObjectsFuncs for BSKind {
             Custom(sh) => sh.set_state(set),
         }
     }
+    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
+        use BSKind::*;
+        match self {
+            Rectangle(sh) => sh.set_state_from_pos(pointer, set),
+            RectangleRounded(sh) => sh.set_state_from_pos(pointer, set),
+            Disc(sh) => sh.set_state_from_pos(pointer, set),
+            Oblong(sh) => sh.set_state_from_pos(pointer, set),
+            Custom(sh) => sh.set_state_from_pos(pointer, set),
+        }
+    }
 
     fn toggle_prop(&mut self) {
         use BSKind::*;
@@ -207,30 +219,24 @@ impl ObjectsFuncs for BSKind {
         }
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2> {
+    fn move_position(&mut self, pointer: &mut Pointer, shift_pressed: bool) -> bool {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.move_position(dpos, snap),
-            RectangleRounded(sh) => sh.move_position(dpos, snap),
-            Disc(sh) => sh.move_position(dpos, snap),
-            Oblong(sh) => sh.move_position(dpos, snap),
-            Custom(sh) => sh.move_position(dpos, snap),
+            Rectangle(sh) => sh.move_position(pointer, shift_pressed),
+            RectangleRounded(sh) => sh.move_position(pointer, shift_pressed),
+            Disc(sh) => sh.move_position(pointer, shift_pressed),
+            Oblong(sh) => sh.move_position(pointer, shift_pressed),
+            Custom(sh) => sh.move_position(pointer, shift_pressed),
         }
     }
-    fn move_modifier(
-        &mut self,
-        pos_init: Vec2,
-        pos: Vec2,
-        snap: f64,
-        _shift_pressed: bool,
-    ) -> Option<Vec2> {
+    fn move_modifier(&mut self, pointer: &mut Pointer, shift_pressed: bool) -> bool {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
-            RectangleRounded(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
-            Disc(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
-            Oblong(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
-            Custom(sh) => sh.move_modifier(pos_init, pos, snap, _shift_pressed),
+            Rectangle(sh) => sh.move_modifier(pointer, shift_pressed),
+            RectangleRounded(sh) => sh.move_modifier(pointer, shift_pressed),
+            Disc(sh) => sh.move_modifier(pointer, shift_pressed),
+            Oblong(sh) => sh.move_modifier(pointer, shift_pressed),
+            Custom(sh) => sh.move_modifier(pointer, shift_pressed),
         }
     }
     fn get_position(&self) -> Vec2 {
@@ -282,14 +288,18 @@ impl ObjectsFuncs for BSKind {
             Custom(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
         }
     }
-    fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+    fn get_dimensions_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.get_dimensions_paths(),
-            RectangleRounded(sh) => sh.get_dimensions_paths(),
-            Disc(sh) => sh.get_dimensions_paths(),
-            Oblong(sh) => sh.get_dimensions_paths(),
-            Custom(sh) => sh.get_dimensions_paths(),
+            Rectangle(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
+            RectangleRounded(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
+            Disc(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
+            Oblong(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
+            Custom(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
         }
     }
 }

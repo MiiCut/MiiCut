@@ -12,6 +12,7 @@ use crate::{
     positions::{Position, Value},
     prefab::{center_path, modifiers_path},
     traits::*,
+    Pointer,
 };
 use geo::{LineString, Polygon};
 use kurbo::{BezPath, Circle, CirclePathIter, Point, Rect, Shape, Size, Vec2};
@@ -182,22 +183,25 @@ impl ObjectsFuncs for ShapeDisc {
         use SetEntityState::*;
         match set {
             SetSelect(value) => self.selected = value,
-            SelectFromPos(pos, ..) => {
-                self.selected = self.contains(pos.to_point());
-            }
             SetHighli(value) => self.highlighted = value,
-            HighliFromPos(pos, ..) => {
-                self.highlighted = self.contains(pos.to_point());
-            }
-
             SelectAllModifiers(value) => self.select_all_modifiers(value),
-            SelectModifierFromPos(pos, ..) => {
-                self.select_modifiers_from_pos(pos, Self::GRAB_RADIUS);
-            }
-
             HighliAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighliModifierFromPos(pos, ..) => {
-                self.highlight_modifiers_from_pos(pos, Self::GRAB_RADIUS);
+        }
+    }
+    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
+        use SetEntityStateFromPos::*;
+        match set {
+            SelectFromPos => {
+                self.selected = self.contains(pointer.pos().to_point());
+            }
+            HighliFromPos => {
+                self.highlighted = self.contains(pointer.pos().to_point());
+            }
+            SelectModifierFromPos => {
+                self.select_modifiers_from_pos(pointer.pos(), Self::GRAB_RADIUS);
+            }
+            HighliModifierFromPos => {
+                self.highlight_modifiers_from_pos(pointer.pos(), Self::GRAB_RADIUS);
             }
         }
     }
@@ -206,28 +210,22 @@ impl ObjectsFuncs for ShapeDisc {
         ()
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2> {
-        self.center.pos = snap_pt(self.center.saved_pos + dpos, snap);
+    fn move_position(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+        let dpos = pointer.dpos();
+        self.center.pos = self.center.saved_pos + dpos;
         self.update_polygon();
-        Some(self.get_position())
+        true
     }
-    fn move_modifier(
-        &mut self,
-        pos_init: Vec2,
-        pos: Vec2,
-        snap: f64,
-        _shift_pressed: bool,
-    ) -> Option<Vec2> {
-        let dpos = pos - pos_init;
+    fn move_modifier(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
         let saved_radius = self.radius.saved_val;
-        let radius = snap_val(saved_radius + dpos.x, snap);
+        let radius = snap_val(saved_radius + pointer.dpos().x, pointer.get_snap().val());
         if radius >= ShapeDisc::MIN_RADIUS {
             self.radius.value = radius;
             self.update_polygon();
-            Some(self.get_radius_modifier())
-        } else {
-            None
-        }
+            pointer.set_pos(self.get_radius_modifier());
+            return true;
+        };
+        false
     }
     fn get_position(&self) -> Vec2 {
         self.center.pos
@@ -249,13 +247,17 @@ impl ObjectsFuncs for ShapeDisc {
             ),
         ]
     }
-    fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+    fn get_dimensions_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         let mut paths = vec![];
         let mut texts = vec![];
         let offset = self.radius.value / 2_f64.sqrt();
         let end = self.center.pos + Vec2::new(offset, -offset);
-        let (path, text) =
-            Dimension::new(DimKind::Radius, self.center.pos, end, self.radius.value).get_path();
+        let (path, text) = Dimension::new(DimKind::Radius, self.center.pos, end, self.radius.value)
+            .get_path_and_pattern();
         paths.push(path);
         texts.push(text);
         (paths, texts)

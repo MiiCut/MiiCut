@@ -6,7 +6,13 @@ use super::{
     shape_rectangle_rounded::ShapeRectRounded,
     shapes::{BSKindvars, BasicShape, BoolOps},
 };
-use crate::{clipboard::Action, math::*, pools::HS, traits::*, IconsShapes, Pools};
+use crate::{
+    clipboard::Action,
+    math::*,
+    pools::{PoolsFunctions, HS},
+    traits::*,
+    IconsShapes, Pointer, Pools,
+};
 use geo::{BooleanOps, Intersects, MultiPolygon, Polygon};
 use kurbo::{BezPath, Vec2};
 use std::{
@@ -23,12 +29,12 @@ pub struct AddShapeAction {
 impl Action for AddShapeAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing shape creation: {:?}", self.shape.get_id());
-        pools.shapes.delete_shape(self.shape.get_id());
+        pools.shapes.delete(self.shape.get_id());
     }
 
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing shape creation: {:?}", self.shape.get_id());
-        pools.shapes.add_shape(self.shape.clone());
+        pools.shapes.add(self.shape.clone());
     }
 }
 
@@ -39,14 +45,14 @@ impl Action for DeleteShapeAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing shapes creation");
         self.shapes.iter().for_each(|shape| {
-            pools.shapes.add_shape(shape.clone());
+            pools.shapes.add(shape.clone());
         });
     }
 
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing shapes creation");
         self.shapes.iter().for_each(|shape| {
-            pools.shapes.delete_shape(shape.get_id());
+            pools.shapes.delete(shape.get_id());
         });
     }
 }
@@ -58,14 +64,6 @@ pub struct ShapesPool {
     full_segs: Vec<BezPath>,
 }
 impl ShapesPool {
-    // Static methods
-    pub fn new() -> ShapesPool {
-        ShapesPool {
-            shapes: HashMap::new(),
-            shapes_selector: ShapeSelector::new(),
-            full_segs: Vec::new(),
-        }
-    }
     pub fn new_shape(
         icon_shape: IconsShapes,
         pos1: Vec2,
@@ -82,285 +80,6 @@ impl ShapesPool {
         };
         BasicShape::new(shid, shape_kind, boolean_op)
     }
-    // Methods
-    pub fn duplicate_shapes(&mut self, shapes: Vec<BasicShape>) -> Vec<BasicShape> {
-        use SetEntityState::*;
-        let mut new_shapes = vec![];
-        for mut shape in shapes.into_iter() {
-            shape.set_new_id(BSid::new());
-            shape.get_kind_mut().set_state(SetSelect(true));
-            self.add_shape(shape.clone());
-            new_shapes.push(shape);
-        }
-        new_shapes
-    }
-    pub fn add_shape(&mut self, shape: BasicShape) {
-        self.shapes.insert(shape.get_id(), shape);
-    }
-    pub fn delete_shape(&mut self, shid: BSid) -> Option<BasicShape> {
-        self.shapes.remove(&shid)
-    }
-    pub fn get_shape(&self, target_shid: BSid) -> Option<&BasicShape> {
-        self.shapes.get(&target_shid)
-    }
-    pub fn get_shape_mut(&mut self, target_shid: BSid) -> Option<&mut BasicShape> {
-        self.shapes.get_mut(&target_shid)
-    }
-    pub fn iter(&self) -> impl Iterator<Item = (&BSid, &BasicShape)> {
-        self.shapes.iter()
-    }
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&BSid, &mut BasicShape)> {
-        self.shapes.iter_mut()
-    }
-    pub fn values(&self) -> impl Iterator<Item = &BasicShape> {
-        self.shapes.values()
-    }
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut BasicShape> {
-        self.shapes.values_mut()
-    }
-
-    pub fn save_vars(&mut self) {
-        self.shapes.values_mut().for_each(|shape| {
-            shape.get_kind_mut().save_vars();
-        });
-    }
-
-    pub fn set_hs_from_pos(&mut self, pos: Vec2, snap: f64, hors: HS) -> Option<Vec2> {
-        use GetEntityState::*;
-        use SetEntityState::*;
-        use HS::*;
-        let mut res = None;
-        if let Highlight = hors {
-            self.shapes.values_mut().for_each(|shape| {
-                shape
-                    .get_kind_mut()
-                    .set_state(HighliFromPos(pos, snap, 5.0))
-            });
-        } else {
-            // If Select, update the ShapeSelector and return the position of the selected shape
-            let mut overlapping_shapes = HashSet::new();
-            self.shapes.values_mut().for_each(|shape| {
-                shape
-                    .get_kind_mut()
-                    .set_state(SelectFromPos(pos, snap, 5.0));
-                if shape.get_kind().get_state(IsSelected).is_some() {
-                    overlapping_shapes.insert(shape.get_id());
-                }
-            });
-            // Update the ShapeSelector with the overlapping shapes
-            self.shapes_selector.update_shapes(overlapping_shapes);
-
-            // Clear the selection of all shapes
-            self.shapes
-                .values_mut()
-                .for_each(|shape| _ = shape.get_kind_mut().set_state(SetSelect(false)));
-
-            // Toggle to the next shape
-            if let Some(next_shid) = self.shapes_selector.next_selection() {
-                // Find and select the next shape
-                if let Some(shape) = self.shapes.get_mut(&next_shid) {
-                    shape
-                        .get_kind_mut()
-                        .set_state(SetEntityState::SetSelect(true));
-                    res = Some(shape.get_kind().get_position());
-                }
-            }
-        }
-        res
-    }
-    pub fn set_hs(&mut self, value: bool, hors: HS) {
-        use SetEntityState::*;
-        match hors {
-            HS::Highlight => {
-                self.shapes.values_mut().for_each(|shape| {
-                    shape.get_kind_mut().set_state(SetHighli(value));
-                });
-            }
-            HS::Select => {
-                self.shapes.values_mut().for_each(|shape| {
-                    shape.get_kind_mut().set_state(SetSelect(value));
-                });
-            }
-        }
-    }
-    pub fn get_hs(&self, hors: HS) -> Vec<BSid> {
-        use GetEntityState::*;
-        let mut result = vec![];
-        match hors {
-            HS::Highlight => {
-                for shape in self.shapes.values() {
-                    if shape.get_kind().get_state(IsHighligh).is_some() {
-                        result.push(shape.get_id());
-                    }
-                }
-            }
-            HS::Select => {
-                for shape in self.shapes.values() {
-                    if shape.get_kind().get_state(IsSelected).is_some() {
-                        result.push(shape.get_id());
-                    }
-                }
-            }
-        }
-        result
-    }
-    pub fn get_hs_if_one(&mut self, hors: HS) -> Option<BSid> {
-        let result = self.get_hs(hors);
-        if result.len() == 1 {
-            Some(result[0])
-        } else {
-            None
-        }
-    }
-    pub fn get_hs_vars(&self, hors: HS) -> Vec<(BSid, BSKindvars)> {
-        use GetEntityState::*;
-        let mut result = vec![];
-        match hors {
-            HS::Highlight => {
-                for shape in self.shapes.values() {
-                    if shape.get_kind().get_state(IsHighligh).is_some() {
-                        result.push((shape.get_id(), shape.get_kind().get_vars()));
-                    }
-                }
-            }
-            HS::Select => {
-                for shape in self.shapes.values() {
-                    if shape.get_kind().get_state(IsSelected).is_some() {
-                        result.push((shape.get_id(), shape.get_kind().get_vars()));
-                    }
-                }
-            }
-        }
-        result
-    }
-    pub fn set_hs_from_shid(&mut self, shid: BSid, value: bool, hors: HS) {
-        use SetEntityState::*;
-        if let Some(shape) = self.shapes.get_mut(&shid) {
-            match hors {
-                HS::Highlight => {
-                    shape.get_kind_mut().set_state(SetHighli(value));
-                }
-                HS::Select => {
-                    shape.get_kind_mut().set_state(SetSelect(value));
-                }
-            }
-        }
-    }
-    pub fn set_mod_hs_from_pos(&mut self, pos: Vec2, snap: f64, _precision: f64, hors: HS) -> bool {
-        use GetEntityState::*;
-        use SetEntityState::*;
-        match hors {
-            HS::Highlight => {
-                self.shapes.values_mut().for_each(|shape| {
-                    shape
-                        .get_kind_mut()
-                        .set_state(HighliModifierFromPos(pos, snap, 5.0));
-                });
-
-                let mut highlighted = false;
-                for shape in self.shapes.values() {
-                    if shape
-                        .get_kind()
-                        .get_state(IsAnyModifierHighligh)
-                        .is_some()
-                    {
-                        highlighted = true;
-                        break;
-                    }
-                }
-                highlighted
-            }
-            HS::Select => {
-                self.shapes.values_mut().for_each(|shape| {
-                    shape
-                        .get_kind_mut()
-                        .set_state(SelectModifierFromPos(pos, snap, 5.0));
-                });
-
-                let mut selected = false;
-                for shape in self.shapes.values() {
-                    if shape.get_kind().get_state(IsAnyModifierSelected).is_some() {
-                        selected = true;
-                        break;
-                    }
-                }
-                selected
-            }
-        }
-    }
-    pub fn set_mod_hs(&mut self, value: bool, hors: HS) {
-        use SetEntityState::*;
-        match hors {
-            HS::Highlight => {
-                self.shapes.values_mut().for_each(|shape| {
-                    shape.get_kind_mut().set_state(HighliAllModifiers(value));
-                });
-            }
-            HS::Select => {
-                self.shapes.values_mut().for_each(|shape| {
-                    shape.get_kind_mut().set_state(SelectAllModifiers(value));
-                });
-            }
-        }
-    }
-    pub fn get_first_selected_modifier_vars(&self) -> Option<(BSid, BSKindvars)> {
-        use GetEntityState::*;
-        for shape in self.shapes.values() {
-            if shape.get_kind().get_state(IsAnyModifierSelected).is_some() {
-                return Some((shape.get_id(), shape.get_kind().get_vars()));
-            }
-        }
-        None
-    }
-
-    pub fn move_position(
-        &mut self,
-        shid: BSid,
-        pos_init: Vec2,
-        pos: Vec2,
-        snap: f64,
-        _shift_pressed: bool,
-    ) -> Option<Vec2> {
-        self.shapes
-            .get_mut(&shid)
-            .and_then(|shape| return shape.get_kind_mut().move_position(pos - pos_init, snap))
-    }
-    pub fn move_modifier(
-        &mut self,
-        shid: BSid,
-        pos_init: Vec2,
-        pos: Vec2,
-        snap: f64,
-        shift_pressed: bool,
-    ) -> Option<Vec2> {
-        if let Some(shape) = self.shapes.get_mut(&shid) {
-            return shape
-                .get_kind_mut()
-                .move_modifier(pos_init, pos, snap, shift_pressed);
-        }
-        None
-    }
-
-    pub fn delete_selection(&mut self) -> Option<Vec<BasicShape>> {
-        use GetEntityState::*;
-        let mut shapes_deleted = vec![];
-
-        for shape in self.shapes.values_mut() {
-            if shape.get_kind_mut().get_state(IsSelected).is_some() {
-                shapes_deleted.push(shape.clone());
-            }
-        }
-
-        self.shapes
-            .retain(|_, v| !v.get_kind_mut().get_state(IsSelected).is_some());
-
-        if !shapes_deleted.is_empty() {
-            Some(shapes_deleted)
-        } else {
-            None
-        }
-    }
-
     pub fn intersection_set(&self, shid: BSid) -> HashSet<BSid> {
         let mut result = HashSet::new();
         if let Some(shape) = self.shapes.get(&shid) {
@@ -407,7 +126,8 @@ impl ShapesPool {
     pub fn select_all_connected(&mut self) -> bool {
         use SetEntityState::*;
         let mut res = false;
-        if let Some(start_shid) = self.get_hs(HS::Select).get(0).copied() {
+        if let Some(start_shid) = self.get_state(HS::Select).get(0).copied() {
+            log!("select_all_shapes_connected");
             let connected_shids = self.connected_shapes(start_shid);
             connected_shids.iter().for_each(|shid| {
                 if let Some(shape) = self.shapes.get_mut(shid) {
@@ -461,6 +181,284 @@ impl ShapesPool {
     }
     pub fn get_full_segs(&mut self) -> Vec<BezPath> {
         self.full_segs.clone()
+    }
+}
+
+impl PoolsFunctions for ShapesPool {
+    type Id = BSid;
+    type Pool = ShapesPool;
+    type Object = BasicShape;
+    type ObjectKindvars = BSKindvars;
+
+    // Static methods
+    fn new() -> ShapesPool {
+        ShapesPool {
+            shapes: HashMap::new(),
+            shapes_selector: ShapeSelector::new(),
+            full_segs: Vec::new(),
+        }
+    }
+    // Methods
+    fn duplicate(&mut self, shapes: Vec<BasicShape>) -> Vec<BasicShape> {
+        use SetEntityState::*;
+        let mut new_shapes = vec![];
+        for mut shape in shapes.into_iter() {
+            shape.set_new_id(BSid::new());
+            shape.get_kind_mut().set_state(SetSelect(true));
+            self.add(shape.clone());
+            new_shapes.push(shape);
+        }
+        new_shapes
+    }
+    fn add(&mut self, shape: BasicShape) {
+        self.shapes.insert(shape.get_id(), shape);
+    }
+    fn delete(&mut self, shid: BSid) -> Option<BasicShape> {
+        self.shapes.remove(&shid)
+    }
+    fn get(&self, target_shid: BSid) -> Option<&BasicShape> {
+        self.shapes.get(&target_shid)
+    }
+    fn get_mut(&mut self, target_shid: BSid) -> Option<&mut BasicShape> {
+        self.shapes.get_mut(&target_shid)
+    }
+    fn iter(&self) -> impl Iterator<Item = (&BSid, &BasicShape)> {
+        self.shapes.iter()
+    }
+    fn iter_mut(&mut self) -> impl Iterator<Item = (&BSid, &mut BasicShape)> {
+        self.shapes.iter_mut()
+    }
+    fn values(&self) -> impl Iterator<Item = &BasicShape> {
+        self.shapes.values()
+    }
+    fn values_mut(&mut self) -> impl Iterator<Item = &mut BasicShape> {
+        self.shapes.values_mut()
+    }
+
+    fn save_vars(&mut self) {
+        self.shapes.values_mut().for_each(|shape| {
+            shape.get_kind_mut().save_vars();
+        });
+    }
+
+    fn set_states_from_pos(&mut self, pointer: &mut Pointer, hors: HS) -> bool {
+        use GetEntityState::*;
+        use SetEntityState::*;
+        use SetEntityStateFromPos::*;
+        use HS::*;
+
+        if let Highlight = hors {
+            self.shapes.values_mut().for_each(|shape| {
+                shape
+                    .get_kind_mut()
+                    .set_state_from_pos(pointer, HighliFromPos)
+            });
+            true
+        } else {
+            // If Select, update the ShapeSelector and return the position of the selected shape
+            let mut overlapping_shapes = HashSet::new();
+            self.shapes.values_mut().for_each(|shape| {
+                shape
+                    .get_kind_mut()
+                    .set_state_from_pos(pointer, SelectFromPos);
+                if shape.get_kind().get_state(IsSelected).is_some() {
+                    overlapping_shapes.insert(shape.get_id());
+                }
+            });
+            // Update the ShapeSelector with the overlapping shapes
+            self.shapes_selector.update_shapes(overlapping_shapes);
+
+            // Clear the selection of all shapes
+            self.shapes
+                .values_mut()
+                .for_each(|shape| _ = shape.get_kind_mut().set_state(SetSelect(false)));
+
+            // Toggle to the next shape
+            if let Some(next_shid) = self.shapes_selector.next_selection() {
+                // Find and select the next shape
+                if let Some(shape) = self.shapes.get_mut(&next_shid) {
+                    shape
+                        .get_kind_mut()
+                        .set_state(SetEntityState::SetSelect(true));
+                    pointer.set_pos(shape.get_kind().get_position());
+                    return true;
+                }
+            }
+            false
+        }
+    }
+    fn set_state(&mut self, value: bool, hors: HS) {
+        use SetEntityState::*;
+        match hors {
+            HS::Highlight => {
+                self.shapes.values_mut().for_each(|shape| {
+                    shape.get_kind_mut().set_state(SetHighli(value));
+                });
+            }
+            HS::Select => {
+                self.shapes.values_mut().for_each(|shape| {
+                    shape.get_kind_mut().set_state(SetSelect(value));
+                });
+            }
+        }
+    }
+    fn get_state(&self, hors: HS) -> Vec<BSid> {
+        use GetEntityState::*;
+        let mut result = vec![];
+        match hors {
+            HS::Highlight => {
+                for shape in self.shapes.values() {
+                    if shape.get_kind().get_state(IsHighligh).is_some() {
+                        result.push(shape.get_id());
+                    }
+                }
+            }
+            HS::Select => {
+                for shape in self.shapes.values() {
+                    if shape.get_kind().get_state(IsSelected).is_some() {
+                        result.push(shape.get_id());
+                    }
+                }
+            }
+        }
+        result
+    }
+    fn get_state_if_one(&self, hors: HS) -> Option<BSid> {
+        let result = self.get_state(hors);
+        if result.len() == 1 {
+            Some(result[0])
+        } else {
+            None
+        }
+    }
+    fn get_state_and_vars(&self, hors: HS) -> Vec<(BSid, BSKindvars)> {
+        use GetEntityState::*;
+        let mut result = vec![];
+        match hors {
+            HS::Highlight => {
+                for shape in self.shapes.values() {
+                    if shape.get_kind().get_state(IsHighligh).is_some() {
+                        result.push((shape.get_id(), shape.get_kind().get_vars()));
+                    }
+                }
+            }
+            HS::Select => {
+                for shape in self.shapes.values() {
+                    if shape.get_kind().get_state(IsSelected).is_some() {
+                        result.push((shape.get_id(), shape.get_kind().get_vars()));
+                    }
+                }
+            }
+        }
+        result
+    }
+    fn set_id_state(&mut self, id: BSid, value: bool, hors: HS) {
+        use SetEntityState::*;
+        if let Some(shape) = self.shapes.get_mut(&id) {
+            match hors {
+                HS::Highlight => {
+                    shape.get_kind_mut().set_state(SetHighli(value));
+                }
+                HS::Select => {
+                    shape.get_kind_mut().set_state(SetSelect(value));
+                }
+            }
+        }
+    }
+    fn set_modifiers_states_from_pos(&mut self, pointer: &mut Pointer, hors: HS) -> bool {
+        use GetEntityState::*;
+        use SetEntityStateFromPos::*;
+        match hors {
+            HS::Highlight => {
+                self.shapes.values_mut().for_each(|shape| {
+                    shape
+                        .get_kind_mut()
+                        .set_state_from_pos(pointer, HighliModifierFromPos);
+                });
+
+                let mut highlighted = false;
+                for shape in self.shapes.values() {
+                    if shape.get_kind().get_state(IsAnyModifierHighligh).is_some() {
+                        highlighted = true;
+                        break;
+                    }
+                }
+                highlighted
+            }
+            HS::Select => {
+                self.shapes.values_mut().for_each(|shape| {
+                    shape
+                        .get_kind_mut()
+                        .set_state_from_pos(pointer, SelectModifierFromPos);
+                });
+
+                let mut selected = false;
+                for shape in self.shapes.values() {
+                    if shape.get_kind().get_state(IsAnyModifierSelected).is_some() {
+                        selected = true;
+                        break;
+                    }
+                }
+                selected
+            }
+        }
+    }
+    fn set_modifiers_state(&mut self, value: bool, hors: HS) {
+        use SetEntityState::*;
+        match hors {
+            HS::Highlight => {
+                self.shapes.values_mut().for_each(|shape| {
+                    shape.get_kind_mut().set_state(HighliAllModifiers(value));
+                });
+            }
+            HS::Select => {
+                self.shapes.values_mut().for_each(|shape| {
+                    shape.get_kind_mut().set_state(SelectAllModifiers(value));
+                });
+            }
+        }
+    }
+    fn get_first_selected_modifier_vars(&self) -> Option<(BSid, BSKindvars)> {
+        use GetEntityState::*;
+        for shape in self.shapes.values() {
+            if shape.get_kind().get_state(IsAnyModifierSelected).is_some() {
+                return Some((shape.get_id(), shape.get_kind().get_vars()));
+            }
+        }
+        None
+    }
+
+    fn move_position(&mut self, shid: BSid, pointer: &mut Pointer, shift_pressed: bool) -> bool {
+        if let Some(shape) = self.shapes.get_mut(&shid) {
+            return shape.get_kind_mut().move_position(pointer, shift_pressed);
+        }
+        false
+    }
+    fn move_modifier(&mut self, shid: BSid, pointer: &mut Pointer, shift_pressed: bool) -> bool {
+        if let Some(shape) = self.shapes.get_mut(&shid) {
+            return shape.get_kind_mut().move_modifier(pointer, shift_pressed);
+        }
+        false
+    }
+
+    fn delete_selection(&mut self) -> Option<Vec<BasicShape>> {
+        use GetEntityState::*;
+        let mut shapes_deleted = vec![];
+
+        for shape in self.shapes.values_mut() {
+            if shape.get_kind_mut().get_state(IsSelected).is_some() {
+                shapes_deleted.push(shape.clone());
+            }
+        }
+
+        self.shapes
+            .retain(|_, v| !v.get_kind_mut().get_state(IsSelected).is_some());
+
+        if !shapes_deleted.is_empty() {
+            Some(shapes_deleted)
+        } else {
+            None
+        }
     }
 }
 

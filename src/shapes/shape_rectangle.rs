@@ -12,7 +12,7 @@ use crate::{
     positions::Position,
     prefab::{center_path, modifiers_path},
     traits::*,
-    Modifier,
+    Modifier, Pointer,
 };
 use geo::{LineString, Polygon};
 use kurbo::{BezPath, PathEl, Point, Rect, RectPathIter, Shape, Size, Vec2};
@@ -285,22 +285,25 @@ impl ObjectsFuncs for ShapeRectangle {
         use SetEntityState::*;
         match set {
             SetSelect(value) => self.selected = value,
-            SelectFromPos(pos, ..) => {
-                self.selected = self.contains(pos.to_point());
-            }
             SetHighli(value) => self.highlighted = value,
-            HighliFromPos(pos, ..) => {
-                self.highlighted = self.contains(pos.to_point());
-            }
-
             SelectAllModifiers(value) => self.select_all_modifiers(value),
-            SelectModifierFromPos(pos, ..) => {
-                self.select_modifiers_from_pos(pos, Self::GRAB_RADIUS);
-            }
-
             HighliAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighliModifierFromPos(pos, ..) => {
-                self.highlight_modifiers_from_pos(pos, Self::GRAB_RADIUS);
+        }
+    }
+    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
+        use SetEntityStateFromPos::*;
+        match set {
+            SelectFromPos => {
+                self.selected = self.contains(pointer.pos().to_point());
+            }
+            HighliFromPos => {
+                self.highlighted = self.contains(pointer.pos().to_point());
+            }
+            SelectModifierFromPos => {
+                self.select_modifiers_from_pos(pointer.pos(), Self::GRAB_RADIUS);
+            }
+            HighliModifierFromPos => {
+                self.highlight_modifiers_from_pos(pointer.pos(), Self::GRAB_RADIUS);
             }
         }
     }
@@ -309,20 +312,14 @@ impl ObjectsFuncs for ShapeRectangle {
         ()
     }
 
-    fn move_position(&mut self, mut dpos: Vec2, snap: f64) -> Option<Vec2> {
-        dpos = snap_pt(dpos, snap);
+    fn move_position(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+        let dpos = pointer.dpos();
         self.tl.pos = self.tl.saved_pos + dpos;
         self.br.pos = self.br.saved_pos + dpos;
         self.update_polygon();
-        Some(self.get_position())
+        true
     }
-    fn move_modifier(
-        &mut self,
-        pos_init: Vec2,
-        pos: Vec2,
-        snap: f64,
-        _shift_pressed: bool,
-    ) -> Option<Vec2> {
+    fn move_modifier(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
         let tl_saved = self.tl.saved_pos;
         let br_saved = self.br.saved_pos;
         let tr_saved = self.get_tr_saved_modifier();
@@ -341,79 +338,93 @@ impl ObjectsFuncs for ShapeRectangle {
         let bottom_sel = self.bottom.selected;
         let left_sel = self.left.selected;
 
-        let dpos = pos - pos_init;
-        const MIN_SIZE: f64 = ShapeRectangle::MIN_SIZE;
+        let dpos = pointer.dpos();
+        let snap = pointer.get_snap().val();
 
         match (tl_sel, tr_sel, br_sel, bl_sel) {
             (true, false, false, false) => {
-                let mut tlpos = tl_saved + dpos;
-                tlpos.x = tlpos.x.min(br_saved.x - MIN_SIZE);
-                tlpos.y = tlpos.y.min(br_saved.y - MIN_SIZE);
-                self.tl.pos = snap_pt(tlpos, snap);
+                self.tl.pos = snap_pt(tl_saved - br_saved + dpos, snap) + br_saved;
+                if br_saved.x - self.tl.pos.x < Self::MIN_SIZE {
+                    self.tl.pos.x = br_saved.x - Self::MIN_SIZE;
+                }
+                if br_saved.y - self.tl.pos.y < Self::MIN_SIZE {
+                    self.tl.pos.y = br_saved.y - Self::MIN_SIZE;
+                }
                 self.update_polygon();
-                return Some(tlpos);
+                pointer.set_pos(self.tl.pos);
+                return true;
             }
             (false, true, false, false) => {
                 let mut trpos = tr_saved + dpos;
-                trpos.x = trpos.x.max(tl_saved.x + MIN_SIZE);
-                trpos.y = trpos.y.min(br_saved.y - MIN_SIZE);
+                trpos.x = trpos.x.max(tl_saved.x + Self::MIN_SIZE);
+                trpos.y = trpos.y.min(br_saved.y - Self::MIN_SIZE);
                 self.br.pos = snap_pt(Vec2::new(trpos.x, br_saved.y), snap);
                 self.tl.pos = snap_pt(Vec2::new(tl_saved.x, trpos.y), snap);
                 self.update_polygon();
-                return Some(trpos);
+                pointer.set_pos(trpos);
+                return true;
             }
             (false, false, true, false) => {
-                let mut brpos = br_saved + dpos;
-                brpos.x = brpos.x.max(bl_saved.x + MIN_SIZE);
-                brpos.y = brpos.y.max(tr_saved.y + MIN_SIZE);
-                self.br.pos = snap_pt(brpos, snap);
+                self.br.pos = tl_saved + snap_pt(br_saved - tl_saved + dpos, snap);
+                if self.br.pos.x - tl_saved.x < Self::MIN_SIZE {
+                    self.br.pos.x = tl_saved.x + Self::MIN_SIZE;
+                }
+                if self.br.pos.y - tl_saved.y < Self::MIN_SIZE {
+                    self.br.pos.y = tl_saved.y + Self::MIN_SIZE;
+                }
                 self.update_polygon();
-                return Some(brpos);
+                pointer.set_pos(self.br.pos);
+                return true;
             }
             (false, false, false, true) => {
                 let mut blpos = bl_saved + dpos;
-                blpos.x = blpos.x.min(br_saved.x - MIN_SIZE);
-                blpos.y = blpos.y.max(tl_saved.y + MIN_SIZE);
+                blpos.x = blpos.x.min(br_saved.x - Self::MIN_SIZE);
+                blpos.y = blpos.y.max(tl_saved.y + Self::MIN_SIZE);
                 self.tl.pos = snap_pt(Vec2::new(blpos.x, tl_saved.y), snap);
                 self.br.pos = snap_pt(Vec2::new(br_saved.x, blpos.y), snap);
                 self.update_polygon();
-                return Some(blpos);
+                pointer.set_pos(blpos);
+                return true;
             }
             _ => (),
         };
 
         match (top_sel, right_sel, bottom_sel, left_sel) {
             (true, false, false, false) => {
-                let mut toppos = top_saved + dpos;
-                toppos.y = toppos.y.min(bottom_saved.y - MIN_SIZE);
-                self.tl.pos = snap_pt(Vec2::new(tl_saved.x, toppos.y), snap);
+                let mut toppos = snap_pt(top_saved - bottom_saved + dpos, snap) + bottom_saved;
+                toppos.y = toppos.y.min(bottom_saved.y - Self::MIN_SIZE);
+                self.tl.pos.y = toppos.y;
                 self.update_polygon();
-                return Some(toppos);
+                pointer.set_pos(toppos);
+                return true;
             }
             (false, true, false, false) => {
-                let mut rightpos = right_saved + dpos;
-                rightpos.x = rightpos.x.max(left_saved.x + MIN_SIZE);
-                self.br.pos = snap_pt(Vec2::new(rightpos.x, br_saved.y), snap);
+                let mut rightpos = snap_pt(right_saved - left_saved + dpos, snap) + left_saved;
+                rightpos.x = rightpos.x.max(left_saved.x + Self::MIN_SIZE);
+                self.br.pos.x = rightpos.x;
                 self.update_polygon();
-                return Some(rightpos);
+                pointer.set_pos(rightpos);
+                return true;
             }
             (false, false, true, false) => {
-                let mut bottompos = bottom_saved + dpos;
-                bottompos.y = bottompos.y.max(top_saved.y + MIN_SIZE);
-                self.br.pos = snap_pt(Vec2::new(br_saved.x, bottompos.y), snap);
+                let mut bottompos = snap_pt(bottom_saved - top_saved + dpos, snap) + top_saved;
+                bottompos.y = bottompos.y.max(top_saved.y + Self::MIN_SIZE);
+                self.br.pos.y = bottompos.y;
                 self.update_polygon();
-                return Some(bottompos);
+                pointer.set_pos(bottompos);
+                return true;
             }
             (false, false, false, true) => {
-                let mut leftpos = left_saved + dpos;
-                leftpos.x = leftpos.x.min(right_saved.x - MIN_SIZE);
-                self.tl.pos = snap_pt(Vec2::new(leftpos.x, tl_saved.y), snap);
+                let mut leftpos = snap_pt(left_saved - right_saved + dpos, snap) + right_saved;
+                leftpos.x = leftpos.x.min(right_saved.x - Self::MIN_SIZE);
+                self.tl.pos.x = leftpos.x;
                 self.update_polygon();
-                return Some(leftpos);
+                pointer.set_pos(leftpos);
+                return true;
             }
             _ => (),
         };
-        None
+        false
     }
     fn get_position(&self) -> Vec2 {
         (self.tl.pos + self.br.pos) / 2.
@@ -467,7 +478,11 @@ impl ObjectsFuncs for ShapeRectangle {
             ),
         ]
     }
-    fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+    fn get_dimensions_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         let mut paths = vec![];
         let mut texts = vec![];
         let (path, text) = Dimension::new(
@@ -476,7 +491,7 @@ impl ObjectsFuncs for ShapeRectangle {
             self.get_tr_modifier(),
             self.get_width(),
         )
-        .get_path();
+        .get_path_and_pattern();
         paths.push(path);
         texts.push(text);
 
@@ -486,7 +501,7 @@ impl ObjectsFuncs for ShapeRectangle {
             self.tl.pos,
             self.get_height(),
         )
-        .get_path();
+        .get_path_and_pattern();
         paths.push(path);
         texts.push(text);
         (paths, texts)

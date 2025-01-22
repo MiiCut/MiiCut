@@ -152,9 +152,11 @@ pub struct Mouse {
 
     canvas_pos: Vec2,
     canvas_pos_ms_dwn: Vec2,
+    canvas_pos_ms_up: Vec2,
     last_draw_pos: Vec2,
     draw_pos: Vec2,
     draw_pos_down: Vec2,
+    draw_pos_up: Vec2,
     mouse_client: Vec2,
 }
 impl Mouse {
@@ -166,9 +168,11 @@ impl Mouse {
 
             canvas_pos: Vec2::ZERO,
             canvas_pos_ms_dwn: Vec2::ZERO,
+            canvas_pos_ms_up: Vec2::ZERO,
             last_draw_pos: Vec2::ZERO,
             draw_pos: Vec2::ZERO,
             draw_pos_down: Vec2::ZERO,
+            draw_pos_up: Vec2::ZERO,
             mouse_client: Vec2::ZERO,
         }
     }
@@ -201,7 +205,7 @@ impl Mouse {
                     if !self.moving {
                         return MouseState::LeftUp(pos);
                     } else {
-                        return MouseState::LeftUpMove(self.draw_pos_down, pos);
+                        return MouseState::LeftUpMove(self.draw_pos_up, pos);
                     }
                 }
             }
@@ -216,7 +220,7 @@ impl Mouse {
                     if !self.moving {
                         return MouseState::MiddleUp(pos);
                     } else {
-                        return MouseState::MiddleUpMove(self.draw_pos_down, pos);
+                        return MouseState::MiddleUpMove(self.draw_pos_up, pos);
                     }
                 }
             }
@@ -231,7 +235,7 @@ impl Mouse {
                     if !self.moving {
                         return MouseState::RightUp(pos);
                     } else {
-                        return MouseState::RightUpMove(self.draw_pos_down, pos);
+                        return MouseState::RightUpMove(self.draw_pos_up, pos);
                     }
                 }
             }
@@ -277,6 +281,8 @@ impl Mouse {
             }
             SystemMouse::Move => self.moving = true,
             SystemMouse::Up => {
+                self.canvas_pos_ms_up = self.canvas_pos;
+                self.draw_pos_up = self.draw_pos;
                 self.button_level = ButtonLevel::Up;
                 self.moving = false;
             }

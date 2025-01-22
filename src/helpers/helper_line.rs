@@ -2,11 +2,14 @@ use super::helpers::HelperKind;
 use super::helpers::HelperKindvars;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
+use crate::dimensions::DimKind;
+use crate::dimensions::Dimension;
 use crate::get_line_segment;
 use crate::is_near_line;
 use crate::math::*;
 use crate::prefab::*;
 use crate::traits::*;
+use crate::Pointer;
 use crate::Position;
 use crate::Value;
 use kurbo::BezPath;
@@ -39,15 +42,8 @@ impl HelperLine {
             selected: false,
         })
     }
-    pub fn magnet_to(&self, pos: Vec2) -> Option<Vec2> {
-        if self.selected {
-            return None;
-        }
-        if (pos - self.center.pos).hypot() < Self::GRAB_RADIUS {
-            Some(self.center.pos)
-        } else {
-            None
-        }
+    pub fn get_angle(&self) -> f64 {
+        self.angle.value
     }
     fn highlight_all_modifiers(&mut self, value: bool) {
         self.angle.highlighted = value;
@@ -55,7 +51,6 @@ impl HelperLine {
     fn select_all_modifiers(&mut self, value: bool) {
         self.angle.selected = value;
     }
-
     fn highlight_modifiers_from_pos(&mut self, pos: Vec2, _grab: f64) {
         self.angle.highlighted =
             is_near_line(self.center.pos, self.angle.value, pos, Self::GRAB_RADIUS);
@@ -136,22 +131,25 @@ impl ObjectsFuncs for HelperLine {
         use SetEntityState::*;
         match set {
             SetSelect(value) => self.selected = value,
-            SelectFromPos(pos, ..) => {
-                self.selected = (pos - self.center.pos).hypot() < Self::GRAB_RADIUS;
-            }
             SetHighli(value) => self.highlighted = value,
-            HighliFromPos(pos, ..) => {
-                self.highlighted = (pos - self.center.pos).hypot() < Self::GRAB_RADIUS;
-            }
-
             SelectAllModifiers(value) => self.select_all_modifiers(value),
-            SelectModifierFromPos(pos, precision, _) => {
-                self.select_modifiers_from_pos(pos, precision);
-            }
-
             HighliAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighliModifierFromPos(pos, precision, _) => {
-                self.highlight_modifiers_from_pos(pos, precision);
+        }
+    }
+    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
+        use SetEntityStateFromPos::*;
+        match set {
+            SelectFromPos => {
+                self.selected = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+            }
+            HighliFromPos => {
+                self.highlighted = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+            }
+            SelectModifierFromPos => {
+                self.select_modifiers_from_pos(pointer.pos(), pointer.get_grab_dist());
+            }
+            HighliModifierFromPos => {
+                self.highlight_modifiers_from_pos(pointer.pos(), pointer.get_grab_dist());
             }
         }
     }
@@ -160,23 +158,21 @@ impl ObjectsFuncs for HelperLine {
         ()
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2> {
-        self.center.pos = snap_pt(self.center.saved_pos + dpos, snap);
-        Some(self.get_position())
+    fn move_position(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+        self.center.pos = snap_pt(
+            self.center.saved_pos + pointer.dpos(),
+            pointer.get_snap().val(),
+        );
+        pointer.set_pos(self.center.pos);
+        true
     }
-    fn move_modifier(
-        &mut self,
-        _pos_init: Vec2,
-        pos: Vec2,
-        snap: f64,
-        _shift_pressed: bool,
-    ) -> Option<Vec2> {
+    fn move_modifier(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
         if self.angle.selected {
-            let angle = (pos - self.center.pos).atan2();
-            self.angle.value = snap_val(angle / PI * 180., snap) / 180. * PI;
-            return Some(pos);
+            let angle = (pointer.pos() - self.center.pos).atan2();
+            self.angle.value = snap_val(angle / PI * 180., pointer.get_snap().val()) / 180. * PI;
+            return true;
         }
-        None
+        false
     }
     fn get_position(&self) -> Vec2 {
         self.center.pos
@@ -187,28 +183,54 @@ impl ObjectsFuncs for HelperLine {
         _das: &Size,
         cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern)> {
-        let pattern_line = match (self.angle.selected, self.angle.highlighted) {
-            (false, false) => Pattern::HelperNormalCircle,
-            (false, true) => Pattern::HelperHighlightedCircle,
-            (true, false) => Pattern::HelperSelectedCircle,
-            (true, true) => Pattern::HelperSelectedCircle,
+        // Determine the appropriate pattern
+        let pattern_line = if self.angle.selected {
+            Pattern::HelperSelectedCircle
+        } else if self.angle.highlighted {
+            Pattern::HelperHighlightedCircle
+        } else {
+            Pattern::HelperNormalCircle
         };
-        let c_w = cinfo.0.width();
-        let c_h = cinfo.0.height();
-        let c_size = Size::new(c_w, c_h);
-        let scale = cinfo.1;
-        let offset = cinfo.2;
-        let c_center = to_canvas(self.center.pos, scale, offset);
-        let (pt_canvas_tl, pt_canvas_br) = get_line_segment(&c_size, c_center, self.angle.value);
-        let pt_tl = to_draw(pt_canvas_tl, scale, offset);
-        let pt_br = to_draw(pt_canvas_br, scale, offset);
+        // Extract canvas and scaling information
+        let canvas_width = cinfo.0.width();
+        let canvas_height = cinfo.0.height();
+        let scale_factor = cinfo.1;
+        let canvas_offset = cinfo.2;
+
+        // Transform the center position to canvas coordinates
+        let canvas_center = to_canvas(self.center.pos, scale_factor, canvas_offset);
+
+        // Compute the line segment points on the canvas
+        let (canvas_tl, canvas_br) = get_line_segment(
+            &Size::new(canvas_width, canvas_height),
+            canvas_center,
+            self.angle.value,
+        );
+
+        // Convert canvas points to drawing coordinates
+        let draw_tl = to_draw(canvas_tl, scale_factor, canvas_offset);
+        let draw_br = to_draw(canvas_br, scale_factor, canvas_offset);
+
+        // Construct the path and pattern
         vec![(
-            Line::new(pt_tl.to_point(), pt_br.to_point()).to_path(HelperLine::TOLERANCE),
+            Line::new(draw_tl.to_point(), draw_br.to_point()).to_path(HelperLine::TOLERANCE),
             pattern_line,
         )]
     }
-    fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
-        (vec![], vec![])
+
+    fn get_dimensions_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+        let mut paths = vec![];
+        let mut texts = vec![];
+        let end = get_point_at_dist_from_angle(self.center.pos, self.angle.value, 200.);
+        let dim = Dimension::new(DimKind::Angle, self.center.pos, end, self.angle.value);
+        let (path, text) = dim.get_path_and_pattern();
+        paths.push(path);
+        texts.push(text);
+        (paths, texts)
     }
     fn get_paths(&self, _: &Size) -> Vec<BezPath> {
         vec![]

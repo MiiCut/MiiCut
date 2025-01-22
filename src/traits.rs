@@ -1,4 +1,7 @@
-use crate::canvas::{CanvasText, Pattern};
+use crate::{
+    canvas::{CanvasText, Pattern},
+    Pointer,
+};
 use kurbo::{BezPath, Rect, Size, Vec2};
 use std::fmt::Debug;
 
@@ -12,15 +15,16 @@ pub enum GetEntityState {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SetEntityState {
     SetSelect(bool),
-    SelectFromPos(Vec2, f64, f64),
     SetHighli(bool),
-    HighliFromPos(Vec2, f64, f64),
-
     SelectAllModifiers(bool),
-    SelectModifierFromPos(Vec2, f64, f64),
-
     HighliAllModifiers(bool),
-    HighliModifierFromPos(Vec2, f64, f64),
+}
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SetEntityStateFromPos {
+    SelectFromPos,
+    HighliFromPos,
+    SelectModifierFromPos,
+    HighliModifierFromPos,
 }
 
 pub trait NewId {
@@ -52,17 +56,12 @@ pub trait ObjectsFuncs: Debug + Clone {
 
     fn get_state(&self, get: GetEntityState) -> Option<Vec2>;
     fn set_state(&mut self, set: SetEntityState);
+    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos);
 
     fn toggle_prop(&mut self);
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2>;
-    fn move_modifier(
-        &mut self,
-        pos_init: Vec2,
-        pos: Vec2,
-        snap: f64,
-        _shift_pressed: bool,
-    ) -> Option<Vec2>;
+    fn move_position(&mut self, pointer: &mut Pointer, shift_pressed: bool) -> bool;
+    fn move_modifier(&mut self, pointer: &mut Pointer, shift_pressed: bool) -> bool;
     fn get_position(&self) -> Vec2;
 
     fn get_paths(&self, das: &Size) -> Vec<BezPath>;
@@ -76,7 +75,11 @@ pub trait ObjectsFuncs: Debug + Clone {
         das: &Size,
         cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern)>;
-    fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>);
+    fn get_dimensions_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>);
     fn get_pattern_status(&self, selected: bool, highlighted: bool) -> Pattern {
         match (selected, highlighted) {
             (false, false) => Pattern::Modifiers,

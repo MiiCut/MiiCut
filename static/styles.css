@@ -1,38 +1,40 @@
 
 :root {
-    --canvas-transparent-color: rgba(255, 255, 255, 0);
-    --canvas-background-color: #dfdfdf4d;
-    --canvas-grid-primary-color: #7d7c686f;
-    --canvas-grid-secondary-color: #b5b5aa6f;
-    --canvas-rules-color: #212121;
-    --canvas-main-color: #8d8b8b;
+    --transparent-color: rgba(255, 255, 255, 0);
+    --background-color: #dfdfdf4d;
+    --grid-primary-color: #7d7c686f;
+    --grid-secondary-color: #b5b5aa6f;
+    --rules-color: #212121;
+    --main-color: #8d8b8b;
 
-    --canvas-modifiers-color: #ffffff6a;
-    --canvas-modifiers-highlight-color: #ffffffc7;
-    --canvas-modifiers-selected-color: #ff00008c;
+    --modifiers-color: #ffffff6a;
+    --modifiers-highlight-color: #ffffffc7;
+    --modifiers-selected-color: #ff00008c;
     /*  */
-    --canvas-basic-normal-color: #424242;
-    --canvas-basic-highlight-color:  #ffea00;
-    --canvas-basic-selected-color:  #ff0000;
-    --canvas-basic-normal-color-dark: #424242;
-    --canvas-basic-highlight-color-dark:  #ffffff;
-    --canvas-basic-selected-color-dark:  #ff0000;
+    --basic-normal-color: #424242;
+    --basic-highlight-color:  #ffea00;
+    --basic-selected-color:  #ff0000;
+    --basic-normal-color-dark: #424242;
+    --basic-highlight-color-dark:  #ffffff;
+    --basic-selected-color-dark:  #ff0000;
 
-    --canvas-helper-normal-color: #49004d8b;
-    --canvas-helper-highlight-color:  #fd07f94c;
-    --canvas-helper-selected-color:  #ff000097;
+    --helper-normal-color: #49004d8b;
+    --helper-highlight-color:  #fd07f94c;
+    --helper-selected-color:  #ff000097;
 
-    --canvas-composed-normal-color: #424242;
-    --canvas-composed-highlight-color:  #bfbb48;
-    --canvas-composed-selected-color:  #ff0000;
+    --composed-normal-color: #424242;
+    --composed-highlight-color:  #bfbb48;
+    --composed-selected-color:  #ff0000;
+    --composed-normal-fill-color: #4242428b;
+    --composed-highlight-fill-color:  #595721a1;
+    --composed-selected-fill-color:  #ff000097;
 
-    --canvas-composed-normal-fill-color: #4242428b;
-    --canvas-composed-highlight-fill-color:  #595721a1;
-    --canvas-composed-selected-fill-color:  #ff000097;
-
-    --canvas-dimension-normal-color: #060070;
-    --canvas-dimension-highlight-color:  #ffffff;
-    --canvas-dimension-selected-color:  #ff0000;
+    --dimension-normal-color: #000000aa;
+    --dimension-highlight-color:  #ffffff;
+    --dimension-selected-color:  #ff0000;
+    --dimension-text-normal-color: #000000;
+    --dimension-text-highlight-color:  #ffffff;
+    --dimension-text-selected-color:  #ff0000;
 }
 body, html {
     margin: 0;

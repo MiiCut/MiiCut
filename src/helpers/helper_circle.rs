@@ -8,8 +8,10 @@ use crate::math::*;
 use crate::prefab::modifiers_path;
 use crate::GetEntityState;
 use crate::ObjectsFuncs;
+use crate::Pointer;
 use crate::Position;
 use crate::SetEntityState;
+use crate::SetEntityStateFromPos;
 use crate::Value;
 use kurbo::BezPath;
 use kurbo::Circle;
@@ -42,6 +44,9 @@ impl HelperCircle {
             highlighted: false,
             selected: false,
         })
+    }
+    pub fn get_radius(&self) -> f64 {
+        self.radius.value
     }
     pub fn magnet_to(&self, pos: Vec2) -> Option<Vec2> {
         if self.selected {
@@ -145,22 +150,25 @@ impl ObjectsFuncs for HelperCircle {
         use SetEntityState::*;
         match set {
             SetSelect(value) => self.selected = value,
-            SelectFromPos(pos, ..) => {
-                self.selected = (pos - self.center.pos).hypot() < Self::GRAB_RADIUS;
-            }
             SetHighli(value) => self.highlighted = value,
-            HighliFromPos(pos, ..) => {
-                self.highlighted = (pos - self.center.pos).hypot() < Self::GRAB_RADIUS;
-            }
-
             SelectAllModifiers(value) => self.select_all_modifiers(value),
-            SelectModifierFromPos(pos, precision, _) => {
-                self.select_modifiers_from_pos(pos, precision);
-            }
-
             HighliAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighliModifierFromPos(pos, precision, _) => {
-                self.highlight_modifiers_from_pos(pos, precision);
+        }
+    }
+    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
+        use SetEntityStateFromPos::*;
+        match set {
+            SelectFromPos => {
+                self.selected = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+            }
+            HighliFromPos => {
+                self.highlighted = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+            }
+            SelectModifierFromPos => {
+                self.select_modifiers_from_pos(pointer.pos(), pointer.get_grab_dist());
+            }
+            HighliModifierFromPos => {
+                self.highlight_modifiers_from_pos(pointer.pos(), pointer.get_grab_dist());
             }
         }
     }
@@ -169,24 +177,21 @@ impl ObjectsFuncs for HelperCircle {
         ()
     }
 
-    fn move_position(&mut self, dpos: Vec2, snap: f64) -> Option<Vec2> {
-        self.center.pos = snap_pt(self.center.saved_pos + dpos, snap);
-        Some(self.get_position())
+    fn move_position(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+        self.center.pos = snap_pt(
+            self.center.saved_pos + pointer.dpos(),
+            pointer.get_snap().val(),
+        );
+        pointer.set_pos(self.center.pos);
+        true
     }
-    fn move_modifier(
-        &mut self,
-        pos_init: Vec2,
-        pos: Vec2,
-        snap: f64,
-        _shift_pressed: bool,
-    ) -> Option<Vec2> {
-        let dpos = pos - pos_init;
+    fn move_modifier(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
         let saved_radius = self.radius.saved_val;
-        let radius = snap_val(saved_radius + dpos.x, snap);
+        let radius = snap_val(saved_radius + pointer.dpos().x, pointer.get_snap().val());
         if radius >= HelperCircle::MIN_RADIUS {
             self.radius.value = radius;
         }
-        Some(pos)
+        true
     }
     fn get_position(&self) -> Vec2 {
         self.center.pos
@@ -205,13 +210,17 @@ impl ObjectsFuncs for HelperCircle {
         };
         vec![((self.get_circle().to_path(Self::TOLERANCE), pattern_circle))]
     }
-    fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+    fn get_dimensions_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         let mut paths = vec![];
         let mut texts = vec![];
         let offset = self.radius.value / 2_f64.sqrt();
         let end = self.center.pos + Vec2::new(offset, -offset);
-        let (path, text) =
-            Dimension::new(DimKind::Radius, self.center.pos, end, self.radius.value).get_path();
+        let (path, text) = Dimension::new(DimKind::Radius, self.center.pos, end, self.radius.value)
+            .get_path_and_pattern();
         paths.push(path);
         texts.push(text);
         (paths, texts)

@@ -758,6 +758,9 @@ pub struct DrawStyles {
     dimension_normal_color: String,
     dimension_highlight_color: String,
     dimension_selected_color: String,
+    dimension_text_normal_color: String,
+    dimension_text_highlight_color: String,
+    dimension_text_selected_color: String,
 
     // line patterns
     pattern_dashed: JsValue,
@@ -765,48 +768,46 @@ pub struct DrawStyles {
 }
 impl DrawStyles {
     pub fn build(style: CssStyleDeclaration) -> Result<DrawStyles, JsValue> {
-        let background_color = style.get_property_value("--canvas-background-color")?;
-        let grid_primary_color = style.get_property_value("--canvas-grid-primary-color")?;
-        let grid_secondary_color = style.get_property_value("--canvas-grid-secondary-color")?;
-        let rules_color = style.get_property_value("--canvas-rules-color")?;
-        let main_color = style.get_property_value("--canvas-main-color")?;
-        let modifiers_color = style.get_property_value("--canvas-modifiers-color")?;
-        let modifiers_highlight_color =
-            style.get_property_value("--canvas-modifiers-highlight-color")?;
-        let modifiers_selected_color =
-            style.get_property_value("--canvas-modifiers-selected-color")?;
-        let basic_normal_color = style.get_property_value("--canvas-basic-normal-color")?;
-        let basic_highlight_color = style.get_property_value("--canvas-basic-highlight-color")?;
-        let basic_selected_color = style.get_property_value("--canvas-basic-selected-color")?;
-        let basic_normal_color_dark =
-            style.get_property_value("--canvas-basic-normal-color-dark")?;
+        let background_color = style.get_property_value("--background-color")?;
+        let grid_primary_color = style.get_property_value("--grid-primary-color")?;
+        let grid_secondary_color = style.get_property_value("--grid-secondary-color")?;
+        let rules_color = style.get_property_value("--rules-color")?;
+        let main_color = style.get_property_value("--main-color")?;
+        let modifiers_color = style.get_property_value("--modifiers-color")?;
+        let modifiers_highlight_color = style.get_property_value("--modifiers-highlight-color")?;
+        let modifiers_selected_color = style.get_property_value("--modifiers-selected-color")?;
+        let basic_normal_color = style.get_property_value("--basic-normal-color")?;
+        let basic_highlight_color = style.get_property_value("--basic-highlight-color")?;
+        let basic_selected_color = style.get_property_value("--basic-selected-color")?;
+        let basic_normal_color_dark = style.get_property_value("--basic-normal-color-dark")?;
         let basic_highlight_color_dark =
-            style.get_property_value("--canvas-basic-highlight-color-dark")?;
-        let basic_selected_color_dark =
-            style.get_property_value("--canvas-basic-selected-color-dark")?;
+            style.get_property_value("--basic-highlight-color-dark")?;
+        let basic_selected_color_dark = style.get_property_value("--basic-selected-color-dark")?;
 
-        let helper_normal_color = style.get_property_value("--canvas-helper-normal-color")?;
-        let helper_highlight_color = style.get_property_value("--canvas-helper-highlight-color")?;
-        let helper_selected_color = style.get_property_value("--canvas-helper-selected-color")?;
+        let helper_normal_color = style.get_property_value("--helper-normal-color")?;
+        let helper_highlight_color = style.get_property_value("--helper-highlight-color")?;
+        let helper_selected_color = style.get_property_value("--helper-selected-color")?;
 
-        let composed_normal_color = style.get_property_value("--canvas-composed-normal-color")?;
-        let composed_highlight_color =
-            style.get_property_value("--canvas-composed-highlight-color")?;
-        let composed_selected_color =
-            style.get_property_value("--canvas-composed-selected-color")?;
+        let composed_normal_color = style.get_property_value("--composed-normal-color")?;
+        let composed_highlight_color = style.get_property_value("--composed-highlight-color")?;
+        let composed_selected_color = style.get_property_value("--composed-selected-color")?;
         let composed_normal_fill_color =
-            style.get_property_value("--canvas-composed-normal-fill-color")?;
+            style.get_property_value("--composed-normal-fill-color")?;
         let composed_highlight_fill_color =
-            style.get_property_value("--canvas-composed-highlight-fill-color")?;
+            style.get_property_value("--composed-highlight-fill-color")?;
         let composed_selected_fill_color =
-            style.get_property_value("--canvas-composed-selected-fill-color")?;
-        let dimension_normal_color = style.get_property_value("--canvas-dimension-normal-color")?;
-        let dimension_highlight_color =
-            style.get_property_value("--canvas-dimension-highlight-color")?;
-        let dimension_selected_color =
-            style.get_property_value("--canvas-dimension-selected-color")?;
+            style.get_property_value("--composed-selected-fill-color")?;
+        let dimension_normal_color = style.get_property_value("--dimension-normal-color")?;
+        let dimension_highlight_color = style.get_property_value("--dimension-highlight-color")?;
+        let dimension_selected_color = style.get_property_value("--dimension-selected-color")?;
+        let dimension_text_normal_color =
+            style.get_property_value("--dimension-text-normal-color")?;
+        let dimension_text_highlight_color =
+            style.get_property_value("--dimension-text-highlight-color")?;
+        let dimension_text_selected_color =
+            style.get_property_value("--dimension-text-selected-color")?;
 
-        let transparent_color = style.get_property_value("--canvas-transparent-color")?;
+        let transparent_color = style.get_property_value("--transparent-color")?;
 
         let dash_pattern = Array::new();
         dash_pattern.push(&JsValue::from_f64(4.0));
@@ -842,6 +843,9 @@ impl DrawStyles {
             dimension_normal_color,
             dimension_highlight_color,
             dimension_selected_color,
+            dimension_text_normal_color,
+            dimension_text_highlight_color,
+            dimension_text_selected_color,
             //
             transparent_color,
             //
@@ -875,6 +879,9 @@ impl DrawStyles {
             DimensionNormal => (&self.pattern_solid, 1., false),
             DimensionHighlighted => (&self.pattern_solid, 1., false),
             DimensionSelected => (&self.pattern_solid, 1., false),
+            DimensionTextNormal => (&self.pattern_solid, 1., false),
+            DimensionTextHighlighted => (&self.pattern_solid, 1., false),
+            DimensionTextSelected => (&self.pattern_solid, 1., false),
         };
         (line_dash, line_width, filled)
     }
@@ -926,6 +933,18 @@ impl DrawStyles {
                 &self.dimension_selected_color,
                 &self.dimension_selected_color,
             ),
+            DimensionTextNormal => (
+                &self.dimension_text_normal_color,
+                &self.dimension_text_normal_color,
+            ),
+            DimensionTextHighlighted => (
+                &self.dimension_text_highlight_color,
+                &self.dimension_text_highlight_color,
+            ),
+            DimensionTextSelected => (
+                &self.dimension_text_selected_color,
+                &self.dimension_text_selected_color,
+            ),
         };
         (fill_color, color)
     }
@@ -963,4 +982,7 @@ pub enum Pattern {
     DimensionNormal,
     DimensionHighlighted,
     DimensionSelected,
+    DimensionTextNormal,
+    DimensionTextHighlighted,
+    DimensionTextSelected,
 }

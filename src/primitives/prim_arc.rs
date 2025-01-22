@@ -1,8 +1,14 @@
-use super::{
-    d1::{D1KindIter, VertexChange},
-    primitives::PrimitiveControls,
+use super::primitives::{
+    GetPrimitiveState, PrimitiveControls, PrimitiveKindIter, SetPrimitiveState,
+    SetPrimitiveStateFromPos, VertexChange,
 };
-use crate::{canvas::Pattern, math::*, prefab::*, GetEntityState, SetEntityState, Value};
+use crate::{
+    canvas::{CanvasText, Pattern},
+    dimensions::{DimKind, Dimension},
+    math::*,
+    prefab::*,
+    Pointer, Value,
+};
 use kurbo::{BezPath, Shape, Size, Vec2};
 
 #[derive(Debug, Clone)]
@@ -27,9 +33,9 @@ impl PrimArc {
             selected: false,
         }
     }
-    pub fn get_center(&mut self, start: Vec2, end: Vec2) -> Vec2 {
+    pub fn get_center(&self, start: Vec2, end: Vec2) -> Vec2 {
         // Validate the radius
-        self.validate_radius(start, end);
+        // self.validate_radius(start, end);
         find_circle_center(start, end, self.radius.value, self.concavity)
     }
     pub fn validate_radius(&mut self, start: Vec2, end: Vec2) {
@@ -59,48 +65,46 @@ impl PrimitiveControls for PrimArc {
         self.radius.value = self.radius.saved_val;
         self.concavity = self.concavity_saved;
     }
-    fn update_vars(&mut self, start: Vec2, end: Vec2, _changed: VertexChange) -> Vec2 {
+    fn update_primitives_vars(&mut self, start: Vec2, end: Vec2, _changed: VertexChange) -> Vec2 {
         self.validate_radius(start, end);
         find_circle_center(start, end, self.radius.value, self.concavity)
     }
-    fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2> {
-        use GetEntityState::*;
+    fn get_state(&self, start: Vec2, end: Vec2, state: GetPrimitiveState) -> Option<Vec2> {
+        use GetPrimitiveState::*;
         match state {
-            IsAnyModifierHighligh | IsHighligh => {
-                if self.highlighted || self.radius.highlighted {
-                    Some(find_circle_center(
-                        start,
-                        end,
-                        self.radius.value,
-                        self.concavity,
-                    ))
-                } else {
-                    None
-                }
-            }
-            IsAnyModifierSelected | IsSelected => {
-                if self.selected || self.radius.selected {
-                    Some(find_circle_center(
-                        start,
-                        end,
-                        self.radius.value,
-                        self.concavity,
-                    ))
-                } else {
-                    None
-                }
-            }
+            IsSelected => self.selected.then(|| (start + end) / 2.),
+            IsHighligh => self.highlighted.then(|| (start + end) / 2.),
+            IsOtherModifiersSelected => self
+                .radius
+                .selected
+                .then(|| find_circle_center(start, end, self.radius.value, self.concavity)),
+            IsOtherModifiersHighligh => self
+                .radius
+                .highlighted
+                .then(|| find_circle_center(start, end, self.radius.value, self.concavity)),
+            _ => None,
         }
     }
-    fn set_state(&mut self, start: Vec2, end: Vec2, state: SetEntityState) {
-        use SetEntityState::*;
+    fn set_state(&mut self, _start: Vec2, _end: Vec2, state: SetPrimitiveState) {
+        use SetPrimitiveState::*;
         match state {
             SetSelect(value) => self.selected = value,
-            SelectAllModifiers(value) => self.radius.selected = value,
             SetHighli(value) => self.highlighted = value,
-            HighliAllModifiers(value) => self.radius.highlighted = value,
-
-            SelectFromPos(pos, _, _) => {
+            SelectAllOtherModifiers(value) => self.radius.selected = value,
+            HighliAllOtherModifiers(value) => self.radius.highlighted = value,
+            _ => (),
+        }
+    }
+    fn set_state_from_pos(
+        &mut self,
+        start: Vec2,
+        end: Vec2,
+        pointer: &mut Pointer,
+        state: SetPrimitiveStateFromPos,
+    ) {
+        use SetPrimitiveStateFromPos::*;
+        match state {
+            SelectFromPos => {
                 self.selected = is_point_near_arc(
                     &create_arc_from_center(
                         start,
@@ -108,11 +112,11 @@ impl PrimitiveControls for PrimArc {
                         find_circle_center(start, end, self.radius.value, self.concavity),
                         self.concavity,
                     ),
-                    pos,
+                    pointer.pos(),
                     Self::GRAB,
                 );
             }
-            HighliFromPos(pos, ..) => {
+            HighliFromPos => {
                 self.highlighted = is_point_near_arc(
                     &create_arc_from_center(
                         start,
@@ -120,33 +124,33 @@ impl PrimitiveControls for PrimArc {
                         find_circle_center(start, end, self.radius.value, self.concavity),
                         self.concavity,
                     ),
-                    pos,
+                    pointer.pos(),
                     Self::GRAB,
                 );
             }
-
-            SelectModifierFromPos(pos, ..) => {
+            SelectOtherModifierFromPos => {
                 let center = find_circle_center(start, end, self.radius.value, self.concavity);
-                self.radius.selected = (pos - center).hypot() < Self::GRAB;
+                self.radius.selected = (pointer.pos() - center).hypot() < Self::GRAB;
             }
-            HighliModifierFromPos(pos, ..) => {
+            HighliOtherModifierFromPos => {
                 let center = find_circle_center(start, end, self.radius.value, self.concavity);
-                self.radius.highlighted = (pos - center).hypot() < Self::GRAB;
+                self.radius.highlighted = (pointer.pos() - center).hypot() < Self::GRAB;
             }
+            _ => (),
         }
     }
+
     fn move_control_selected(
         &mut self,
         start: Vec2,
         end: Vec2,
-        pos_init: Vec2,
-        pos: Vec2,
-        _snap: f64,
+        pointer: &mut Pointer,
         _shift_pressed: bool,
-    ) -> Option<Vec2> {
+    ) -> bool {
         if self.radius.selected {
             let center = find_circle_center(start, end, self.radius.saved_val, self.concavity);
-            let dpos = pos - pos_init;
+            let pos = pointer.pos();
+            let dpos = pointer.dpos();
             let dpos_proj = perpendicular_point_with_projection(
                 (start - end) / 2.,
                 (end - start) / 2.,
@@ -158,25 +162,24 @@ impl PrimitiveControls for PrimArc {
             } else {
                 (pos - start).cross(end - start).signum()
             };
-            self.radius.value = sign * (center + dpos_proj - start).hypot();
-            Some(find_circle_center(
-                start,
-                end,
-                self.radius.value,
-                self.concavity,
-            ))
+            self.radius.value = snap_val(
+                sign * (center + dpos_proj - start).hypot(),
+                pointer.get_snap().val(),
+            );
+            self.validate_radius(start, end);
+            true
         } else {
-            None
+            false
         }
     }
-    fn path_elements(&self, start: Vec2, end: Vec2) -> D1KindIter {
+    fn path_elements(&self, start: Vec2, end: Vec2) -> PrimitiveKindIter {
         let f = create_arc_from_center(
             start,
             end,
             find_circle_center(start, end, self.radius.value, self.concavity),
             self.concavity,
         );
-        D1KindIter::Arc(f.path_elements(Self::TOLERANCE))
+        PrimitiveKindIter::Arc(f.path_elements(Self::TOLERANCE))
     }
     fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, _das: &Size) -> (BezPath, Pattern) {
         (
@@ -200,5 +203,24 @@ impl PrimitiveControls for PrimArc {
             self.get_mod_pattern(self.radius.selected, self.radius.highlighted),
         ));
         paths_patterns
+    }
+    fn get_dimensions_paths_and_patterns(
+        &self,
+        start: Vec2,
+        end: Vec2,
+        _das: &Size,
+    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+        let mut paths = vec![];
+        let mut texts = vec![];
+
+        let center = self.get_center(start, end);
+        let offset = self.radius.value / 2_f64.sqrt();
+        let end = center + Vec2::new(offset, -offset);
+        let (path, text) =
+            Dimension::new(DimKind::Radius, center, end, self.radius.value).get_path_and_pattern();
+
+        paths.push(path);
+        texts.push(text);
+        (paths, texts)
     }
 }

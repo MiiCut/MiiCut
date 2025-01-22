@@ -12,6 +12,7 @@ use crate::{
     positions::{Position, Value},
     prefab::{center_path, modifiers_path},
     traits::*,
+    Pointer,
 };
 use geo::{LineString, Polygon};
 use kurbo::{
@@ -257,22 +258,25 @@ impl ObjectsFuncs for ShapeOblong {
         use SetEntityState::*;
         match set {
             SetSelect(value) => self.selected = value,
-            SelectFromPos(pos, ..) => {
-                self.selected = self.contains(pos.to_point());
-            }
             SetHighli(value) => self.highlighted = value,
-            HighliFromPos(pos, ..) => {
-                self.highlighted = self.contains(pos.to_point());
-            }
-
             SelectAllModifiers(value) => self.select_all_modifiers(value),
-            SelectModifierFromPos(pos, ..) => {
-                self.select_modifiers_from_pos(pos, Self::GRAB_RADIUS);
-            }
-
             HighliAllModifiers(value) => self.highlight_all_modifiers(value),
-            HighliModifierFromPos(pos, ..) => {
-                self.highlight_modifiers_from_pos(pos, Self::GRAB_RADIUS);
+        }
+    }
+    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
+        use SetEntityStateFromPos::*;
+        match set {
+            SelectFromPos => {
+                self.selected = self.contains(pointer.pos().to_point());
+            }
+            HighliFromPos => {
+                self.highlighted = self.contains(pointer.pos().to_point());
+            }
+            SelectModifierFromPos => {
+                self.select_modifiers_from_pos(pointer.pos(), Self::GRAB_RADIUS);
+            }
+            HighliModifierFromPos => {
+                self.highlight_modifiers_from_pos(pointer.pos(), Self::GRAB_RADIUS);
             }
         }
     }
@@ -281,20 +285,14 @@ impl ObjectsFuncs for ShapeOblong {
         ()
     }
 
-    fn move_position(&mut self, mut dpos: Vec2, snap: f64) -> Option<Vec2> {
-        dpos = snap_pt(dpos, snap);
+    fn move_position(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+        let dpos = pointer.dpos();
         self.start.pos = self.start.saved_pos + dpos;
         self.end.pos = self.end.saved_pos + dpos;
         self.update_polygon();
-        Some(self.get_position())
+        true
     }
-    fn move_modifier(
-        &mut self,
-        pos_init: Vec2,
-        pos: Vec2,
-        snap: f64,
-        _shift_pressed: bool,
-    ) -> Option<Vec2> {
+    fn move_modifier(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
         let start_saved = self.start.saved_pos;
         let end_saved = self.end.saved_pos;
         let middle_saved = self.get_middle_modifier_saved();
@@ -304,7 +302,8 @@ impl ObjectsFuncs for ShapeOblong {
         let end_sel = self.end.selected;
         let width_sel = self.width.selected;
 
-        let dpos = pos - pos_init;
+        let dpos = pointer.dpos();
+        let snap = pointer.get_snap().val();
         let (dpos_proj, _) = project_to_perpendicular(start_saved, end_saved, dpos);
 
         match (start_sel, end_sel, width_sel) {
@@ -318,7 +317,8 @@ impl ObjectsFuncs for ShapeOblong {
                 if (start - end_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
                     self.start.pos = start;
                     self.update_polygon();
-                    return Some(self.start.pos);
+                    pointer.set_pos(self.start.pos);
+                    return true;
                 }
             }
             (false, true, false) => {
@@ -331,7 +331,8 @@ impl ObjectsFuncs for ShapeOblong {
                 if (end - start_saved).hypot() >= ShapeOblong::MIN_LENGTH_SIZE {
                     self.end.pos = end;
                     self.update_polygon();
-                    return Some(self.end.pos);
+                    pointer.set_pos(self.end.pos);
+                    return true;
                 }
             }
             (false, false, true) => {
@@ -345,12 +346,13 @@ impl ObjectsFuncs for ShapeOblong {
                 if width >= ShapeOblong::MIN_WIDTH_SIZE && dir1 * dir2 > 0. {
                     self.width.value = width;
                     self.update_polygon();
-                    return Some(self.get_middle_modifier());
+                    pointer.set_pos(self.get_middle_modifier());
+                    return true;
                 }
             }
             _ => (),
         }
-        None
+        false
     }
     fn get_position(&self) -> Vec2 {
         (self.start.pos + self.end.pos) / 2.
@@ -384,7 +386,11 @@ impl ObjectsFuncs for ShapeOblong {
             ),
         ]
     }
-    fn get_dimensions_paths(&self) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+    fn get_dimensions_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
         let mut paths = vec![];
         let mut texts = vec![];
         let start = self.start.pos;
@@ -396,18 +402,18 @@ impl ObjectsFuncs for ShapeOblong {
 
         let mut dim = Dimension::new(DimKind::Linear, start, end, length);
         dim.set_dim_offset(width / 2. + 6.);
-        let (path, text) = dim.get_path();
+        let (path, text) = dim.get_path_and_pattern();
         paths.push(path);
         texts.push(text);
 
         let mut dim = Dimension::new(DimKind::Linear, middle1_pt, middle2_pt, width);
         dim.set_dim_offset(length / 2. + width / 2. + 6.);
-        let (path, text) = dim.get_path();
+        let (path, text) = dim.get_path_and_pattern();
         paths.push(path);
         texts.push(text);
 
         let dim = Dimension::new(DimKind::Angle, start, end, 0.);
-        let (path, text) = dim.get_path();
+        let (path, text) = dim.get_path_and_pattern();
         paths.push(path);
         texts.push(text);
 

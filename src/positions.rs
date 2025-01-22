@@ -2,6 +2,94 @@
 use kurbo::Vec2;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
+pub enum SnapValue {
+    Snap1,
+    Snap5,
+    Snap10,
+}
+impl SnapValue {
+    pub fn val(&self) -> f64 {
+        match self {
+            SnapValue::Snap1 => 1.,
+            SnapValue::Snap5 => 5.,
+            SnapValue::Snap10 => 10.,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Pointer {
+    // Pointer position
+    pos_saved: Vec2,
+    pos: Vec2,
+
+    snap: SnapValue,
+    grab_dist: f64,
+    draw_scale: f64,
+    active: bool,
+    magnetized: bool,
+}
+impl Pointer {
+    pub fn new() -> Self {
+        Self {
+            pos_saved: Vec2::new(0., 0.),
+            pos: Vec2::new(0., 0.),
+
+            snap: SnapValue::Snap10,
+            grab_dist: 5.,
+            draw_scale: 1.,
+            active: false,
+            magnetized: false,
+        }
+    }
+    pub fn dpos(&self) -> Vec2 {
+        self.pos - self.pos_saved
+    }
+    pub fn pos(&self) -> Vec2 {
+        self.pos
+    }
+    pub fn pos_saved(&self) -> Vec2 {
+        self.pos_saved
+    }
+    pub fn set_pos(&mut self, pos: Vec2) {
+        self.pos = pos;
+        self.pos_saved = pos;
+    }
+    pub fn set_pos_rel(&mut self, dpos: Vec2) {
+        self.pos = self.pos_saved + dpos;
+    }
+    pub fn set_pos_saved(&mut self, pos: Vec2) {
+        self.pos_saved = pos;
+    }
+    pub fn set_draw_scale(&mut self, scale: f64) {
+        self.draw_scale = scale;
+    }
+    pub fn set_snap(&mut self, snap: SnapValue) {
+        self.snap = snap;
+    }
+    pub fn get_snap(&self) -> SnapValue {
+        self.snap
+    }
+    pub fn set_active(&mut self, active: bool) {
+        self.active = active;
+    }
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+    pub fn get_grab_dist(&self) -> f64 {
+        self.grab_dist
+    }
+    pub fn set_grab_dist(&mut self, grab_dist: f64) {
+        self.grab_dist = grab_dist;
+    }
+    pub fn set_magnetized(&mut self, magnetized: bool) {
+        self.magnetized = magnetized;
+    }
+    pub fn is_magnetized(&self) -> bool {
+        self.magnetized
+    }
+}
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Modifier {
     pub highlighted: bool,
     pub selected: bool,
@@ -56,12 +144,6 @@ impl Position {
             selected: false,
         }
     }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Pointer {
-    pub pos: Position,
-    pub active: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]

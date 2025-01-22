@@ -9,7 +9,9 @@
 use crate::shapes::shapes_pool::BSid;
 use approx::*;
 use geo::{LineString, Polygon};
-use kurbo::{flatten, Arc, BezPath, Line, ParamCurveNearest, PathEl, RoundedRectRadii, Size, Vec2};
+use kurbo::{
+    flatten, Arc, BezPath, Line, ParamCurveNearest, PathEl, Point, RoundedRectRadii, Size, Vec2,
+};
 use std::f64::consts::PI;
 use std::{
     error::Error,
@@ -588,12 +590,6 @@ pub fn _pos_to_polar(pos1: &Vec2, pos2: &Vec2) -> (Vec2, f64) {
 //     Vec2::ZERO
 // }
 
-pub fn _get_vec2_from_angle(radius: &Vec2, angle: f64) -> Vec2 {
-    let x = radius.x.abs() * angle.cos();
-    let y = radius.y.abs() * angle.sin();
-    Vec2 { x: x, y: y }
-}
-
 #[inline]
 pub fn get_line_angle(pt2: &Vec2, pt1: &Vec2) -> f64 {
     let pt = *pt2 - *pt1;
@@ -604,11 +600,6 @@ pub fn get_line_angle(pt2: &Vec2, pt1: &Vec2) -> f64 {
 pub fn is_same_direction(pt2: &Vec2, pt1: &Vec2, angle: f64) -> bool {
     let angle1 = get_line_angle(pt2, pt1);
     (angle1.tan() - angle.tan()).abs() <= 0.0001
-}
-
-#[inline]
-pub fn dotp(pt2: &Vec2, pt1: &Vec2) -> f64 {
-    pt2.x * pt1.x + pt2.y * pt1.y
 }
 
 // #[inline]
@@ -1144,43 +1135,87 @@ pub fn is_near_line(point: Vec2, angle: f64, cursor: Vec2, precision: f64) -> bo
     distance <= precision
 }
 
+// pub fn get_line_segment(size: &Size, point: Vec2, angle: f64) -> (Vec2, Vec2) {
+//     let width = size.width;
+//     let height = size.height;
+//     if angle.abs() == FRAC_PI_2 {
+//         let x = point.x;
+//         return (Vec2::new(x, 0.), Vec2::new(x, height));
+//     }
+//     let m = angle.tan();
+//     if m == 0. {
+//         let y = point.y;
+//         return (Vec2::new(0., y), Vec2::new(width, y));
+//     }
+//     // y= 0 intersection
+//     let x0 = -point.y / m + point.x;
+//     // y= height intersection
+//     let xh = (height - point.y) / m + point.x;
+//     // x= 0 intersection
+//     let y0 = m * -point.x + point.y;
+//     // x= width intersection
+//     let yw = m * (width - point.x) + point.y;
+//     let x0_inside = x0 >= 0. && x0 <= width;
+//     let xh_inside = xh >= 0. && xh <= width;
+//     let y0_inside = y0 >= 0. && y0 <= height;
+//     let yw_inside = yw >= 0. && yw <= height;
+//     match (x0_inside, xh_inside, y0_inside, yw_inside) {
+//         (true, true, false, false) => (Vec2::new(x0, 0.), Vec2::new(xh, height)),
+//         (false, false, true, true) => (Vec2::new(0., y0), Vec2::new(width, yw)),
+//         (true, false, false, true) => (Vec2::new(x0, 0.), Vec2::new(width, yw)),
+//         (true, false, true, false) => (Vec2::new(0., y0), Vec2::new(x0, 0.)),
+//         (false, true, false, true) => (Vec2::new(width, y0), Vec2::new(xh, height)),
+//         (false, true, true, false) => (Vec2::new(0., y0), Vec2::new(xh, height)),
+//         _ => (Vec2::new(0., 0.), Vec2::new(width, height)),
+//     }
+// }
+
 pub fn get_line_segment(size: &Size, point: Vec2, angle: f64) -> (Vec2, Vec2) {
     let width = size.width;
     let height = size.height;
 
-    if angle.abs() == FRAC_PI_2 {
+    // Handle vertical lines (angle = ±π/2)
+    if (angle - std::f64::consts::FRAC_PI_2).abs() < EPSILON
+        || (angle + std::f64::consts::FRAC_PI_2).abs() < EPSILON
+    {
         let x = point.x;
-        return (Vec2::new(x, 0.), Vec2::new(x, height));
+        return (Vec2::new(x, 0.0), Vec2::new(x, height));
     }
 
+    // Handle horizontal lines (angle = 0 or π)
     let m = angle.tan();
-    if m == 0. {
+    if m.abs() < EPSILON {
         let y = point.y;
-        return (Vec2::new(0., y), Vec2::new(width, y));
+        return (Vec2::new(0.0, y), Vec2::new(width, y));
     }
 
-    // y= 0 intersection
-    let x0 = -point.y / m + point.x;
-    // y= height intersection
-    let xh = (height - point.y) / m + point.x;
-    // x= 0 intersection
-    let y0 = m * -point.x + point.y;
-    // x= width intersection
-    let yw = m * (width - point.x) + point.y;
+    // Calculate intersections
+    let x0 = -point.y / m + point.x; // Intersection with y = 0
+    let xh = (height - point.y) / m + point.x; // Intersection with y = height
+    let y0 = m * -point.x + point.y; // Intersection with x = 0
+    let yw = m * (width - point.x) + point.y; // Intersection with x = width
 
-    let x0_inside = x0 >= 0. && x0 <= width;
-    let xh_inside = xh >= 0. && xh <= width;
-    let y0_inside = y0 >= 0. && y0 <= height;
-    let yw_inside = yw >= 0. && yw <= height;
+    // Collect valid points inside the canvas
+    let mut intersections = vec![];
+    if x0 >= 0.0 && x0 <= width {
+        intersections.push(Vec2::new(x0, 0.0));
+    }
+    if xh >= 0.0 && xh <= width {
+        intersections.push(Vec2::new(xh, height));
+    }
+    if y0 >= 0.0 && y0 <= height {
+        intersections.push(Vec2::new(0.0, y0));
+    }
+    if yw >= 0.0 && yw <= height {
+        intersections.push(Vec2::new(width, yw));
+    }
 
-    match (x0_inside, xh_inside, y0_inside, yw_inside) {
-        (true, true, false, false) => (Vec2::new(x0, 0.), Vec2::new(xh, height)),
-        (false, false, true, true) => (Vec2::new(0., y0), Vec2::new(width, yw)),
-        (true, false, false, true) => (Vec2::new(x0, 0.), Vec2::new(width, yw)),
-        (true, false, true, false) => (Vec2::new(0., y0), Vec2::new(x0, 0.)),
-        (false, true, false, true) => (Vec2::new(width, y0), Vec2::new(xh, height)),
-        (false, true, true, false) => (Vec2::new(0., y0), Vec2::new(xh, height)),
-        _ => (Vec2::new(0., 0.), Vec2::new(width, height)),
+    // Ensure two valid points
+    if intersections.len() == 2 {
+        (intersections[0], intersections[1])
+    } else {
+        // Fallback: Return a degenerate line if something goes wrong
+        (Vec2::new(0.0, 0.0), Vec2::new(width, height))
     }
 }
 
@@ -1498,4 +1533,110 @@ pub fn find_circle_center(pt1: Vec2, pt2: Vec2, r: f64, concavity: bool) -> Vec2
     } else {
         midpoint - perpendicular * h
     }
+}
+
+pub fn line_line_intersection(
+    point1: Vec2,
+    angle1: f64,
+    point2: Vec2,
+    angle2: f64,
+) -> Option<Vec2> {
+    // Direction vectors for the two lines
+    let dir1 = Vec2::new(angle1.cos(), angle1.sin());
+    let dir2 = Vec2::new(angle2.cos(), angle2.sin());
+
+    // Differences between the points
+    let delta = point2 - point1;
+
+    // Determinant (cross product of direction vectors)
+    let det = dir1.x * dir2.y - dir1.y * dir2.x;
+
+    // If determinant is zero, the lines are parallel or coincident
+    if det.abs() < f64::EPSILON {
+        return None;
+    }
+
+    // Solve for t and u
+    let t = (delta.x * dir2.y - delta.y * dir2.x) / det;
+
+    // Compute the intersection point
+    Some(point1 + dir1 * t)
+}
+
+/// Find the intersection points of a line (origin, angle) and a circle (center, radius)
+pub fn line_circle_intersection_with_angle(
+    origin: Vec2,
+    angle: f64,
+    center: Vec2,
+    radius: f64,
+) -> Option<(Vec2, Option<Vec2>)> {
+    // Line direction vector from the angle
+    let direction = Vec2::new(angle.cos(), angle.sin());
+    // Vector from the circle center to the line origin
+    let f = origin - center;
+    // Quadratic coefficients
+    let a = direction.dot(direction);
+    let b = 2.0 * f.dot(direction);
+    let c = f.dot(f) - radius.powi(2);
+    // Discriminant
+    let discriminant = b * b - 4.0 * a * c;
+    if discriminant < 0.0 {
+        // No intersection
+        None
+    } else {
+        let discriminant_sqrt = discriminant.sqrt();
+        let t1 = (-b - discriminant_sqrt) / (2.0 * a);
+        let t2 = (-b + discriminant_sqrt) / (2.0 * a);
+
+        // Calculate intersection points
+        match (t1.is_finite(), t2.is_finite()) {
+            (true, true) => {
+                if (t1 - t2).abs() < EPSILON {
+                    Some((origin + direction * t1, None))
+                } else {
+                    Some((origin + direction * t1, Some(origin + direction * t2)))
+                }
+            }
+            (true, false) => Some((origin + direction * t1, None)),
+            (false, true) => Some((origin + direction * t2, None)),
+            (false, false) => None,
+        }
+    }
+}
+
+/// Find the intersection points of two circles
+pub fn circle_circle_intersection(
+    center1: Vec2,
+    radius1: f64,
+    center2: Vec2,
+    radius2: f64,
+) -> Option<(Vec2, Option<Vec2>)> {
+    let d = (center2 - center1).hypot();
+    // No intersection cases
+    if d > radius1 + radius2 || d < (radius1 - radius2).abs() || d.abs() < f64::EPSILON {
+        return None;
+    }
+    let a = (radius1.powi(2) - radius2.powi(2) + d.powi(2)) / (2.0 * d);
+    let h = (radius1.powi(2) - a.powi(2)).sqrt();
+    let p2 = Point::new(
+        center1.x + a * (center2.x - center1.x) / d,
+        center1.y + a * (center2.y - center1.y) / d,
+    );
+    let intersection1 = Vec2::new(
+        p2.x + h * (center2.y - center1.y) / d,
+        p2.y - h * (center2.x - center1.x) / d,
+    );
+    let intersection2 = Vec2::new(
+        p2.x - h * (center2.y - center1.y) / d,
+        p2.y + h * (center2.x - center1.x) / d,
+    );
+    if intersection1 == intersection2 {
+        Some((intersection1, None))
+    } else {
+        Some((intersection1, Some(intersection2)))
+    }
+}
+
+pub fn get_point_at_dist_from_angle(origin: Vec2, angle: f64, dist: f64) -> Vec2 {
+    origin + Vec2::new(angle.cos(), angle.sin()) * dist
 }

@@ -1,9 +1,9 @@
 use kurbo::Vec2;
 
 use crate::helpers::helpers::Helper;
-use crate::pools::Pools;
+use crate::pools::{Pools, PoolsFunctions};
 use crate::shapes::shapes::BasicShape;
-use crate::traits::*;
+use crate::{traits::*, Pointer};
 
 #[derive(Clone, Debug)]
 pub enum ClipboardItem {
@@ -24,53 +24,51 @@ impl Clipboard {
         }
     }
 
-    pub fn copy_shapes(&mut self, shapes: Vec<BasicShape>, cursor_pos: Vec2) {
-        self.item_copy = Some(ClipboardItem::Shapes((shapes, cursor_pos)));
+    pub fn copy_shapes(&mut self, shapes: Vec<BasicShape>, pointer_pos: Vec2) {
+        self.item_copy = Some(ClipboardItem::Shapes((shapes, pointer_pos)));
         self.item_paste = None;
     }
 
-    pub fn copy_helpers(&mut self, helpers: Vec<Helper>, cursor_pos: Vec2) {
-        self.item_copy = Some(ClipboardItem::Helpers((helpers, cursor_pos)));
+    pub fn copy_helpers(&mut self, helpers: Vec<Helper>, pointer_pos: Vec2) {
+        self.item_copy = Some(ClipboardItem::Helpers((helpers, pointer_pos)));
         self.item_paste = None;
     }
 
-    pub fn move_paste(&mut self, cursor_pos: Vec2, snap: f64) {
+    pub fn move_paste(&mut self, pointer: &mut Pointer) {
         if let Some(item_paste) = self.item_paste.as_mut() {
             match item_paste {
-                ClipboardItem::Shapes((shapes, pos_copy)) => {
+                ClipboardItem::Shapes((shapes, _pos_copy)) => {
                     shapes.iter_mut().for_each(|shape| {
-                        shape
-                            .get_kind_mut()
-                            .move_position(cursor_pos - *pos_copy, snap);
+                        shape.get_kind_mut().move_position(pointer, false);
                     });
                 }
-                ClipboardItem::Helpers((helpers, pos_copy)) => {
+                ClipboardItem::Helpers((helpers, _pos_copy)) => {
                     helpers.iter_mut().for_each(|helper| {
-                        helper
-                            .get_kind_mut()
-                            .move_position(cursor_pos - *pos_copy, snap);
+                        helper.get_kind_mut().move_position(pointer, false);
                     });
                 }
             }
         }
     }
 
-    pub fn paste_item(&mut self, cursor_pos: Vec2, snap: f64) {
+    pub fn paste_item(&mut self, pointer: &mut Pointer) {
         if let Some(item_copy) = &self.item_copy {
             let mut item_paste = item_copy.clone();
             match &mut item_paste {
-                ClipboardItem::Shapes((shapes, pos_copy)) => {
+                ClipboardItem::Shapes((shapes, _pos_copy)) => {
+                    if shapes.len() == 1 {
+                        shapes
+                            .get(0)
+                            .map(|shape| pointer.set_pos(shape.get_kind().get_position()));
+                    }
                     shapes.iter_mut().for_each(|shape| {
-                        shape
-                            .get_kind_mut()
-                            .move_position(cursor_pos - *pos_copy, snap);
+                        shape.get_kind_mut().move_position(pointer, false);
                     });
                 }
-                ClipboardItem::Helpers((helpers, pos_copy)) => {
+                ClipboardItem::Helpers((helpers, _pos_copy)) => {
+                    // pointer.set_pos_saved(pointer.pos() - *pos_copy);
                     helpers.iter_mut().for_each(|helper| {
-                        helper
-                            .get_kind_mut()
-                            .move_position(cursor_pos - *pos_copy, snap);
+                        helper.get_kind_mut().move_position(pointer, false);
                     });
                 }
             }
@@ -112,12 +110,12 @@ impl Action for PasteAction {
         match &self.clip_item {
             ClipboardItem::Shapes((shapes, ..)) => {
                 shapes.iter().for_each(|shape| {
-                    pools.shapes.delete_shape(shape.get_id());
+                    pools.shapes.delete(shape.get_id());
                 });
             }
             ClipboardItem::Helpers((helpers, ..)) => {
                 helpers.iter().for_each(|helper| {
-                    pools.helpers.delete_helper(helper.get_id());
+                    pools.helpers.delete(helper.get_id());
                 });
             }
         }
@@ -127,12 +125,12 @@ impl Action for PasteAction {
         match &self.clip_item {
             ClipboardItem::Shapes((shapes, _)) => {
                 shapes.iter().for_each(|shape| {
-                    pools.shapes.add_shape(shape.clone());
+                    pools.shapes.add(shape.clone());
                 });
             }
             ClipboardItem::Helpers((helpers, _)) => {
                 helpers.iter().for_each(|helper| {
-                    pools.helpers.add_helper(helper.clone());
+                    pools.helpers.add(helper.clone());
                 });
             }
         }
