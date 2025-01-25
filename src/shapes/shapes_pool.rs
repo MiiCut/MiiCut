@@ -4,14 +4,14 @@ use super::{
     shape_oblong::ShapeOblong,
     shape_rectangle::ShapeRectangle,
     shape_rectangle_rounded::ShapeRectRounded,
-    shapes::{BSKindvars, BasicShape, BoolOps},
+    shapes::{BSKind, BSKindvars, BasicShape, BoolOps},
 };
 use crate::{
     clipboard::Action,
     math::*,
     pools::{PoolsFunctions, HS},
     traits::*,
-    IconsShapes, Pointer, Pools,
+    IconsShapes, KeysStates, Pointer, Pools,
 };
 use geo::{BooleanOps, Intersects, MultiPolygon, Polygon};
 use kurbo::{BezPath, Vec2};
@@ -182,6 +182,19 @@ impl ShapesPool {
     pub fn get_full_segs(&mut self) -> Vec<BezPath> {
         self.full_segs.clone()
     }
+    pub fn get_shape_custom_on_select(&self) -> Option<BSid> {
+        for (shid, shape) in self.shapes.iter() {
+            if let BSKind::Custom(shape_custom) = shape.get_kind() {
+                if shape_custom
+                    .get_state(GetEntityState::IsAnyModifierSelected)
+                    .is_some()
+                {
+                    return Some(*shid);
+                }
+            }
+        }
+        None
+    }
 }
 
 impl PoolsFunctions for ShapesPool {
@@ -281,6 +294,7 @@ impl PoolsFunctions for ShapesPool {
                         .get_kind_mut()
                         .set_state(SetEntityState::SetSelect(true));
                     pointer.set_pos(shape.get_kind().get_position());
+                    pointer.save_pos();
                     return true;
                 }
             }
@@ -428,15 +442,25 @@ impl PoolsFunctions for ShapesPool {
         None
     }
 
-    fn move_position(&mut self, shid: BSid, pointer: &mut Pointer, shift_pressed: bool) -> bool {
+    fn move_position(
+        &mut self,
+        shid: BSid,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+    ) -> bool {
         if let Some(shape) = self.shapes.get_mut(&shid) {
-            return shape.get_kind_mut().move_position(pointer, shift_pressed);
+            return shape.get_kind_mut().move_position(pointer, keys_states);
         }
         false
     }
-    fn move_modifier(&mut self, shid: BSid, pointer: &mut Pointer, shift_pressed: bool) -> bool {
+    fn move_modifier(
+        &mut self,
+        shid: BSid,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+    ) -> bool {
         if let Some(shape) = self.shapes.get_mut(&shid) {
-            return shape.get_kind_mut().move_modifier(pointer, shift_pressed);
+            return shape.get_kind_mut().move_modifier(pointer, keys_states);
         }
         false
     }

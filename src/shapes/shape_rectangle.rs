@@ -12,7 +12,7 @@ use crate::{
     positions::Position,
     prefab::{center_path, modifiers_path},
     traits::*,
-    Modifier, Pointer,
+    KeysStates, Modifier, Pointer,
 };
 use geo::{LineString, Polygon};
 use kurbo::{BezPath, PathEl, Point, Rect, RectPathIter, Shape, Size, Vec2};
@@ -64,7 +64,7 @@ impl ShapeRectangle {
     }
 
     fn update_polygon(&mut self) {
-        self.segs = calc_segs(self.get_paths(&Size::ZERO));
+        self.segs = calc_segs(self.to_path(Self::TOLERANCE));
         self.polygon = calc_polygon(&self.segs);
     }
     fn get_width(&self) -> f64 {
@@ -141,25 +141,113 @@ impl ShapeRectangle {
         self.left.selected = value;
     }
 
-    fn highlight_modifiers_from_pos(&mut self, pos: Vec2, grab: f64) {
-        self.tl.highlighted = (pos - self.tl.pos).hypot() < grab;
-        self.tr.highlighted = (pos - self.get_tr_modifier()).hypot() < grab;
-        self.br.highlighted = (pos - self.br.pos).hypot() < grab;
-        self.bl.highlighted = (pos - self.get_bl_modifier()).hypot() < grab;
-        self.top.highlighted = (pos - self.get_top_modifier()).hypot() < grab;
-        self.right.highlighted = (pos - self.get_right_modifier()).hypot() < grab;
-        self.bottom.highlighted = (pos - self.get_bottom_modifier()).hypot() < grab;
-        self.left.highlighted = (pos - self.get_left_modifier()).hypot() < grab;
+    fn highlight_modifiers_from_pos(&mut self, pointer: &mut Pointer, grab: f64) {
+        if (pointer.pos() - self.tl.pos).hypot() < grab {
+            self.tl.highlighted = true;
+            pointer.set_pos(self.tl.pos);
+        } else {
+            self.tl.highlighted = false;
+        }
+        if (pointer.pos() - self.get_tr_modifier()).hypot() < grab {
+            self.tr.highlighted = true;
+            pointer.set_pos(self.get_tr_modifier());
+        } else {
+            self.tr.highlighted = false;
+        }
+        if (pointer.pos() - self.br.pos).hypot() < grab {
+            self.br.highlighted = true;
+            pointer.set_pos(self.br.pos);
+        } else {
+            self.br.highlighted = false;
+        }
+        if (pointer.pos() - self.get_bl_modifier()).hypot() < grab {
+            self.bl.highlighted = true;
+            pointer.set_pos(self.get_bl_modifier());
+        } else {
+            self.bl.highlighted = false;
+        }
+        if (pointer.pos() - self.get_top_modifier()).hypot() < grab {
+            self.top.highlighted = true;
+            pointer.set_pos(self.get_top_modifier());
+        } else {
+            self.top.highlighted = false;
+        }
+        if (pointer.pos() - self.get_right_modifier()).hypot() < grab {
+            self.right.highlighted = true;
+            pointer.set_pos(self.get_right_modifier());
+        } else {
+            self.right.highlighted = false;
+        }
+        if (pointer.pos() - self.get_bottom_modifier()).hypot() < grab {
+            self.bottom.highlighted = true;
+            pointer.set_pos(self.get_bottom_modifier());
+        } else {
+            self.bottom.highlighted = false;
+        }
+        if (pointer.pos() - self.get_left_modifier()).hypot() < grab {
+            self.left.highlighted = true;
+            pointer.set_pos(self.get_left_modifier());
+        } else {
+            self.left.highlighted = false;
+        }
     }
-    fn select_modifiers_from_pos(&mut self, pos: Vec2, grab: f64) {
-        self.tl.selected = (pos - self.tl.pos).hypot() < grab;
-        self.tr.selected = (pos - self.get_tr_modifier()).hypot() < grab;
-        self.br.selected = (pos - self.br.pos).hypot() < grab;
-        self.bl.selected = (pos - self.get_bl_modifier()).hypot() < grab;
-        self.top.selected = (pos - self.get_top_modifier()).hypot() < grab;
-        self.right.selected = (pos - self.get_right_modifier()).hypot() < grab;
-        self.bottom.selected = (pos - self.get_bottom_modifier()).hypot() < grab;
-        self.left.selected = (pos - self.get_left_modifier()).hypot() < grab;
+    fn select_modifiers_from_pos(&mut self, pointer: &mut Pointer, grab: f64) {
+        if (pointer.pos() - self.tl.pos).hypot() < grab {
+            self.tl.selected = true;
+            pointer.set_pos(self.tl.pos);
+            pointer.save_pos();
+        } else {
+            self.tl.selected = false;
+        }
+        if (pointer.pos() - self.get_tr_modifier()).hypot() < grab {
+            self.tr.selected = true;
+            pointer.set_pos(self.get_tr_modifier());
+            pointer.save_pos();
+        } else {
+            self.tr.selected = false;
+        }
+        if (pointer.pos() - self.br.pos).hypot() < grab {
+            self.br.selected = true;
+            pointer.set_pos(self.br.pos);
+            pointer.save_pos();
+        } else {
+            self.br.selected = false;
+        }
+        if (pointer.pos() - self.get_bl_modifier()).hypot() < grab {
+            self.bl.selected = true;
+            pointer.set_pos(self.get_bl_modifier());
+            pointer.save_pos();
+        } else {
+            self.bl.selected = false;
+        }
+        if (pointer.pos() - self.get_top_modifier()).hypot() < grab {
+            self.top.selected = true;
+            pointer.set_pos(self.get_top_modifier());
+            pointer.save_pos();
+        } else {
+            self.top.selected = false;
+        }
+        if (pointer.pos() - self.get_right_modifier()).hypot() < grab {
+            self.right.selected = true;
+            pointer.set_pos(self.get_right_modifier());
+            pointer.save_pos();
+        } else {
+            self.right.selected = false;
+        }
+        if (pointer.pos() - self.get_bottom_modifier()).hypot() < grab {
+            self.bottom.selected = true;
+            pointer.set_pos(self.get_bottom_modifier());
+            pointer.save_pos();
+        } else {
+            self.bottom.selected = false;
+        }
+        if (pointer.pos() - self.get_left_modifier()).hypot() < grab {
+            self.left.selected = true;
+            pointer.set_pos(self.get_left_modifier());
+            pointer.save_pos();
+        } else {
+            self.left.selected = false;
+        }
     }
 }
 impl Display for ShapeRectangle {
@@ -300,10 +388,10 @@ impl ObjectsFuncs for ShapeRectangle {
                 self.highlighted = self.contains(pointer.pos().to_point());
             }
             SelectModifierFromPos => {
-                self.select_modifiers_from_pos(pointer.pos(), Self::GRAB_RADIUS);
+                self.select_modifiers_from_pos(pointer, Self::GRAB_RADIUS);
             }
             HighliModifierFromPos => {
-                self.highlight_modifiers_from_pos(pointer.pos(), Self::GRAB_RADIUS);
+                self.highlight_modifiers_from_pos(pointer, Self::GRAB_RADIUS);
             }
         }
     }
@@ -312,14 +400,14 @@ impl ObjectsFuncs for ShapeRectangle {
         ()
     }
 
-    fn move_position(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+    fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         let dpos = pointer.dpos();
         self.tl.pos = self.tl.saved_pos + dpos;
         self.br.pos = self.br.saved_pos + dpos;
         self.update_polygon();
         true
     }
-    fn move_modifier(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+    fn move_modifier(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
         let tl_saved = self.tl.saved_pos;
         let br_saved = self.br.saved_pos;
         let tr_saved = self.get_tr_saved_modifier();
@@ -343,47 +431,76 @@ impl ObjectsFuncs for ShapeRectangle {
 
         match (tl_sel, tr_sel, br_sel, bl_sel) {
             (true, false, false, false) => {
-                self.tl.pos = snap_pt(tl_saved - br_saved + dpos, snap) + br_saved;
-                if br_saved.x - self.tl.pos.x < Self::MIN_SIZE {
-                    self.tl.pos.x = br_saved.x - Self::MIN_SIZE;
+                self.tl.pos = if pointer.is_magnetized() {
+                    tl_saved + dpos
+                } else {
+                    br_saved + snap_pt(tl_saved - br_saved + dpos, snap)
+                };
+                if self.br.pos.x - self.tl.pos.x < Self::MIN_SIZE {
+                    self.tl.pos.x = self.br.pos.x - Self::MIN_SIZE;
                 }
-                if br_saved.y - self.tl.pos.y < Self::MIN_SIZE {
-                    self.tl.pos.y = br_saved.y - Self::MIN_SIZE;
+                if self.br.pos.y - self.tl.pos.y < Self::MIN_SIZE {
+                    self.tl.pos.y = self.br.pos.y - Self::MIN_SIZE;
                 }
                 self.update_polygon();
-                pointer.set_pos(self.tl.pos);
                 return true;
             }
             (false, true, false, false) => {
-                let mut trpos = tr_saved + dpos;
-                trpos.x = trpos.x.max(tl_saved.x + Self::MIN_SIZE);
-                trpos.y = trpos.y.min(br_saved.y - Self::MIN_SIZE);
-                self.br.pos = snap_pt(Vec2::new(trpos.x, br_saved.y), snap);
-                self.tl.pos = snap_pt(Vec2::new(tl_saved.x, trpos.y), snap);
+                let tr_pos = if pointer.is_magnetized() {
+                    tr_saved + dpos
+                } else {
+                    Vec2::new(
+                        tl_saved.x + snap_val(tr_saved.x - tl_saved.x + dpos.x, snap),
+                        br_saved.y + snap_val(tr_saved.y - br_saved.y + dpos.y, snap),
+                    )
+                };
+                self.br.pos.x = tr_pos.x;
+                self.tl.pos.y = tr_pos.y;
+
+                if self.br.pos.x - self.tl.pos.x < Self::MIN_SIZE {
+                    self.br.pos.x = self.tl.pos.x + Self::MIN_SIZE;
+                }
+                if self.br.pos.y - self.tl.pos.y < Self::MIN_SIZE {
+                    self.tl.pos.y = self.br.pos.y - Self::MIN_SIZE;
+                }
                 self.update_polygon();
-                pointer.set_pos(trpos);
                 return true;
             }
             (false, false, true, false) => {
-                self.br.pos = tl_saved + snap_pt(br_saved - tl_saved + dpos, snap);
-                if self.br.pos.x - tl_saved.x < Self::MIN_SIZE {
-                    self.br.pos.x = tl_saved.x + Self::MIN_SIZE;
+                self.br.pos = if pointer.is_magnetized() {
+                    br_saved + dpos
+                } else {
+                    tl_saved + snap_pt(br_saved - tl_saved + dpos, snap)
+                };
+
+                if self.br.pos.x - self.tl.pos.x < Self::MIN_SIZE {
+                    self.br.pos.x = self.tl.pos.x + Self::MIN_SIZE;
                 }
-                if self.br.pos.y - tl_saved.y < Self::MIN_SIZE {
-                    self.br.pos.y = tl_saved.y + Self::MIN_SIZE;
+                if self.br.pos.y - self.tl.pos.y < Self::MIN_SIZE {
+                    self.br.pos.y = self.tl.pos.y + Self::MIN_SIZE;
                 }
                 self.update_polygon();
-                pointer.set_pos(self.br.pos);
                 return true;
             }
             (false, false, false, true) => {
-                let mut blpos = bl_saved + dpos;
-                blpos.x = blpos.x.min(br_saved.x - Self::MIN_SIZE);
-                blpos.y = blpos.y.max(tl_saved.y + Self::MIN_SIZE);
-                self.tl.pos = snap_pt(Vec2::new(blpos.x, tl_saved.y), snap);
-                self.br.pos = snap_pt(Vec2::new(br_saved.x, blpos.y), snap);
+                let bl_pos = if pointer.is_magnetized() {
+                    bl_saved + dpos
+                } else {
+                    Vec2::new(
+                        br_saved.x + snap_val(bl_saved.x - br_saved.x + dpos.x, snap),
+                        tl_saved.y + snap_val(bl_saved.y - tl_saved.y + dpos.y, snap),
+                    )
+                };
+                self.tl.pos.x = bl_pos.x;
+                self.br.pos.y = bl_pos.y;
+
+                if self.br.pos.x - self.tl.pos.x < Self::MIN_SIZE {
+                    self.tl.pos.x = self.br.pos.x - Self::MIN_SIZE;
+                }
+                if self.br.pos.y - self.tl.pos.y < Self::MIN_SIZE {
+                    self.br.pos.y = self.tl.pos.y + Self::MIN_SIZE;
+                }
                 self.update_polygon();
-                pointer.set_pos(blpos);
                 return true;
             }
             _ => (),
@@ -391,35 +508,47 @@ impl ObjectsFuncs for ShapeRectangle {
 
         match (top_sel, right_sel, bottom_sel, left_sel) {
             (true, false, false, false) => {
-                let mut toppos = snap_pt(top_saved - bottom_saved + dpos, snap) + bottom_saved;
+                let mut toppos = if pointer.is_magnetized() {
+                    top_saved + dpos
+                } else {
+                    snap_pt(top_saved - bottom_saved + dpos, snap) + bottom_saved
+                };
                 toppos.y = toppos.y.min(bottom_saved.y - Self::MIN_SIZE);
                 self.tl.pos.y = toppos.y;
                 self.update_polygon();
-                pointer.set_pos(toppos);
                 return true;
             }
             (false, true, false, false) => {
-                let mut rightpos = snap_pt(right_saved - left_saved + dpos, snap) + left_saved;
+                let mut rightpos = if pointer.is_magnetized() {
+                    right_saved + dpos
+                } else {
+                    snap_pt(right_saved - left_saved + dpos, snap) + left_saved
+                };
                 rightpos.x = rightpos.x.max(left_saved.x + Self::MIN_SIZE);
                 self.br.pos.x = rightpos.x;
                 self.update_polygon();
-                pointer.set_pos(rightpos);
                 return true;
             }
             (false, false, true, false) => {
-                let mut bottompos = snap_pt(bottom_saved - top_saved + dpos, snap) + top_saved;
+                let mut bottompos = if pointer.is_magnetized() {
+                    bottom_saved + dpos
+                } else {
+                    snap_pt(bottom_saved - top_saved + dpos, snap) + top_saved
+                };
                 bottompos.y = bottompos.y.max(top_saved.y + Self::MIN_SIZE);
                 self.br.pos.y = bottompos.y;
                 self.update_polygon();
-                pointer.set_pos(bottompos);
                 return true;
             }
             (false, false, false, true) => {
-                let mut leftpos = snap_pt(left_saved - right_saved + dpos, snap) + right_saved;
+                let mut leftpos = if pointer.is_magnetized() {
+                    left_saved + dpos
+                } else {
+                    snap_pt(left_saved - right_saved + dpos, snap) + right_saved
+                };
                 leftpos.x = leftpos.x.min(right_saved.x - Self::MIN_SIZE);
                 self.tl.pos.x = leftpos.x;
                 self.update_polygon();
-                pointer.set_pos(leftpos);
                 return true;
             }
             _ => (),
@@ -482,51 +611,37 @@ impl ObjectsFuncs for ShapeRectangle {
         &self,
         _: &Size,
         _: (Rect, f64, Vec2),
-    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
-        let mut paths = vec![];
-        let mut texts = vec![];
-        let (path, text) = Dimension::new(
+    ) -> Vec<(BezPath, Pattern, CanvasText)> {
+        let mut res = vec![];
+
+        let dim = Dimension::new(
             DimKind::Horizontal,
             self.tl.pos,
             self.get_tr_modifier(),
             self.get_width(),
         )
         .get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
+        res.push(dim);
 
-        let (path, text) = Dimension::new(
+        let dim = Dimension::new(
             DimKind::Vertical,
             self.get_bl_modifier(),
             self.tl.pos,
             self.get_height(),
         )
         .get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
-        (paths, texts)
+        res.push(dim);
+
+        res
     }
-    fn get_paths(&self, _: &Size) -> Vec<BezPath> {
-        if self.good_size() {
-            vec![self.get_rectangle().to_path(Self::TOLERANCE)]
-        } else {
-            vec![BezPath::new()]
-        }
-    }
-    fn get_paths_and_patterns(&self, das: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
+    fn get_paths_and_patterns(&self, _das: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         let pattern = match (self.selected, self.highlighted) {
             (false, false) => Pattern::BasicNormal,
             (false, true) => Pattern::BasicHighlighted,
             (true, false) => Pattern::BasicSelected,
             (true, true) => Pattern::BasicSelected,
         };
-
-        let mut paths = self.get_paths(das);
-        let result = paths
-            .iter_mut()
-            .map(|path| (path.clone(), pattern))
-            .collect();
-        result
+        vec![(self.to_path(Self::TOLERANCE), pattern)]
     }
 }
 

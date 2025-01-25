@@ -12,7 +12,7 @@ use crate::{
     positions::{Position, Value},
     prefab::{center_path, modifiers_path},
     traits::*,
-    Modifier, Pointer,
+    KeysStates, Modifier, Pointer,
 };
 use geo::{LineString, Polygon};
 use kurbo::{
@@ -77,7 +77,7 @@ impl ShapeRectRounded {
     }
 
     fn update_polygon(&mut self) {
-        self.segs = calc_segs(self.get_paths(&Size::ZERO));
+        self.segs = calc_segs(self.to_path(Self::TOLERANCE));
         self.polygon = calc_polygon(&self.segs);
     }
     fn get_width(&self) -> f64 {
@@ -398,7 +398,7 @@ impl ObjectsFuncs for ShapeRectRounded {
         ()
     }
 
-    fn move_position(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+    fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         let dpos = snap_pt(pointer.dpos(), pointer.get_snap().val());
         self.tl.pos = self.tl.saved_pos + dpos;
         self.br.pos = self.br.saved_pos + dpos;
@@ -406,7 +406,7 @@ impl ObjectsFuncs for ShapeRectRounded {
         pointer.set_pos(self.get_position());
         true
     }
-    fn move_modifier(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+    fn move_modifier(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
         const MIN_SIZE: f64 = ShapeRectRounded::MIN_SIZE;
         const RAD_MIN_SIZE: f64 = ShapeRectRounded::RAD_MIN_SIZE;
 
@@ -446,7 +446,6 @@ impl ObjectsFuncs for ShapeRectRounded {
                 tlpos.y = tlpos.y.min(br_saved.y - MIN_SIZE);
                 self.tl.pos = snap_pt(tlpos, snap);
                 self.update_polygon();
-                pointer.set_pos(tlpos);
             }
             (false, true, false, false) => {
                 let mut trpos = tr_saved + dpos;
@@ -455,7 +454,6 @@ impl ObjectsFuncs for ShapeRectRounded {
                 self.br.pos = snap_pt(Vec2::new(trpos.x, br_saved.y), snap);
                 self.tl.pos = snap_pt(Vec2::new(tl_saved.x, trpos.y), snap);
                 self.update_polygon();
-                pointer.set_pos(trpos);
             }
             (false, false, true, false) => {
                 let mut brpos = br_saved + dpos;
@@ -463,7 +461,6 @@ impl ObjectsFuncs for ShapeRectRounded {
                 brpos.y = brpos.y.max(tr_saved.y + MIN_SIZE);
                 self.br.pos = snap_pt(brpos, snap);
                 self.update_polygon();
-                pointer.set_pos(brpos);
             }
             (false, false, false, true) => {
                 let mut blpos = bl_saved + dpos;
@@ -472,7 +469,6 @@ impl ObjectsFuncs for ShapeRectRounded {
                 self.tl.pos = snap_pt(Vec2::new(blpos.x, tl_saved.y), snap);
                 self.br.pos = snap_pt(Vec2::new(br_saved.x, blpos.y), snap);
                 self.update_polygon();
-                pointer.set_pos(blpos);
             }
             _ => (),
         };
@@ -483,28 +479,24 @@ impl ObjectsFuncs for ShapeRectRounded {
                 toppos.y = toppos.y.min(bottom_saved.y - MIN_SIZE);
                 self.tl.pos = snap_pt(Vec2::new(tl_saved.x, toppos.y), snap);
                 self.update_polygon();
-                pointer.set_pos(toppos);
             }
             (false, true, false, false) => {
                 let mut rightpos = right_saved + dpos;
                 rightpos.x = rightpos.x.max(left_saved.x + MIN_SIZE);
                 self.br.pos = snap_pt(Vec2::new(rightpos.x, br_saved.y), snap);
                 self.update_polygon();
-                pointer.set_pos(rightpos);
             }
             (false, false, true, false) => {
                 let mut bottompos = bottom_saved + dpos;
                 bottompos.y = bottompos.y.max(top_saved.y + MIN_SIZE);
                 self.br.pos = snap_pt(Vec2::new(br_saved.x, bottompos.y), snap);
                 self.update_polygon();
-                pointer.set_pos(bottompos);
             }
             (false, false, false, true) => {
                 let mut leftpos = left_saved + dpos;
                 leftpos.x = leftpos.x.min(right_saved.x - MIN_SIZE);
                 self.tl.pos = snap_pt(Vec2::new(leftpos.x, tl_saved.y), snap);
                 self.update_polygon();
-                pointer.set_pos(leftpos);
             }
             _ => (),
         };
@@ -522,8 +514,6 @@ impl ObjectsFuncs for ShapeRectRounded {
                     .min(max_radius_size);
                 self.radius_tl.value = snap_val(radius_tl, snap);
                 self.update_polygon();
-                pointer
-                    .set_pos(self.tl.pos + Vec2::new(self.radius_tl.value, self.radius_tl.value));
             }
             (false, true, false, false) => {
                 let (proj, dir) = project_to_segment_with_direction(
@@ -536,9 +526,6 @@ impl ObjectsFuncs for ShapeRectRounded {
                     .min(max_radius_size);
                 self.radius_tr.value = snap_val(radius_tr, snap);
                 self.update_polygon();
-                pointer.set_pos(
-                    self.get_tr_modifier() + Vec2::new(-self.radius_tr.value, self.radius_tr.value),
-                );
             }
             (false, false, true, false) => {
                 let (proj, dir) = project_to_segment_with_direction(
@@ -551,8 +538,6 @@ impl ObjectsFuncs for ShapeRectRounded {
                     .min(max_radius_size);
                 self.radius_br.value = snap_val(radius_br, snap);
                 self.update_polygon();
-                pointer
-                    .set_pos(self.br.pos + Vec2::new(-self.radius_br.value, -self.radius_br.value));
             }
             (false, false, false, true) => {
                 let (proj, dir) = project_to_segment_with_direction(
@@ -565,9 +550,6 @@ impl ObjectsFuncs for ShapeRectRounded {
                     .min(max_radius_size);
                 self.radius_bl.value = snap_val(radius_bl, snap);
                 self.update_polygon();
-                pointer.set_pos(
-                    self.get_bl_modifier() + Vec2::new(self.radius_bl.value, -self.radius_bl.value),
-                );
             }
             _ => (),
         };
@@ -659,9 +641,8 @@ impl ObjectsFuncs for ShapeRectRounded {
         &self,
         _: &Size,
         _: (Rect, f64, Vec2),
-    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
-        let mut paths = vec![];
-        let mut texts = vec![];
+    ) -> Vec<(BezPath, Pattern, CanvasText)> {
+        let mut res = vec![];
 
         let tl = self.tl.pos;
         let tr = self.get_tr_modifier();
@@ -677,79 +658,60 @@ impl ObjectsFuncs for ShapeRectRounded {
         let rad_br = self.radius_br.value / 2_f64.sqrt();
         let rad_bl = self.radius_bl.value / 2_f64.sqrt();
 
-        let (path, text) =
+        let dim =
             Dimension::new(DimKind::Horizontal, tl, tr, self.get_width()).get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
+        res.push(dim);
 
-        let (path, text) =
+        let dim =
             Dimension::new(DimKind::Vertical, bl, tl, self.get_height()).get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
+        res.push(dim);
 
-        let (path, text) = Dimension::new(
+        let dim = Dimension::new(
             DimKind::Radius,
             rad_tl_center,
             rad_tl_center + Vec2::new(-rad_tl, -rad_tl),
             self.radius_tl.value,
         )
         .get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
+        res.push(dim);
 
-        let (path, text) = Dimension::new(
+        let dim = Dimension::new(
             DimKind::Radius,
             rad_tr_center,
             rad_tr_center + Vec2::new(rad_tr, -rad_tr),
             self.radius_tr.value,
         )
         .get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
+        res.push(dim);
 
-        let (path, text) = Dimension::new(
+        let dim = Dimension::new(
             DimKind::Radius,
             rad_br_center,
             rad_br_center + Vec2::new(rad_br, rad_br),
             self.radius_br.value,
         )
         .get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
+        res.push(dim);
 
-        let (path, text) = Dimension::new(
+        let dim = Dimension::new(
             DimKind::Radius,
             rad_bl_center,
             rad_bl_center + Vec2::new(-rad_bl, rad_bl),
             self.radius_bl.value,
         )
         .get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
+        res.push(dim);
+        res
+    }
 
-        (paths, texts)
-    }
-    fn get_paths(&self, _: &Size) -> Vec<BezPath> {
-        if self.good_size() {
-            vec![self.get_rectangle_rounded().to_path(Self::TOLERANCE)]
-        } else {
-            vec![BezPath::new()]
-        }
-    }
-    fn get_paths_and_patterns(&self, das: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
+    fn get_paths_and_patterns(&self, _das: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         let pattern = match (self.selected, self.highlighted) {
             (false, false) => Pattern::BasicNormal,
             (false, true) => Pattern::BasicHighlighted,
             (true, false) => Pattern::BasicSelected,
             (true, true) => Pattern::BasicSelected,
         };
-
-        let mut paths = self.get_paths(das);
-        let result = paths
-            .iter_mut()
-            .map(|path| (path.clone(), pattern))
-            .collect();
-        result
+        vec![(self.to_path(Self::TOLERANCE), pattern)]
     }
 }
 

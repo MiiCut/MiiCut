@@ -1,5 +1,6 @@
 use crate::math::*;
 use kurbo::Vec2;
+use strum_macros::{Display, EnumString};
 use wasm_bindgen::prelude::*;
 use web_sys::{window, Document, Element, Event, EventTarget, HtmlElement, MouseEvent};
 
@@ -288,6 +289,37 @@ impl Mouse {
             }
         }
     }
+}
+
+#[derive(Debug, EnumString, Display)]
+pub enum Keys {
+    Tab,
+    Control,
+    Meta,
+    Alt,
+    Shift,
+    Delete,
+    #[strum(serialize = " ")]
+    Space,
+    Backspace,
+    Enter,
+    Escape,
+    #[strum(serialize = "c")]
+    CLower,
+    #[strum(serialize = "v")]
+    VLower,
+    #[strum(serialize = "z")]
+    ZLower,
+    #[strum(serialize = "Z")]
+    ZUpper,
+    #[strum(serialize = "y")]
+    YLower,
+    #[strum(serialize = "s")]
+    SLower,
+    #[strum(serialize = "S")]
+    SUpper,
+    #[strum(serialize = "t")]
+    TLower,
 }
 
 pub fn document() -> Document {

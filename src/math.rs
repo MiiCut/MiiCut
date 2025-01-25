@@ -823,9 +823,16 @@ pub fn is_point_near_path(path: &BezPath, point: Vec2, threshold: f64) -> bool {
 }
 
 /// Calculate the shortest distance from a point to a line segment.
-pub fn distance_to_segment(start: Vec2, end: Vec2, pos: Vec2) -> f64 {
+pub fn distance_to_segment(start: Vec2, end: Vec2, pos: Vec2, grab_zone: f64) -> f64 {
     let a = start;
     let b = end;
+
+    if (a - pos).hypot() < grab_zone {
+        return f64::MAX;
+    }
+    if (b - pos).hypot() < grab_zone {
+        return f64::MAX;
+    }
 
     // Vector from a to b
     let ab = (b.x - a.x, b.y - a.y);
@@ -1091,16 +1098,14 @@ pub fn geo_polygon_to_bez_path(polygon: &Polygon<f64>) -> Vec<BezPath> {
     vec_bez_path
 }
 
-pub fn calc_segs(paths_patterns: Vec<BezPath>) -> BezPath {
-    let mut segs = BezPath::new();
-    for path in paths_patterns {
-        flatten(path, 0.15, |s| segs.push(s));
-    }
-    segs
+pub fn calc_segs(bez_path: BezPath) -> BezPath {
+    let mut bez_path_flat = BezPath::new();
+    flatten(bez_path, 0.15, |s| bez_path_flat.push(s));
+    bez_path_flat
 }
 
-pub fn calc_polygon(bez_path: &BezPath) -> Polygon<f64> {
-    bez_path_to_geo_polygon(bez_path)
+pub fn calc_polygon(bez_path_flat: &BezPath) -> Polygon<f64> {
+    bez_path_to_geo_polygon(bez_path_flat)
 }
 
 // Helper function to convert a ring (either exterior or interior) to a bezier path
@@ -1299,32 +1304,73 @@ pub fn get_arc_center(start: Vec2, end: Vec2, radius: f64, up: bool) -> Vec2 {
     }
 }
 
-pub fn create_arc_from_radius(start: Vec2, end: Vec2, radius: f64, up: bool) -> Arc {
-    // Determine the arc center based on `up` boolean
-    let center = get_arc_center(start, end, radius, up);
+pub fn find_circle_center(start: Vec2, end: Vec2, mut radius: f64, concavity: bool) -> Vec2 {
+    // Vector of the chord
+    let chord = end - start;
+    let chord_length = chord.hypot();
 
-    // Calculate the angles for the arc and normalize to [0, 2π]
-    let start_angle = (start - center)
-        .atan2()
-        .rem_euclid(2.0 * std::f64::consts::PI);
-    let end_angle = (end - center)
-        .atan2()
-        .rem_euclid(2.0 * std::f64::consts::PI);
+    // Check if the radius is valid (must be >= half the chord length)
+    if radius.abs() < chord_length / 2.0 {
+        radius = radius.signum() * chord_length / 2.0;
+    }
 
-    // Calculate the sweep angle
-    let sweep_angle = if up {
-        (end_angle - start_angle).rem_euclid(2.0 * std::f64::consts::PI)
+    // Midpoint of the chord
+    let midpoint = (start + end) / 2.0;
+
+    // Perpendicular vector to the chord
+    let perpendicular = Vec2::new(-chord.y, chord.x).normalize();
+
+    // Distance from the midpoint to the arc center
+    let h = (radius.powi(2) - (chord_length / 2.0).powi(2)).sqrt();
+
+    // Determine the arc center based on the radius' sign (concavity)
+    match (concavity, radius > 0.0) {
+        (true, true) => midpoint + perpendicular * h,
+        (true, false) => midpoint - perpendicular * h,
+        (false, true) => midpoint - perpendicular * h,
+        (false, false) => midpoint + perpendicular * h,
+    }
+}
+/// Creates an arc passing through `start` and `end` with the specified `radius`.
+/// The `concavity` parameter determines whether the arc is the smallest (true) or the largest (false).
+/// The radius sign determines the arc's direction (concavity up/down).
+pub fn create_arc_from_radius_and_concavity(
+    start: Vec2,
+    end: Vec2,
+    radius: f64,
+    concavity: bool,
+) -> Arc {
+    let arc_center = find_circle_center(start, end, radius, concavity);
+
+    // Start and end angles of the arc
+    let start_angle = (start - arc_center).atan2();
+    let end_angle = (end - arc_center).atan2();
+
+    // Sweep angle
+    let mut sweep_angle = end_angle - start_angle;
+
+    if concavity ^ (radius > 0.0) {
+        // Smallest arc: Adjust sweep angle to be less than 180 degrees
+        if radius > 0.0 && sweep_angle < 0.0 {
+            sweep_angle += 2.0 * std::f64::consts::PI;
+        } else if radius < 0.0 && sweep_angle > 0.0 {
+            sweep_angle -= 2.0 * std::f64::consts::PI;
+        }
     } else {
-        -(start_angle - end_angle).rem_euclid(2.0 * std::f64::consts::PI)
-    };
+        // Largest arc: Adjust sweep angle to be more than 180 degrees
+        if radius > 0.0 && sweep_angle > 0.0 {
+            sweep_angle -= 2.0 * std::f64::consts::PI;
+        } else if radius < 0.0 && sweep_angle < 0.0 {
+            sweep_angle += 2.0 * std::f64::consts::PI;
+        }
+    }
 
-    // Create the arc
     Arc {
-        center: center.to_point(),
-        radii: Vec2::new(radius, radius),
+        center: arc_center.to_point(),
+        radii: Vec2::new(radius.abs(), radius.abs()), // Uniform radius
         start_angle,
         sweep_angle,
-        x_rotation: 0.0,
+        x_rotation: 0.0, // No rotation in this implementation
     }
 }
 
@@ -1459,30 +1505,30 @@ pub fn perpendicular_point_with_projection(start: Vec2, end: Vec2, dpos: Vec2, u
     midpoint + perp * projection
 }
 
-pub fn create_arc_from_center(start: Vec2, end: Vec2, center: Vec2, concavity: bool) -> Arc {
-    // Calculate the radius
-    let radius = (start - center).hypot();
+// pub fn create_arc_from_center(start: Vec2, end: Vec2, center: Vec2, sweep_sign: bool) -> Arc {
+//     // Calculate the radius
+//     let radius = (start - center).hypot();
 
-    // Calculate the start and end angles
-    let start_angle = (start - center).atan2();
-    let end_angle = (end - center).atan2();
+//     // Calculate the start and end angles
+//     let start_angle = (start - center).atan2();
+//     let end_angle = (end - center).atan2();
 
-    // Calculate the sweep angle based on the concavity
-    let sweep_angle = if concavity {
-        (end_angle - start_angle).rem_euclid(2.0 * std::f64::consts::PI)
-    } else {
-        (start_angle - end_angle).rem_euclid(2.0 * std::f64::consts::PI) * -1.0
-    };
+//     // Calculate the sweep angle based on the concavity
+//     let sweep_angle = if sweep_sign {
+//         (end_angle - start_angle).rem_euclid(2.0 * std::f64::consts::PI)
+//     } else {
+//         (start_angle - end_angle).rem_euclid(2.0 * std::f64::consts::PI) * -1.0
+//     };
 
-    // Construct the arc
-    Arc {
-        center: center.to_point(),
-        radii: Vec2::new(radius, radius),
-        start_angle,
-        sweep_angle,
-        x_rotation: 0.0,
-    }
-}
+//     // Construct the arc
+//     Arc {
+//         center: center.to_point(),
+//         radii: Vec2::new(radius, radius),
+//         start_angle,
+//         sweep_angle,
+//         x_rotation: 0.0,
+//     }
+// }
 
 pub fn perpendicular_points_with_distance(
     pt1: Vec2,
@@ -1510,28 +1556,6 @@ pub fn perpendicular_points_with_distance(
         midpoint + perpendicular * dist
     } else {
         midpoint - perpendicular * dist
-    }
-}
-
-pub fn find_circle_center(pt1: Vec2, pt2: Vec2, r: f64, concavity: bool) -> Vec2 {
-    // Calculate the midpoint of the chord
-    let midpoint = (pt1 + pt2) / 2.0;
-
-    // Vector of the chord
-    let chord = pt2 - pt1;
-    let chord_length = chord.hypot();
-
-    // Perpendicular vector to the chord
-    let perpendicular = Vec2::new(-chord.y, chord.x).normalize();
-
-    // Distance from the midpoint to the circle centers
-    let h = r.signum() * (r.powi(2) - (chord_length / 2.0).powi(2)).sqrt();
-
-    // Calculate the two centers
-    if concavity {
-        midpoint + perpendicular * h
-    } else {
-        midpoint - perpendicular * h
     }
 }
 
@@ -1639,4 +1663,259 @@ pub fn circle_circle_intersection(
 
 pub fn get_point_at_dist_from_angle(origin: Vec2, angle: f64, dist: f64) -> Vec2 {
     origin + Vec2::new(angle.cos(), angle.sin()) * dist
+}
+
+/// Splits an arc (defined by two points, a radius, and concavity) with a circle centered at `start`
+/// returning two arcs if there are two valid intersection points.
+pub fn split_arc_with_circle(
+    start: Vec2,
+    end: Vec2,
+    arc_radius: f64,
+    arc_concavity: bool,
+    circle_radius: f64,
+) -> Option<(Arc, Arc)> {
+    // 1. Compute the arc center and angles for the original arc
+    let arc_center = get_arc_center(start, end, arc_radius, arc_concavity);
+    let start_angle = (start - arc_center).atan2();
+    let end_angle = (end - arc_center).atan2();
+
+    // Sweep angle (handle concavity if needed)
+    // For a "simple" approach, we do:
+    //   sweep_angle = end_angle - start_angle
+    // But you can adjust for concavity if the sign is inverted
+    let mut sweep_angle = end_angle - start_angle;
+
+    // Normalize sweep angle to range (-π..π) or [0..2π),
+    // ensuring correct direction for "concavity".
+    // A simple approach is to keep the sign if arc_concavity is relevant:
+    if arc_concavity && sweep_angle > 0.0 {
+        sweep_angle -= 2.0 * std::f64::consts::PI;
+    } else if !arc_concavity && sweep_angle < 0.0 {
+        sweep_angle += 2.0 * std::f64::consts::PI;
+    }
+
+    // Construct the original arc
+    let _original_arc = Arc {
+        center: arc_center.to_point(),
+        radii: Vec2::new(arc_radius, arc_radius),
+        start_angle,
+        sweep_angle,
+        x_rotation: 0.0,
+    };
+
+    // 2. The circle is centered at `start`, radius = `circle_radius`
+    // We'll find intersections between that circle and the arc's circle
+    let circle_center = start;
+    let circle_r = circle_radius;
+
+    // 3. Find intersection points between the two circles
+    match find_arc_circle_intersections(arc_center, arc_radius, circle_center, circle_r) {
+        None => None, // No intersection or infinite intersection
+        Some((_pt1, None)) => {
+            // Only one intersection => tangent
+            // The arc is not really "split" into two arcs,
+            // but you could return a degenerate second arc if desired.
+            // For now, we treat it as no valid two-arc split.
+            None
+        }
+        Some((pt1, Some(pt2))) => {
+            // Two intersection points: split into two arcs
+
+            // Convert intersection points to angles relative to arc_center
+            let angle1 = (pt1 - arc_center).atan2();
+            let angle2 = (pt2 - arc_center).atan2();
+
+            // Sort angles so arc1 is [start_angle..angle1], arc2 is [angle1..end_angle]
+            let (mid_angle1, _mid_angle2) = if angle1 < angle2 {
+                (angle1, angle2)
+            } else {
+                (angle2, angle1)
+            };
+
+            // Ensure mid angles lie within [start_angle..start_angle+sweep_angle]
+            // or handle them as is if you assume geometry is correct
+
+            // Arc 1: from start_angle to mid_angle1
+            let arc1 = Arc {
+                center: arc_center.to_point(),
+                radii: Vec2::new(arc_radius, arc_radius),
+                start_angle,
+                sweep_angle: mid_angle1 - start_angle,
+                x_rotation: 0.0,
+            };
+
+            // Arc 2: from mid_angle1 to end_angle
+            let arc2 = Arc {
+                center: arc_center.to_point(),
+                radii: Vec2::new(arc_radius, arc_radius),
+                start_angle: mid_angle1,
+                sweep_angle: (start_angle + sweep_angle) - mid_angle1,
+                x_rotation: 0.0,
+            };
+
+            Some((arc1, arc2))
+        }
+    }
+}
+
+/// Finds intersection points between two circles:
+/// Circle1: center=arc_center, radius=arc_radius
+/// Circle2: center=circle_center, radius=circle_radius
+/// Returns:
+///   None => No intersection or infinite intersection (coincident)
+///   Some((pt1, None)) => tangent
+///   Some((pt1, Some(pt2))) => two intersections
+fn find_arc_circle_intersections(
+    arc_center: Vec2,
+    arc_radius: f64,
+    circle_center: Vec2,
+    circle_radius: f64,
+) -> Option<(Vec2, Option<Vec2>)> {
+    // Distance between centers
+    let d = (circle_center - arc_center).hypot();
+    // Check for no intersection
+    if d > arc_radius + circle_radius
+        || d < (arc_radius - circle_radius).abs()
+        || d.abs() < f64::EPSILON
+    {
+        return None;
+    }
+
+    // Solve circle-circle intersection
+    let a = (arc_radius.powi(2) - circle_radius.powi(2) + d.powi(2)) / (2.0 * d);
+    let h = (arc_radius.powi(2) - a.powi(2)).sqrt();
+
+    // Midpoint of intersection chord
+    let mid = arc_center + (circle_center - arc_center) * (a / d);
+
+    let offset = circle_center - arc_center;
+    let offset_perp = Vec2::new(-offset.y, offset.x);
+
+    let i1 = mid + offset_perp * (h / d);
+    let i2 = mid - offset_perp * (h / d);
+
+    if h.abs() < f64::EPSILON {
+        // One intersection => tangent
+        Some((i1, None))
+    } else {
+        Some((i1, Some(i2)))
+    }
+}
+
+/// Normalize an angle to the range [0, 2π)
+fn normalize_angle(angle: f64) -> f64 {
+    angle.rem_euclid(2.0 * std::f64::consts::PI)
+}
+
+pub fn point_from_start(start: Vec2, end: Vec2, rad: f64) -> Vec2 {
+    let seg = end - start;
+    let dist = seg.hypot();
+
+    if dist.abs() < f64::EPSILON {
+        return start;
+    }
+
+    let dir = seg / dist;
+
+    // No clamping here
+    start + dir * rad
+}
+
+pub fn point_from_end(start: Vec2, end: Vec2, rad: f64) -> Vec2 {
+    let seg = start - end;
+    let dist = seg.hypot();
+
+    if dist.abs() < f64::EPSILON {
+        return start;
+    }
+
+    let dir = seg / dist;
+
+    // No clamping here
+    end + dir * rad
+}
+
+pub fn bisector_dir(a: Vec2, b: Vec2, c: Vec2) -> Vec2 {
+    // 1. Vectors from b
+    let v1 = a - b; // BA
+    let v2 = c - b; // BC
+
+    // Handle degenerate: if either vector is near zero, angle is not well-defined
+    if v1.hypot() < f64::EPSILON || v2.hypot() < f64::EPSILON {
+        return b;
+    }
+
+    // 2. Normalize
+    let n1 = v1.normalize();
+    let n2 = v2.normalize();
+
+    // 3. Sum the normalized directions => angle bisector direction
+    let bisector_dir = n1 + n2;
+
+    // Degenerate case: if n1 ~ -n2 => A,B,C are ~180°, the "internal bisector" is ill-defined
+    if bisector_dir.hypot() < f64::EPSILON {
+        return b;
+    }
+
+    bisector_dir.normalize()
+}
+
+// Angle at b
+pub fn project_onto_bisector(a: Vec2, b: Vec2, c: Vec2, p: Vec2) -> (Vec2, f64) {
+    // Compute bisector
+    let bisec = bisector_dir(a, b, c);
+
+    // Compute projected point
+    let t = p.dot(bisec);
+    let p_proj = bisec * t;
+
+    (p_proj, t.signum())
+}
+
+pub fn point_on_bisector(a: Vec2, b: Vec2, c: Vec2) -> (Vec2, f64) {
+    // Angle
+    let mut angle = angle_from(a - b, c - b) * 0.5;
+    if (angle - PI / 2.).abs() < EPSILON || (angle + PI / 2.).abs() < EPSILON {
+        return (b, 0.);
+    }
+    let sign = angle.signum();
+    angle = angle.abs();
+
+    let radius = (a - b).hypot() * angle.tan();
+    let point = bisector_dir(a, b, c) * radius / angle.abs().sin();
+    (point + b, -sign)
+}
+
+fn snap_length(length: f64, snap: f64) -> f64 {
+    (length / snap).round() * snap
+}
+
+pub fn move_b_with_snapping(a: Vec2, b: Vec2, c: Vec2, dpos: Vec2, snap: f64) -> Vec2 {
+    // Apply the small displacement to B
+    let new_b = b + dpos;
+
+    // Compute snapped lengths for AB and BC
+    let ab = (new_b - a).hypot();
+    let bc = (new_b - c).hypot();
+    let snap_ab = snap_length(ab, snap);
+    let snap_bc = snap_length(bc, snap);
+
+    // Find the intersection of the two circles
+    match circle_circle_intersection(a, snap_ab, c, snap_bc) {
+        Some((i1, None)) => i1,
+        Some((i1, Some(i2))) => {
+            // Choose the intersection point closest to the proposed B
+            let dist1 = (i1 - new_b).hypot();
+            let dist2 = (i2 - new_b).hypot();
+            if dist1 < dist2 {
+                i1
+            } else {
+                i2
+            }
+        }
+        _ => {
+            log!("WARNING: No intersection found in move_b_with_snapping()");
+            b
+        }
+    }
 }

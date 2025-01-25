@@ -37,8 +37,10 @@ use prefab::modifiers_path;
 use primitives::primitives::GetPrimitiveState;
 use shapes::shapes::BSKind;
 use shapes::shapes::{BoolOps, ToogleBoolOpsShapesAction};
+use shapes::shapes_pool::BSid;
 use shapes::shapes_pool::{AddShapeAction, DeleteShapeAction, ShapesPool};
 use std::collections::HashSet;
+use std::str::FromStr;
 use std::{
     cell::{RefCell, RefMut},
     rc::Rc,
@@ -49,17 +51,18 @@ use traits::*;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 use web_sys::{
-    window, Document, Element, Event, FileList, FileReader, HtmlCanvasElement, HtmlElement,
-    HtmlInputElement, KeyboardEvent, MouseEvent, WheelEvent, Window,
+    window, Document, Element, Event, FileReader, HtmlCanvasElement, HtmlElement, HtmlInputElement,
+    KeyboardEvent, MouseEvent, WheelEvent, Window,
 };
 
 type RefAV = Rc<RefCell<AppVars>>;
 type ElementCallback = Box<dyn Fn(RefAV, Event) + 'static>;
 
-#[derive(Default)]
-struct KeysStates {
+#[derive(Default, Copy, Clone, Debug, PartialEq)]
+pub struct KeysStates {
     crtl_cmd_pressed: bool,
     shift_pressed: bool,
+    alt_pressed: bool,
 }
 
 fn main() {
@@ -101,6 +104,204 @@ struct AppVars {
     styles: DrawStyles,
 }
 
+impl AppVars {
+    fn cancel_entity_creation(&mut self) {
+        self.on_creation = DrawObjects::Nope;
+        self.go_to_arrow_tool();
+    }
+    fn copy_entity(&mut self) {
+        if let Icons::Arrow = self.icon_selected.clone() {
+            if let DrawObjects::Nope = self.on_creation {
+                let shapes_selected = self.pools.shapes.get_state(HS::Select);
+                let helpers_selected = self.pools.helpers.get_state(HS::Select);
+                let mut pointer = self.pointer.clone();
+
+                if shapes_selected.len() > 0 {
+                    let mut to_copy = vec![];
+                    for shid in shapes_selected.iter() {
+                        if let Some(shape) = self.pools.shapes.get(*shid) {
+                            pointer.set_pos(shape.get_kind().get_position());
+                            to_copy.push(shape.clone());
+                        }
+                    }
+                    self.clipboard.copy_shapes(to_copy, pointer.pos());
+                } else {
+                    if helpers_selected.len() > 0 {
+                        let mut to_copy = vec![];
+                        for shid in helpers_selected {
+                            if let Some(helper) = self.pools.helpers.get(shid) {
+                                to_copy.push(helper.clone());
+                            }
+                        }
+                        self.clipboard.copy_helpers(to_copy, pointer.pos());
+                    }
+                }
+            }
+        }
+    }
+    fn paste_entity(&mut self) {
+        let mut pointer = self.pointer;
+        let icon_selected = self.icon_selected.clone();
+        if let Icons::Arrow = icon_selected {
+            self.clipboard.paste_item(&mut pointer);
+            // Clear actual selection
+            self.pools.shapes.set_state(false, HS::Select);
+        }
+        self.pointer = pointer;
+    }
+    fn delete_entity(&mut self) {
+        if let Some(shapes_deleted) = self.pools.delete_shapes_selection() {
+            // Push the DeleteShapesAction to the undo/redo system
+            self.undo_redo.push(Box::new(DeleteShapeAction {
+                shapes: shapes_deleted,
+            }));
+            self.pools.shapes.recalc_full_segs();
+        }
+        if let Some(helpers_deleted) = self.pools.delete_helpers_selection() {
+            // Push the DeleteShapesAction to the undo/redo system
+            self.undo_redo.push(Box::new(DeleteHelperAction {
+                helpers: helpers_deleted,
+            }));
+            self.pools.shapes.recalc_full_segs();
+        }
+        self.pools.shapes.recalc_full_segs();
+    }
+    fn next_snap(&mut self) {
+        let snap = &self.pointer.get_snap();
+        self.pointer.set_snap(match snap {
+            SnapValue::Snap1 => SnapValue::Snap5,
+            SnapValue::Snap5 => SnapValue::Snap10,
+            SnapValue::Snap10 => SnapValue::Snap1,
+        });
+    }
+    fn toogle_boolean_op(&mut self) {
+        if let DrawObjects::Nope = self.on_creation {
+            let mut o_shid = None;
+            let selected = self.pools.shapes.get_state(HS::Select);
+            if selected.len() == 1 {
+                if let Some(shape) = self.pools.shapes.get_mut(selected[0]) {
+                    o_shid = Some((selected[0], shape.get_boolean_op()));
+                }
+            }
+            if let Some((shid, bool_ops)) = o_shid {
+                // Push the ToogleBoolOpsShapesAction to the undo/redo system
+                self.undo_redo.push(Box::new(ToogleBoolOpsShapesAction {
+                    shid_toogle: (shid, bool_ops),
+                }));
+                if let Some(shape) = self.pools.shapes.get_mut(shid) {
+                    shape.toggle_boolean_op();
+                }
+                self.pools.shapes.recalc_full_segs();
+            }
+        }
+    }
+    fn toogle_primitive_prop(&mut self) {
+        use GetPrimitiveState::*;
+        let o_shid = self
+            .pools
+            .shapes
+            .get_first_selected_modifier_vars()
+            .and_then(|(shid, _)| Some(shid));
+        if let Some(shid) = o_shid {
+            let mut o_pos = None;
+            self.pools
+                .shapes
+                .get_mut(shid)
+                .and_then(|shape| {
+                    if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
+                        Some(shape_custom)
+                    } else {
+                        None
+                    }
+                })
+                .map(|shape_custom| {
+                    let prims = shape_custom.get_prims_mut();
+
+                    prims.iter_mut().for_each(|prim| {
+                        if prim.get_state(IsSelected).is_some() {
+                            o_pos = Some(prim.toogle());
+                        }
+                    });
+                    shape_custom.update_polygon();
+                });
+            if let Some(_pos) = o_pos {
+                // avb.pointer.set_pos(pos);
+            };
+            self.pools.recalc_full_segs();
+        }
+    }
+    fn change_shape_custom(&mut self, shid: BSid) {
+        let shift_pressed = self.keys_states.shift_pressed;
+        if let Some(shape) = self.pools.shapes.get_mut(shid) {
+            if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
+                for primitive in shape_custom.get_prims_mut() {
+                    // A) Change first edge selected and return
+                    if primitive.get_state(GetPrimitiveState::IsSelected).is_some() {
+                        if shift_pressed {
+                            primitive.set_prim_kind_prev();
+                        } else {
+                            primitive.set_prim_kind_next();
+                        }
+                        break;
+                    }
+                    // B) Change first vertex selected and return
+                    if primitive
+                        .get_state(GetPrimitiveState::IsStartSelected)
+                        .is_some()
+                    {
+                        primitive.toogle_start_modifier();
+                        log!("switched to {:?}", primitive.get_start_modifier());
+                        break;
+                    }
+                }
+                shape_custom.update_polygon();
+                self.pools.shapes.recalc_full_segs();
+            }
+        }
+    }
+    fn undo(&mut self) {
+        // Temporarily take ownership of `undo_redo`
+        let mut undo_redo = std::mem::take(&mut self.undo_redo);
+        // Perform undo operation
+        undo_redo.undo(&mut self.pools);
+        // Put `undo_redo` back into `avb`
+        self.undo_redo = undo_redo;
+        // Recalculate the full segments
+        self.pools.shapes.recalc_full_segs();
+    }
+    fn redo(&mut self) {
+        // Temporarily take ownership of `undo_redo`
+        let mut undo_redo = std::mem::take(&mut self.undo_redo);
+        // Perform redo operation
+        undo_redo.redo(&mut self.pools);
+        // Put `undo_redo` back into `avb`
+        self.undo_redo = undo_redo;
+        // Recalculate the full segments
+        self.pools.shapes.recalc_full_segs();
+    }
+
+    fn go_to_arrow_tool(&mut self) {
+        self.icon_selected = Icons::Arrow;
+        self.user_icons
+            .iter()
+            .for_each(|icon| self.html_deselect_icons(*icon));
+        self.html_select_icon(Icons::Arrow);
+    }
+    fn html_select_icon(&self, icon: Icons) {
+        if let Some(html_element) = icon.get_html_element() {
+            html_element
+                .set_attribute("class", "icon icon-selected")
+                .expect("Failed to set class attribute");
+        }
+    }
+    fn html_deselect_icons(&self, icon: Icons) {
+        if let Some(html_element) = icon.get_html_element() {
+            html_element
+                .set_attribute("class", "icon")
+                .expect("Failed to set class attribute");
+        }
+    }
+}
 ///////////////
 // Initialization
 fn create_app_vars(window: Window) -> Result<(), JsValue> {
@@ -233,11 +434,11 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
 }
 fn init_window(av: RefAV) -> Result<(), JsValue> {
     // Resize event
-    let pa_cloned1 = av.clone();
+    let pa_cloneprim = av.clone();
     let pa_cloned2 = av.clone();
 
     let closure = Closure::<dyn FnMut(_)>::new(move |event: Event| {
-        on_window_resize(pa_cloned1.clone(), event);
+        on_window_resize(pa_cloneprim.clone(), event);
     });
 
     pa_cloned2
@@ -248,10 +449,10 @@ fn init_window(av: RefAV) -> Result<(), JsValue> {
     closure.forget();
 
     // Click event
-    let pa_cloned1 = av.clone();
+    let pa_cloneprim = av.clone();
     let pa_cloned2 = av.clone();
     let closure = Closure::<dyn FnMut(_)>::new(move |event: Event| {
-        on_window_click(pa_cloned1.clone(), event);
+        on_window_click(pa_cloneprim.clone(), event);
     });
     pa_cloned2
         .borrow_mut()
@@ -260,10 +461,10 @@ fn init_window(av: RefAV) -> Result<(), JsValue> {
     closure.forget();
 
     // Key keydown event
-    let pa_cloned1 = av.clone();
+    let pa_cloneprim = av.clone();
     let pa_cloned2 = av.clone();
     let closure = Closure::<dyn FnMut(_)>::new(move |event: Event| {
-        on_window_keydown(pa_cloned1.clone(), event);
+        on_window_keydown(pa_cloneprim.clone(), event);
     });
     pa_cloned2
         .borrow_mut()
@@ -272,10 +473,10 @@ fn init_window(av: RefAV) -> Result<(), JsValue> {
     closure.forget();
 
     // Key keydup event
-    let pa_cloned1 = av.clone();
+    let pa_cloneprim = av.clone();
     let pa_cloned2 = av.clone();
     let closure = Closure::<dyn FnMut(_)>::new(move |event: Event| {
-        on_window_keyup(pa_cloned1.clone(), event);
+        on_window_keyup(pa_cloneprim.clone(), event);
     });
     pa_cloned2
         .borrow_mut()
@@ -365,79 +566,6 @@ fn init_canvas(av: RefAV) -> Result<(), JsValue> {
     set_callback(av.clone(), "wheel".into(), c_draw, Box::new(on_mouse_wheel))?;
     Ok(())
 }
-fn _init_menu(av: RefAV) -> Result<(), JsValue> {
-    let pam = av.borrow_mut();
-    let document = pam.document.clone();
-
-    let load_element = document.get_element_by_id("load-option").unwrap();
-    let load_element: HtmlElement = load_element.dyn_into::<HtmlElement>()?;
-
-    let save_element = document.get_element_by_id("save-option").unwrap();
-    let save_element: HtmlElement = save_element.dyn_into::<HtmlElement>()?;
-
-    let file_input = document.get_element_by_id("file-input").unwrap();
-    let file_input: HtmlElement = file_input.dyn_into::<HtmlElement>()?;
-
-    let file_input_clone = file_input.clone();
-    let on_load = Closure::wrap(Box::new(move || {
-        // Trigger a click event on the file input element to open the file dialog
-        file_input_clone.click();
-    }) as Box<dyn FnMut()>);
-
-    let on_save = Closure::wrap(Box::new(move || {
-        // Your save action here
-    }) as Box<dyn FnMut()>);
-
-    load_element.add_event_listener_with_callback("click", on_load.as_ref().unchecked_ref())?;
-    on_load.forget(); // Leaks memory, but we need to do this to keep the callback alive
-
-    save_element.add_event_listener_with_callback("click", on_save.as_ref().unchecked_ref())?;
-    on_save.forget(); // Leaks memory, but we need to do this to keep the callback alive
-
-    drop(pam);
-    // Set up an event listener to handle file selection
-    let on_file_select = Closure::wrap(Box::new(move || {
-        let pa_clone = av.clone();
-        // Get the files from the file input element
-        if let Some(file_input) = document.get_element_by_id("file-input") {
-            let file_input: HtmlInputElement = file_input.dyn_into().unwrap();
-            let files = js_sys::Reflect::get(&file_input.into(), &"files".into())
-                .unwrap()
-                .dyn_into::<FileList>()
-                .unwrap();
-            if let Some(file) = files.get(0) {
-                let file_name = file.name();
-                log!("File selected: {:?}", file_name);
-                let file_reader = FileReader::new().unwrap();
-
-                let on_load = Closure::wrap(Box::new(move |event: Event| {
-                    let target = event.target().unwrap();
-                    let file_reader: FileReader = target.dyn_into().unwrap();
-                    let result = file_reader.result().unwrap();
-                    if let Some(content) = result.as_string() {
-                        convert_svg_to_shapes(pa_clone.clone(), content);
-                        drop(pa_clone.borrow_mut());
-                        // render_drawing(pa_clone.clone());
-                    }
-                }) as Box<dyn FnMut(_)>);
-
-                file_reader
-                    .add_event_listener_with_callback("load", on_load.as_ref().unchecked_ref())
-                    .unwrap();
-                on_load.forget(); // Avoid memory leak
-
-                file_reader.read_as_text(&file).unwrap();
-            }
-        }
-    }) as Box<dyn FnMut()>);
-
-    file_input
-        .add_event_listener_with_callback("change", on_file_select.as_ref().unchecked_ref())?;
-    on_file_select.forget(); // Leaks memory, but we need to do this to keep the callback alive
-
-    Ok(())
-}
-
 fn init_menu(av: RefAV) -> Result<(), JsValue> {
     let avb = av.borrow_mut();
     let document = avb.document.clone();
@@ -449,6 +577,7 @@ fn init_menu(av: RefAV) -> Result<(), JsValue> {
     let file_input: HtmlInputElement = file_input.dyn_into::<HtmlInputElement>()?;
 
     let file_input_clone = file_input.clone();
+
     let on_load = Closure::wrap(Box::new(move || {
         file_input_clone.click();
     }) as Box<dyn FnMut()>);
@@ -570,8 +699,7 @@ fn convert_svg_to_shapes(_av: RefAV, svg_data: String) {
 fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
     use MouseState::*;
     let icon_selected = avb.icon_selected.clone();
-    let shift_pressed = avb.keys_states.shift_pressed;
-    let ctrl_pressed = avb.keys_states.crtl_cmd_pressed;
+    let keys_states = avb.keys_states;
 
     let mut pointer = avb.pointer;
     pointer.set_draw_scale(avb.canvases.get_drawing_scale());
@@ -582,17 +710,19 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
         Icons::Arrow => match avb.mouse.get_mouse_state() {
             LeftDown(mouse_pos_down) => {
                 pointer.set_pos(mouse_pos_down);
-                avb.pools.magnet_to_helpers(&mut pointer, shift_pressed);
+                pointer.save_pos();
+                avb.pools.magnet_to_helpers(&mut pointer, keys_states);
+
                 // Always clear selection before proceeding
                 avb.pools.clear_all_hs();
 
                 if avb.clipboard.is_paste_empty() {
-                    let pointer_pas_saved = pointer.pos_saved();
+                    let pointer_pos_saved = pointer.pos_saved();
                     avb.pools
                         .set_objects_states_in_order(&mut pointer, HS::Select);
                     if avb.keys_states.crtl_cmd_pressed {
                         avb.pools.select_all_shapes_connected();
-                        pointer.set_pos(pointer_pas_saved);
+                        pointer.set_pos(pointer_pos_saved);
                     }
                 } else {
                     // User has clicked for pasting the object on the canvas
@@ -607,13 +737,16 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 avb.pools.save_vars();
             }
             LeftDownMove(mouse_pos_down, mouse_pos) => {
-                pointer.set_pos_rel(mouse_pos - mouse_pos_down);
-                avb.pools.magnet_to_helpers(&mut pointer, shift_pressed);
+                pointer.set_pos(mouse_pos);
+                avb.pools.magnet_to_helpers(&mut pointer, keys_states);
 
-                _ = avb.pools.move_objects(&mut pointer, shift_pressed);
+                _ = avb.pools.move_objects(&mut pointer, keys_states);
             }
             LeftUp(mouse_pos_up) => {
                 pointer.set_pos(mouse_pos_up);
+                pointer.save_pos();
+                avb.pools.magnet_to_helpers(&mut pointer, keys_states);
+
                 // Push the MoveAction to the undo/redo system
                 if let Some(move_action) = avb.pools.get_move_action() {
                     avb.undo_redo.push(move_action);
@@ -623,8 +756,8 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 avb.pools.helpers.create_helpers_magnet_points();
             }
             LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
-                pointer.set_pos_rel(mouse_pos - mouse_pos_up);
-                avb.pools.magnet_to_helpers(&mut pointer, shift_pressed);
+                pointer.set_pos(mouse_pos);
+                avb.pools.magnet_to_helpers(&mut pointer, keys_states);
 
                 if !avb.clipboard.is_paste_empty() {
                     avb.clipboard.move_paste(&mut pointer);
@@ -644,6 +777,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
             }
             RightUp(mouse_pos_up) => {
                 pointer.set_pos(mouse_pos_up);
+                pointer.save_pos();
             }
             _ => (),
         },
@@ -651,7 +785,8 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
             match avb.mouse.get_mouse_state() {
                 LeftDown(mouse_pos_down) => {
                     pointer.set_pos(mouse_pos_down);
-                    avb.pools.magnet_to_helpers(&mut pointer, shift_pressed);
+                    pointer.save_pos();
+                    avb.pools.magnet_to_helpers(&mut pointer, keys_states);
 
                     if let Some(mut shape) = avb.on_creation.get_shape_into() {
                         // When a custom shape is created, we always continue, we stop (and
@@ -689,25 +824,31 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 }
 
                 LeftDownMove(mouse_pos_down, mouse_pos) => {
-                    pointer.set_pos_rel(mouse_pos - mouse_pos_down);
-                    avb.pools.magnet_to_helpers(&mut pointer, shift_pressed);
+                    pointer.set_pos(mouse_pos);
+                    avb.pools.magnet_to_helpers(&mut pointer, keys_states);
                 }
-                //     if let Some(shape) = avb.on_creation.get_shape_mut() {
-                //         _ = shape.get_kind_mut().move_modifier(&mut pointer, false);
-                //     }
-                // }
+                LeftUp(mouse_pos_up) => {
+                    pointer.set_pos(mouse_pos_up);
+                    pointer.save_pos();
+                    avb.pools.magnet_to_helpers(&mut pointer, keys_states);
+                }
                 LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
-                    pointer.set_pos_rel(mouse_pos - mouse_pos_up);
-                    avb.pools.magnet_to_helpers(&mut pointer, shift_pressed);
+                    pointer.set_pos(mouse_pos);
+                    avb.pools.magnet_to_helpers(&mut pointer, keys_states);
 
+                    if pointer.is_magnetized() {
+                        log!("Magnetized");
+                    }
                     if let Some(shape) = avb.on_creation.get_shape_mut() {
-                        _ = shape.get_kind_mut().move_modifier(&mut pointer, false);
+                        _ = shape
+                            .get_kind_mut()
+                            .move_modifier(&mut pointer, keys_states);
                     }
                 }
 
                 RightDown(mouse_pos_down) => {
                     pointer.set_pos(mouse_pos_down);
-                    avb.pools.magnet_to_helpers(&mut pointer, shift_pressed);
+                    pointer.save_pos();
 
                     if let Some(mut shape) = avb.on_creation.get_shape_into() {
                         if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
@@ -730,15 +871,16 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     }
 
                     avb.on_creation = DrawObjects::Nope;
-                    go_to_arrow_tool(avb);
+                    avb.go_to_arrow_tool();
                 }
                 _ => (),
             }
         }
         Icons::IHelpers(ihelper) => match avb.mouse.get_mouse_state() {
             LeftDown(mouse_pos_down) => {
-                pointer.set_pos(mouse_pos_down);
-                avb.pools.magnet_to_helpers(&mut pointer, shift_pressed);
+                pointer.set_pos(snap_pt(mouse_pos_down, pointer.get_snap().val()));
+                pointer.save_pos();
+                avb.pools.magnet_to_helpers(&mut pointer, keys_states);
 
                 if let Some(mut helper) = avb.on_creation.get_helper_into() {
                     // Minimum size was not reached
@@ -772,31 +914,32 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 }
             }
             LeftDownMove(mouse_pos_down, mouse_pos) => {
-                pointer.set_pos_rel(mouse_pos - mouse_pos_down);
-                avb.pools.magnet_to_helpers(&mut pointer, shift_pressed);
+                pointer.set_pos(snap_pt(mouse_pos, pointer.get_snap().val()));
+                avb.pools.magnet_to_helpers(&mut pointer, keys_states);
             }
-            //     if let Some(helper) = avb.on_creation.get_helper_mut() {
-            //         if helper.get_kind().get_state(IsAnyModifierSelected).is_some() {
-            //             _ = helper.get_kind_mut().move_modifier(&mut pointer, false);
-            //         }
-            //     }
-            // }
+            LeftUp(mouse_pos_up) => {
+                pointer.set_pos(mouse_pos_up);
+                pointer.save_pos();
+                avb.pools.magnet_to_helpers(&mut pointer, keys_states);
+            }
             LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
-                pointer.set_pos_rel(mouse_pos - mouse_pos_up);
-                avb.pools.magnet_to_helpers(&mut pointer, shift_pressed);
+                pointer.set_pos(snap_pt(mouse_pos, pointer.get_snap().val()));
+                avb.pools.magnet_to_helpers(&mut pointer, keys_states);
 
                 if let Some(helper) = avb.on_creation.get_helper_mut() {
                     if helper.get_kind().get_state(IsAnyModifierSelected).is_some() {
-                        _ = helper.get_kind_mut().move_modifier(&mut pointer, false);
+                        _ = helper
+                            .get_kind_mut()
+                            .move_modifier(&mut pointer, keys_states);
                     }
                 }
             }
             RightDown(mouse_pos_down) => {
-                pointer.set_pos(mouse_pos_down);
-                avb.pools.magnet_to_helpers(&mut pointer, shift_pressed);
+                pointer.set_pos(snap_pt(mouse_pos_down, pointer.get_snap().val()));
+                pointer.save_pos();
 
                 avb.on_creation = DrawObjects::Nope;
-                go_to_arrow_tool(avb);
+                avb.go_to_arrow_tool();
             }
             _ => (),
         },
@@ -812,8 +955,9 @@ fn update_informations(avb: &mut RefMut<'_, AppVars>) {
     //Display: update mouse world position
     let c_size = avb.canvases.get_canvas_size();
     let pos = avb.pointer.pos();
+    let ckind = CanvasKind::Background;
     avb.canvases.direct_text(
-        &CanvasKind::Background,
+        &ckind,
         &CanvasText::new(
             format!("( {:.1} , {:.1} )", pos.x, pos.y),
             TextPos::PosCustom(Vec2::new(c_size.width - 10., c_size.height - 10.)),
@@ -821,10 +965,10 @@ fn update_informations(avb: &mut RefMut<'_, AppVars>) {
         ),
     );
     avb.canvases.direct_text(
-        &CanvasKind::Background,
+        &ckind,
         &CanvasText::new(
             format!(
-                "Snap value (PRESS G): {:.0} mm or {:.0} °",
+                "Snap value (PRESS S): {:.0} mm or {:.0} °",
                 avb.pointer.get_snap().val(),
                 avb.pointer.get_snap().val()
             ),
@@ -1049,244 +1193,96 @@ fn on_window_click(_pa: RefAV, _event: Event) {}
 fn on_window_keydown(av: RefAV, event: Event) {
     event.prevent_default();
     if let Ok(keyboard_event) = event.dyn_into::<KeyboardEvent>() {
-        let mut avb = av.borrow_mut();
-
-        if keyboard_event.key() == "Control" || keyboard_event.key() == "Meta" {
-            log!("control pressed");
-            avb.keys_states.crtl_cmd_pressed = true;
-        }
-        if keyboard_event.key() == "Shift" {
-            log!("shift pressed");
-            avb.keys_states.shift_pressed = true;
-        }
-        if keyboard_event.key() == "Delete" || keyboard_event.key() == "Backspace" {
-            if let Some(shapes_deleted) = avb.pools.delete_shapes_selection() {
-                // Push the DeleteShapesAction to the undo/redo system
-                avb.undo_redo.push(Box::new(DeleteShapeAction {
-                    shapes: shapes_deleted,
-                }));
-                avb.pools.shapes.recalc_full_segs();
-            }
-            if let Some(helpers_deleted) = avb.pools.delete_helpers_selection() {
-                // Push the DeleteShapesAction to the undo/redo system
-                avb.undo_redo.push(Box::new(DeleteHelperAction {
-                    helpers: helpers_deleted,
-                }));
-                avb.pools.shapes.recalc_full_segs();
-            }
-            avb.pools.shapes.recalc_full_segs();
-        }
-        if keyboard_event.key() == "Escape" {
-            avb.on_creation = DrawObjects::Nope;
-            go_to_arrow_tool(&mut avb);
-        }
-        // Copy and paste
-        if keyboard_event.key() == "c" {
-            if avb.keys_states.crtl_cmd_pressed {
-                log!("ctrl-c pressed");
-                if let Icons::Arrow = avb.icon_selected.clone() {
-                    if let DrawObjects::Nope = avb.on_creation {
-                        let shapes_selected = avb.pools.shapes.get_state(HS::Select);
-                        let helpers_selected = avb.pools.helpers.get_state(HS::Select);
-                        let mut pointer = avb.pointer.clone();
-
-                        if shapes_selected.len() > 0 {
-                            let mut to_copy = vec![];
-                            for shid in shapes_selected.iter() {
-                                if let Some(shape) = avb.pools.shapes.get(*shid) {
-                                    pointer.set_pos(shape.get_kind().get_position());
-                                    to_copy.push(shape.clone());
-                                }
-                            }
-                            avb.clipboard.copy_shapes(to_copy, pointer.pos());
-                        } else {
-                            if helpers_selected.len() > 0 {
-                                let mut to_copy = vec![];
-                                for shid in helpers_selected {
-                                    if let Some(helper) = avb.pools.helpers.get(shid) {
-                                        to_copy.push(helper.clone());
-                                    }
-                                }
-                                avb.clipboard.copy_helpers(to_copy, pointer.pos());
-                            }
-                        }
+        if let Some(key) = Keys::from_str(&keyboard_event.key()).ok() {
+            let mut avb = av.borrow_mut();
+            use Keys::*;
+            match key {
+                Control | Meta => {
+                    log!("control pressed");
+                    avb.keys_states.crtl_cmd_pressed = true;
+                }
+                Shift => {
+                    log!("shift pressed");
+                    avb.keys_states.shift_pressed = true;
+                }
+                Alt => {
+                    log!("alt pressed");
+                    avb.keys_states.alt_pressed = true;
+                }
+                Delete | Backspace => avb.delete_entity(),
+                Escape => avb.cancel_entity_creation(),
+                // Copy and paste
+                CLower => {
+                    if avb.keys_states.crtl_cmd_pressed {
+                        log!("ctrl-c pressed");
+                        avb.copy_entity();
                     }
                 }
-            }
-        }
-        if keyboard_event.key() == "v" {
-            let crtl_pressed = avb.keys_states.crtl_cmd_pressed;
-            if crtl_pressed {
-                log!("ctrl-v pressed");
-                let mut pointer = avb.pointer;
-                let icon_selected = avb.icon_selected.clone();
-                if let Icons::Arrow = icon_selected {
-                    avb.clipboard.paste_item(&mut pointer);
-                    // Clear actual selection
-                    avb.pools.shapes.set_state(false, HS::Select);
-                }
-                avb.pointer = pointer;
-            }
-        }
-        // Undo and Redo
-        if keyboard_event.key() == "z" {
-            if avb.keys_states.crtl_cmd_pressed {
-                log!("ctrl-z pressed");
-                // Temporarily take ownership of `undo_redo`
-                let mut undo_redo = std::mem::take(&mut avb.undo_redo);
-                // Perform undo operation
-                undo_redo.undo(&mut avb.pools);
-                // Put `undo_redo` back into `avb`
-                avb.undo_redo = undo_redo;
-                // Recalculate the full segments
-                avb.pools.shapes.recalc_full_segs();
-            }
-        }
-        if keyboard_event.key() == "Z" || keyboard_event.key() == "y" {
-            if avb.keys_states.crtl_cmd_pressed {
-                log!("ctrl-Z pressed or ctrl-y pressed");
-                // Temporarily take ownership of `undo_redo`
-                let mut undo_redo = std::mem::take(&mut avb.undo_redo);
-                // Perform redo operation
-                undo_redo.redo(&mut avb.pools);
-                // Put `undo_redo` back into `avb`
-                avb.undo_redo = undo_redo;
-                // Recalculate the full segments
-                avb.pools.shapes.recalc_full_segs();
-            }
-        }
-        // Grid
-        if keyboard_event.key() == "g" || keyboard_event.key() == "G" {
-            let snap = &avb.pointer.get_snap();
-            avb.pointer.set_snap(match snap {
-                SnapValue::Snap1 => SnapValue::Snap5,
-                SnapValue::Snap5 => SnapValue::Snap10,
-                SnapValue::Snap10 => SnapValue::Snap1,
-            });
-            update_informations(&mut avb);
-        }
-        // Toggle boolean operation
-        if keyboard_event.key() == "t" {
-            if let DrawObjects::Nope = avb.on_creation {
-                let mut o_shid = None;
-                // let highlighted = avb.pool.get_hs(HS::Highlight);
-                // if highlighted.len() == 1 {
-                //     if let Some(shape) = avb.pool.get_shape_mut(highlighted[0]) {
-                //         o_shid = Some((highlighted[0], shape.get_boolean_op()));
-                //     }
-                // } else {
-                let selected = avb.pools.shapes.get_state(HS::Select);
-                if selected.len() == 1 {
-                    if let Some(shape) = avb.pools.shapes.get_mut(selected[0]) {
-                        o_shid = Some((selected[0], shape.get_boolean_op()));
+                VLower => {
+                    if avb.keys_states.crtl_cmd_pressed {
+                        log!("ctrl-v pressed");
+                        avb.paste_entity();
                     }
                 }
-                // }
-                if let Some((shid, bool_ops)) = o_shid {
-                    // Push the ToogleBoolOpsShapesAction to the undo/redo system
-                    avb.undo_redo.push(Box::new(ToogleBoolOpsShapesAction {
-                        shid_toogle: (shid, bool_ops),
-                    }));
-                    if let Some(shape) = avb.pools.shapes.get_mut(shid) {
-                        // Do the actual toogle
-                        shape.toggle_boolean_op();
+                // Undo and Redo
+                ZLower => {
+                    if avb.keys_states.crtl_cmd_pressed {
+                        log!("ctrl-z pressed");
+                        avb.undo();
                     }
-                    avb.pools.shapes.recalc_full_segs();
                 }
-            }
-        }
-        if keyboard_event.key() == "Tab" {
-            use GetPrimitiveState::*;
-            let shift_pressed = avb.keys_states.shift_pressed;
-            let o_shid = avb
-                .pools
-                .shapes
-                .get_first_selected_modifier_vars()
-                .and_then(|(shid, _)| Some(shid));
-            log!("o_shid: {:?}", o_shid);
-            if let Some(shid) = o_shid {
-                let pointer = None;
-                avb.pools
-                    .shapes
-                    .get_mut(shid)
-                    .and_then(|shape| {
-                        if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
-                            Some(shape_custom)
-                        } else {
-                            None
-                        }
-                    })
-                    .map(|shape_custom| {
-                        let d1s = shape_custom.get_d1s_mut();
-                        d1s.iter_mut().for_each(|d1| {
-                            if d1.get_state(IsSelected).is_some() {
-                                if shift_pressed {
-                                    // pointer = Some(d1.set_d1_kind_prev());
-                                    d1.set_d1_kind_prev();
-                                } else {
-                                    // pointer = Some(d1.set_d1_kind_next());
-                                    d1.set_d1_kind_next();
-                                }
-                                log!("Switched to: {:?}", d1.get_d1_kind());
-                            }
-                        });
-                        shape_custom.update_polygon();
-                    });
-                pointer.map(|pos| {
-                    avb.pointer.set_pos(pos);
-                });
-                avb.pools.recalc_full_segs();
-            }
-        }
-        if keyboard_event.key() == " " {
-            use GetPrimitiveState::*;
-            let o_shid = avb
-                .pools
-                .shapes
-                .get_first_selected_modifier_vars()
-                .and_then(|(shid, _)| Some(shid));
-            if let Some(shid) = o_shid {
-                let mut o_pos = None;
-                avb.pools
-                    .shapes
-                    .get_mut(shid)
-                    .and_then(|shape| {
-                        if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
-                            Some(shape_custom)
-                        } else {
-                            None
-                        }
-                    })
-                    .map(|shape_custom| {
-                        let d1s = shape_custom.get_d1s_mut();
-                        d1s.iter_mut().for_each(|d1| {
-                            if d1.get_state(IsSelected).is_some() {
-                                o_pos = Some(d1.toogle());
-                            }
-                        });
-                        shape_custom.update_polygon();
-                    });
-                if let Some(_pos) = o_pos {
-                    // avb.pointer.set_pos(pos);
-                };
-                avb.pools.recalc_full_segs();
-            }
-        }
+                ZUpper | YLower => {
+                    if avb.keys_states.crtl_cmd_pressed {
+                        log!("ctrl-Z pressed or ctrl-y pressed");
+                        avb.redo();
+                    }
+                }
+                // Entities values snapping
+                SLower | SUpper => {
+                    avb.next_snap();
+                    update_informations(&mut avb);
+                }
+                // Toggle boolean operation (add, substract, intersect)
+                TLower => avb.toogle_boolean_op(),
+                // Change ShapeCustom: A) edge (line, arc,...) or B) vertex (none, fillet, chamfer)
+                Tab => {
+                    if let Some(shid_custom) = avb.pools.shapes.get_shape_custom_on_select() {
+                        avb.change_shape_custom(shid_custom);
+                    }
+                }
+                // Toggle primitive property (concavity for arc)
+                Space => {
+                    log!("space pressed");
+                    avb.toogle_primitive_prop();
+                }
+                _ => (),
+            };
 
-        render_drawing(&mut avb);
-        drop(avb);
+            render_drawing(&mut avb);
+            drop(avb);
+        }
     }
 }
 fn on_window_keyup(av: RefAV, event: Event) {
     if let Ok(keyboard_event) = event.dyn_into::<KeyboardEvent>() {
-        let mut pam = av.borrow_mut();
-        if keyboard_event.key() == "Control" || keyboard_event.key() == "Meta" {
-            log!("ctrl released");
-            pam.keys_states.crtl_cmd_pressed = false;
-        }
-        if keyboard_event.key() == "Shift" {
-            log!("shift released");
-            pam.keys_states.shift_pressed = false;
+        if let Some(key) = Keys::from_str(&keyboard_event.key()).ok() {
+            let mut avb = av.borrow_mut();
+            use Keys::*;
+            match key {
+                Control | Meta => {
+                    log!("control released");
+                    avb.keys_states.crtl_cmd_pressed = false;
+                }
+                Shift => {
+                    log!("shift released");
+                    avb.keys_states.shift_pressed = false;
+                }
+                Alt => {
+                    log!("alt released");
+                    avb.keys_states.alt_pressed = false;
+                }
+                _ => (),
+            }
         }
     }
 }
@@ -1306,8 +1302,8 @@ fn on_icon_click(av: RefAV, event: Event) {
 
                     avb.user_icons
                         .iter()
-                        .for_each(|icon| html_deselect_icons(*icon));
-                    html_select_icon(icon);
+                        .for_each(|icon| avb.html_deselect_icons(*icon));
+                    avb.html_select_icon(icon);
                 }
             }
         }
@@ -1352,27 +1348,6 @@ fn on_icon_mouseout(av: RefAV, _event: Event) {
 
 ///////////////
 // Helpers
-fn go_to_arrow_tool(avb: &mut RefMut<'_, AppVars>) {
-    avb.icon_selected = Icons::Arrow;
-    avb.user_icons
-        .iter()
-        .for_each(|icon| html_deselect_icons(*icon));
-    html_select_icon(Icons::Arrow);
-}
-fn html_select_icon(icon: Icons) {
-    if let Some(html_element) = icon.get_html_element() {
-        html_element
-            .set_attribute("class", "icon icon-selected")
-            .expect("Failed to set class attribute");
-    }
-}
-fn html_deselect_icons(icon: Icons) {
-    if let Some(html_element) = icon.get_html_element() {
-        html_element
-            .set_attribute("class", "icon")
-            .expect("Failed to set class attribute");
-    }
-}
 
 ///////////////
 // Rendering
@@ -1409,21 +1384,21 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     // SHAPES: Draw the outline of every shape
     // log!("START");
     for shape in avb.pools.shapes.values() {
-        let paths_patterns = shape.get_kind().get_paths_and_patterns(das, cinfo);
-        // paths_patterns.iter().for_each(|(path, pattern)| {
-        //     log!("Path: {:?}", path);
-        // });
-        avb.canvases
-            .draw_path(&CanvasKind::Draw, paths_patterns, vec![]);
+        shape
+            .get_kind()
+            .get_paths_and_patterns(das, cinfo)
+            .iter()
+            .for_each(|(path, pattern)| {
+                avb.canvases
+                    .draw_path(&CanvasKind::Draw, (path.clone(), *pattern), vec![]);
+            });
     }
 
     // SHAPES: Draw the modifiers points
     for shape in avb.pools.shapes.values() {
-        avb.canvases.draw_path(
-            &CanvasKind::Draw,
-            shape.get_kind().get_mod_paths_and_patterns(das, cinfo),
-            vec![],
-        );
+        for path in shape.get_kind().get_mod_paths_and_patterns(das, cinfo) {
+            avb.canvases.draw_path(&CanvasKind::Draw, path, vec![]);
+        }
     }
 
     // SHAPES: Draw dimensions
@@ -1434,29 +1409,34 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
             || shape.get_kind().get_state(IsAnyModifierSelected).is_some()
             || shape.get_kind().get_state(IsAnyModifierHighligh).is_some()
         {
-            let (path, texts) = shape
+            for (path, pattern, text) in shape
                 .get_kind()
-                .get_dimensions_paths_and_patterns(das, cinfo);
-            avb.canvases.draw_path(&CanvasKind::Draw, path, texts);
+                .get_dimensions_paths_and_patterns(das, cinfo)
+            {
+                avb.canvases
+                    .draw_path(&CanvasKind::Draw, (path, pattern), vec![text]);
+            }
         }
     }
 
     // HELPERS: Draw the helpers
     for helper in avb.pools.helpers.values() {
-        avb.canvases.draw_path(
-            &CanvasKind::Draw,
-            helper.get_kind().get_paths_and_patterns(das, cinfo),
-            vec![],
-        );
+        helper
+            .get_kind()
+            .get_paths_and_patterns(das, cinfo)
+            .iter()
+            .for_each(|(path, pattern)| {
+                avb.canvases
+                    .draw_path(&CanvasKind::Draw, (path.clone(), *pattern), vec![]);
+            });
     }
     // HELPERS: Draw the modifiers points
     for helper in avb.pools.helpers.values() {
-        avb.canvases.draw_path(
-            &CanvasKind::Draw,
-            helper.get_kind().get_mod_paths_and_patterns(das, cinfo),
-            vec![],
-        );
+        for path in helper.get_kind().get_mod_paths_and_patterns(das, cinfo) {
+            avb.canvases.draw_path(&CanvasKind::Draw, path, vec![]);
+        }
     }
+
     // HELPERS: Draw dimensions
     for helper in avb.pools.helpers.values() {
         if helper.get_kind().get_state(IsSelected).is_some()
@@ -1464,17 +1444,20 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
             || helper.get_kind().get_state(IsAnyModifierSelected).is_some()
             || helper.get_kind().get_state(IsAnyModifierHighligh).is_some()
         {
-            let (path, texts) = helper
+            for (path, pattern, text) in helper
                 .get_kind()
-                .get_dimensions_paths_and_patterns(das, cinfo);
-            avb.canvases.draw_path(&CanvasKind::Draw, path, texts);
+                .get_dimensions_paths_and_patterns(das, cinfo)
+            {
+                avb.canvases
+                    .draw_path(&CanvasKind::Draw, (path, pattern), vec![text]);
+            }
         }
     }
     // HELPERS: Draw the magnets points
-    for mag_point in avb.pools.helpers.magnet_points() {
+    for magnet_point in avb.pools.helpers.magnet_points() {
         avb.canvases.draw_path(
             &CanvasKind::Draw,
-            vec![(modifiers_path(*mag_point, 1., 5.), Pattern::HelperNormal)],
+            (modifiers_path(*magnet_point, 1., 5.), Pattern::HelperNormal),
             vec![],
         );
     }
@@ -1484,20 +1467,32 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
         match item {
             ClipboardItem::Shapes((shapes, _)) => {
                 for shape in shapes {
-                    avb.canvases.draw_path(
-                        &CanvasKind::Draw,
-                        shape.get_kind().get_paths_and_patterns(das, cinfo),
-                        vec![],
-                    );
+                    shape
+                        .get_kind()
+                        .get_paths_and_patterns(das, cinfo)
+                        .iter()
+                        .for_each(|(path, pattern)| {
+                            avb.canvases.draw_path(
+                                &CanvasKind::Draw,
+                                (path.clone(), *pattern),
+                                vec![],
+                            );
+                        });
                 }
             }
             ClipboardItem::Helpers((helpers, _)) => {
                 for helper in helpers {
-                    avb.canvases.draw_path(
-                        &CanvasKind::Draw,
-                        helper.get_kind().get_paths_and_patterns(das, cinfo),
-                        vec![],
-                    );
+                    helper
+                        .get_kind()
+                        .get_paths_and_patterns(das, cinfo)
+                        .iter()
+                        .for_each(|(path, pattern)| {
+                            avb.canvases.draw_path(
+                                &CanvasKind::Draw,
+                                (path.clone(), *pattern),
+                                vec![],
+                            );
+                        });
                 }
             }
         }
@@ -1505,40 +1500,48 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
 
     // Draw the on_creation object if any
     if let Some(shape) = avb.on_creation.get_shape() {
-        avb.canvases.draw_path(
-            &CanvasKind::Draw,
-            shape.get_kind().get_paths_and_patterns(das, cinfo),
-            vec![],
-        );
-        // With modifiers
-        avb.canvases.draw_path(
-            &CanvasKind::Draw,
-            shape.get_kind().get_mod_paths_and_patterns(das, cinfo),
-            vec![],
-        );
-        // With dimensions
-        let (path, texts) = shape
+        shape
             .get_kind()
-            .get_dimensions_paths_and_patterns(das, cinfo);
-        avb.canvases.draw_path(&CanvasKind::Draw, path, texts);
+            .get_paths_and_patterns(das, cinfo)
+            .iter()
+            .for_each(|(path, pattern)| {
+                avb.canvases
+                    .draw_path(&CanvasKind::Draw, (path.clone(), *pattern), vec![]);
+            });
+        // With modifiers
+        for path in shape.get_kind().get_mod_paths_and_patterns(das, cinfo) {
+            avb.canvases.draw_path(&CanvasKind::Draw, path, vec![]);
+        }
+        // With dimensions
+        for (path, pattern, text) in shape
+            .get_kind()
+            .get_dimensions_paths_and_patterns(das, cinfo)
+        {
+            avb.canvases
+                .draw_path(&CanvasKind::Draw, (path, pattern), vec![text]);
+        }
     } else {
-        if let Some(helper) = &avb.on_creation.get_helper() {
-            avb.canvases.draw_path(
-                &CanvasKind::Draw,
-                helper.get_kind().get_paths_and_patterns(das, cinfo),
-                vec![],
-            );
-            // With modifiers
-            avb.canvases.draw_path(
-                &CanvasKind::Draw,
-                helper.get_kind().get_mod_paths_and_patterns(das, cinfo),
-                vec![],
-            );
-            // With dimensions
-            let (path, texts) = helper
+        if let Some(helper) = avb.on_creation.get_helper() {
+            helper
                 .get_kind()
-                .get_dimensions_paths_and_patterns(das, cinfo);
-            avb.canvases.draw_path(&CanvasKind::Draw, path, texts);
+                .get_paths_and_patterns(das, cinfo)
+                .iter()
+                .for_each(|(path, pattern)| {
+                    avb.canvases
+                        .draw_path(&CanvasKind::Draw, (path.clone(), *pattern), vec![]);
+                });
+            // With modifiers
+            for path in helper.get_kind().get_mod_paths_and_patterns(das, cinfo) {
+                avb.canvases.draw_path(&CanvasKind::Draw, path, vec![]);
+            }
+            // With dimensions
+            for (path, pattern, text) in helper
+                .get_kind()
+                .get_dimensions_paths_and_patterns(das, cinfo)
+            {
+                avb.canvases
+                    .draw_path(&CanvasKind::Draw, (path, pattern), vec![text]);
+            }
         }
     }
 

@@ -8,7 +8,7 @@ use crate::{
         shapes_pool::{AddShapeAction, ShapesPool},
     },
     traits::*,
-    Action, ClipboardItem, PasteAction, Pointer,
+    Action, ClipboardItem, KeysStates, PasteAction, Pointer,
 };
 use kurbo::Vec2;
 
@@ -199,21 +199,21 @@ impl Pools {
             }
         }
     }
-    pub fn move_objects(&mut self, pointer: &mut Pointer, shift_pressed: bool) -> bool {
+    pub fn move_objects(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
         if let Some((shid, _)) = self.shapes.get_first_selected_modifier_vars() {
-            return self.shapes.move_modifier(shid, pointer, shift_pressed);
+            return self.shapes.move_modifier(shid, pointer, keys_states);
         }
 
         let shapes_selected = self.shapes.get_state(HS::Select);
         if shapes_selected.len() == 1 {
             return self
                 .shapes
-                .move_position(shapes_selected[0], pointer, shift_pressed);
+                .move_position(shapes_selected[0], pointer, keys_states);
         } else {
             if shapes_selected.len() > 0 {
                 let mut moved = false;
                 for shid in shapes_selected {
-                    moved |= self.shapes.move_position(shid, pointer, shift_pressed);
+                    moved |= self.shapes.move_position(shid, pointer, keys_states);
                 }
                 return moved;
             }
@@ -223,17 +223,17 @@ impl Pools {
         if helpers_selected.len() == 1 {
             return self
                 .helpers
-                .move_position(helpers_selected[0], pointer, shift_pressed);
+                .move_position(helpers_selected[0], pointer, keys_states);
         } else {
             if helpers_selected.len() > 0 {
                 let mut moved = false;
                 for dhid in helpers_selected {
-                    moved |= self.helpers.move_position(dhid, pointer, shift_pressed);
+                    moved |= self.helpers.move_position(dhid, pointer, keys_states);
                 }
                 return moved;
             } else {
                 if let Some((hpid, _)) = self.helpers.get_first_selected_modifier_vars() {
-                    return self.helpers.move_modifier(hpid, pointer, shift_pressed);
+                    return self.helpers.move_modifier(hpid, pointer, keys_states);
                 }
             }
         }
@@ -272,8 +272,8 @@ impl Pools {
     pub fn recalc_full_segs(&mut self) {
         self.shapes.recalc_full_segs();
     }
-    pub fn magnet_to_helpers(&mut self, pointer: &mut Pointer, shift_pressed: bool) {
-        if !shift_pressed {
+    pub fn magnet_to_helpers(&mut self, pointer: &mut Pointer, keys_states: KeysStates) {
+        if !keys_states.alt_pressed {
             self.helpers.magnet_to_point(pointer);
         }
     }
@@ -318,9 +318,17 @@ pub trait PoolsFunctions {
     fn set_modifiers_state(&mut self, value: bool, hors: HS);
     fn get_first_selected_modifier_vars(&self) -> Option<(Self::Id, Self::ObjectKindvars)>;
 
-    fn move_position(&mut self, dhid: Self::Id, pointer: &mut Pointer, shift_pressed: bool)
-        -> bool;
-    fn move_modifier(&mut self, dhid: Self::Id, pointer: &mut Pointer, shift_pressed: bool)
-        -> bool;
+    fn move_position(
+        &mut self,
+        dhid: Self::Id,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+    ) -> bool;
+    fn move_modifier(
+        &mut self,
+        dhid: Self::Id,
+        pointer: &mut Pointer,
+        skeys_states: KeysStates,
+    ) -> bool;
     fn delete_selection(&mut self) -> Option<Vec<Self::Object>>;
 }

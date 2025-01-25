@@ -7,7 +7,7 @@ use crate::{
     math::*,
     pools::{Pools, PoolsFunctions},
     traits::*,
-    Action, IconsConstruction, Pointer, HS,
+    Action, IconsConstruction, KeysStates, Pointer, HS,
 };
 use kurbo::Vec2;
 use std::{
@@ -143,7 +143,7 @@ impl HelpersPool {
         pointer.set_magnetized(false);
         for point in self.magnet_points.iter() {
             if (pointer.pos() - *point).hypot() < Self::MAGNET_RADIUS {
-                pointer.set_pos_rel(*point - pointer.pos_saved());
+                pointer.set_pos(*point);
                 pointer.set_magnetized(true);
                 break;
             }
@@ -371,15 +371,25 @@ impl PoolsFunctions for HelpersPool {
         None
     }
 
-    fn move_position(&mut self, dhid: DHid, pointer: &mut Pointer, shift_pressed: bool) -> bool {
+    fn move_position(
+        &mut self,
+        dhid: DHid,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+    ) -> bool {
         if let Some(helper) = self.helpers.get_mut(&dhid) {
-            return helper.get_kind_mut().move_position(pointer, shift_pressed);
+            return helper.get_kind_mut().move_position(pointer, keys_states);
         }
         false
     }
-    fn move_modifier(&mut self, dhid: DHid, pointer: &mut Pointer, shift_pressed: bool) -> bool {
+    fn move_modifier(
+        &mut self,
+        dhid: DHid,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+    ) -> bool {
         if let Some(helper) = self.helpers.get_mut(&dhid) {
-            helper.get_kind_mut().move_modifier(pointer, shift_pressed);
+            helper.get_kind_mut().move_modifier(pointer, keys_states);
         }
         false
     }

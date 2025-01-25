@@ -2,7 +2,7 @@ use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
-    Pointer,
+    KeysStates, Pointer,
 };
 
 use super::primitives::{
@@ -50,6 +50,12 @@ impl PrimitiveControls for PrimLine {
             _ => None,
         }
     }
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+    fn is_highlighted(&self) -> bool {
+        self.highlighted
+    }
     fn set_state(&mut self, _start: Vec2, _end: Vec2, state: SetPrimitiveState) {
         use SetPrimitiveState::*;
         match state {
@@ -68,10 +74,12 @@ impl PrimitiveControls for PrimLine {
         use SetPrimitiveStateFromPos::*;
         match state {
             SelectFromPos => {
-                self.selected = distance_to_segment(start, end, pointer.pos()) < 0.5 * Self::GRAB
+                self.selected =
+                    distance_to_segment(start, end, pointer.pos(), Self::GRAB) < Self::GRAB
             }
             HighliFromPos => {
-                self.highlighted = distance_to_segment(start, end, pointer.pos()) < 0.5 * Self::GRAB
+                self.highlighted =
+                    distance_to_segment(start, end, pointer.pos(), Self::GRAB) < Self::GRAB
             }
             _ => (),
         }
@@ -80,8 +88,8 @@ impl PrimitiveControls for PrimLine {
         &mut self,
         _start: Vec2,
         _end: Vec2,
-        _pointer: &mut Pointer,
-        _shift_pressed: bool,
+        _pointer: &Pointer,
+        _keys_states: KeysStates,
     ) -> bool {
         false
     }
@@ -110,21 +118,17 @@ impl PrimitiveControls for PrimLine {
         start: Vec2,
         end: Vec2,
         _das: &Size,
-    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
-        let mut paths = vec![];
-        let mut texts = vec![];
+    ) -> Vec<(BezPath, Pattern, CanvasText)> {
+        let mut res = vec![];
         let length = (start - end).hypot();
 
         let dim = Dimension::new(DimKind::Linear, start, end, length);
-        let (path, text) = dim.get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
+        let dim = dim.get_path_and_pattern();
+        res.push(dim);
 
         let dim = Dimension::new(DimKind::Angle, start, end, 0.);
-        let (path, text) = dim.get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
-
-        (paths, texts)
+        let dim = dim.get_path_and_pattern();
+        res.push(dim);
+        res
     }
 }

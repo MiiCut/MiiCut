@@ -18,9 +18,10 @@ use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
 use crate::pools::Pools;
 use crate::pools::PoolsFunctions;
-use crate::primitives::primitives::Privitive;
+use crate::primitives::primitives::Primitive;
 use crate::traits::*;
 use crate::Action;
+use crate::KeysStates;
 use crate::Pointer;
 use crate::Position;
 use crate::Value;
@@ -86,7 +87,7 @@ pub enum BSKindvars {
     RectangleRounded(Position, Position, Value, Value, Value, Value),
     Disc(Position, Value),
     Oblong(Position, Position, Value),
-    Custom(Vec<Privitive>),
+    Custom(Vec<Primitive>),
 }
 
 #[derive(Debug, Clone)]
@@ -219,24 +220,24 @@ impl ObjectsFuncs for BSKind {
         }
     }
 
-    fn move_position(&mut self, pointer: &mut Pointer, shift_pressed: bool) -> bool {
+    fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.move_position(pointer, shift_pressed),
-            RectangleRounded(sh) => sh.move_position(pointer, shift_pressed),
-            Disc(sh) => sh.move_position(pointer, shift_pressed),
-            Oblong(sh) => sh.move_position(pointer, shift_pressed),
-            Custom(sh) => sh.move_position(pointer, shift_pressed),
+            Rectangle(sh) => sh.move_position(pointer, keys_states),
+            RectangleRounded(sh) => sh.move_position(pointer, keys_states),
+            Disc(sh) => sh.move_position(pointer, keys_states),
+            Oblong(sh) => sh.move_position(pointer, keys_states),
+            Custom(sh) => sh.move_position(pointer, keys_states),
         }
     }
-    fn move_modifier(&mut self, pointer: &mut Pointer, shift_pressed: bool) -> bool {
+    fn move_modifier(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
         use BSKind::*;
         match self {
-            Rectangle(sh) => sh.move_modifier(pointer, shift_pressed),
-            RectangleRounded(sh) => sh.move_modifier(pointer, shift_pressed),
-            Disc(sh) => sh.move_modifier(pointer, shift_pressed),
-            Oblong(sh) => sh.move_modifier(pointer, shift_pressed),
-            Custom(sh) => sh.move_modifier(pointer, shift_pressed),
+            Rectangle(sh) => sh.move_modifier(pointer, keys_states),
+            RectangleRounded(sh) => sh.move_modifier(pointer, keys_states),
+            Disc(sh) => sh.move_modifier(pointer, keys_states),
+            Oblong(sh) => sh.move_modifier(pointer, keys_states),
+            Custom(sh) => sh.move_modifier(pointer, keys_states),
         }
     }
     fn get_position(&self) -> Vec2 {
@@ -250,16 +251,6 @@ impl ObjectsFuncs for BSKind {
         }
     }
 
-    fn get_paths(&self, das: &Size) -> Vec<BezPath> {
-        use BSKind::*;
-        match self {
-            Rectangle(sh) => sh.get_paths(das),
-            RectangleRounded(sh) => sh.get_paths(das),
-            Disc(sh) => sh.get_paths(das),
-            Oblong(sh) => sh.get_paths(das),
-            Custom(sh) => sh.get_paths(das),
-        }
-    }
     fn get_paths_and_patterns(
         &self,
         das: &Size,
@@ -292,7 +283,7 @@ impl ObjectsFuncs for BSKind {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+    ) -> Vec<(BezPath, Pattern, CanvasText)> {
         use BSKind::*;
         match self {
             Rectangle(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),

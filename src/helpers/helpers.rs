@@ -7,6 +7,7 @@ use crate::pools::Pools;
 use crate::pools::PoolsFunctions;
 use crate::traits::*;
 use crate::Action;
+use crate::KeysStates;
 use crate::Pointer;
 use crate::Position;
 use crate::Value;
@@ -130,18 +131,18 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn move_position(&mut self, pointer: &mut Pointer, shift_pressed: bool) -> bool {
+    fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.move_position(pointer, shift_pressed),
-            Circle(sh) => sh.move_position(pointer, shift_pressed),
+            Line(sh) => sh.move_position(pointer, keys_states),
+            Circle(sh) => sh.move_position(pointer, keys_states),
         }
     }
-    fn move_modifier(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+    fn move_modifier(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.move_modifier(pointer, _shift_pressed),
-            Circle(sh) => sh.move_modifier(pointer, _shift_pressed),
+            Line(sh) => sh.move_modifier(pointer, keys_states),
+            Circle(sh) => sh.move_modifier(pointer, keys_states),
         }
     }
     fn get_position(&self) -> Vec2 {
@@ -152,13 +153,6 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn get_paths(&self, das: &Size) -> Vec<BezPath> {
-        use HelperKind::*;
-        match self {
-            Line(sh) => sh.get_paths(das),
-            Circle(sh) => sh.get_paths(das),
-        }
-    }
     fn get_paths_and_patterns(
         &self,
         das: &Size,
@@ -185,7 +179,7 @@ impl ObjectsFuncs for HelperKind {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+    ) -> Vec<(BezPath, Pattern, CanvasText)> {
         use HelperKind::*;
         match self {
             Line(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),

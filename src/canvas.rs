@@ -8,7 +8,6 @@
 use crate::{math::*, prefab::*};
 use js_sys::Array;
 use kurbo::{BezPath, PathEl, Point, Rect, Size, Vec2};
-use std::vec;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CanvasRenderingContext2d, CssStyleDeclaration, HtmlCanvasElement, Window};
 
@@ -164,7 +163,7 @@ impl GridRules {
         draw_rec_grid_spacing: f64,
         drawing_offset: Vec2,
         drawing_scale: f64,
-    ) -> (CanvasKind, Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+    ) -> (CanvasKind, (BezPath, Pattern), Vec<CanvasText>) {
         use PathEl::*;
         let mut v: Vec<PathEl> = vec![];
         let mut texts: Vec<CanvasText> = vec![];
@@ -218,7 +217,7 @@ impl GridRules {
 
         (
             CanvasKind::Grid,
-            vec![(BezPath::from_vec(v), Pattern::Rules)],
+            (BezPath::from_vec(v), Pattern::Rules),
             texts,
         )
     }
@@ -227,7 +226,7 @@ impl GridRules {
         &mut self,
         draw_rec_size: Size,
         draw_rec_grid_spacing: f64,
-    ) -> (CanvasKind, Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+    ) -> (CanvasKind, (BezPath, Pattern), Vec<CanvasText>) {
         use PathEl::*;
         let mut v: Vec<PathEl> = vec![];
         let spacing = 10. * draw_rec_grid_spacing;
@@ -253,7 +252,7 @@ impl GridRules {
 
         (
             CanvasKind::Grid,
-            vec![(BezPath::from_vec(v), Pattern::GridPrimary)],
+            (BezPath::from_vec(v), Pattern::GridPrimary),
             vec![],
         )
     }
@@ -262,7 +261,7 @@ impl GridRules {
         &mut self,
         draw_rec_size: Size,
         draw_rec_grid_spacing: f64,
-    ) -> (CanvasKind, Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
+    ) -> (CanvasKind, (BezPath, Pattern), Vec<CanvasText>) {
         use PathEl::*;
         let mut v: Vec<PathEl> = vec![];
 
@@ -286,7 +285,7 @@ impl GridRules {
 
         (
             CanvasKind::Grid,
-            vec![(BezPath::from_vec(v), Pattern::GridSecondary)],
+            (BezPath::from_vec(v), Pattern::GridSecondary),
             vec![],
         )
     }
@@ -375,7 +374,6 @@ impl Canvases {
             self.c_main.height() as f64,
         );
     }
-
     pub fn draw_grid_and_rules(&mut self) {
         self.c_grid_ctx.clear_rect(
             0.,
@@ -385,27 +383,28 @@ impl Canvases {
         );
 
         // Rules
-        let (canvas_kind, bez_path, texts) = self.grid_rules.draw_rules(
+        let (canvas_kind, bez_paths, texts) = self.grid_rules.draw_rules(
             self.get_drawing_size(),
             self.get_grid_size(),
             self.drawing_offset,
             self.drawing_scale,
         );
-        self.draw_path(&canvas_kind, bez_path, texts);
+
+        self.draw_path(&canvas_kind, bez_paths, texts);
 
         // Primary grid
-        let (canvas_kind, bez_path, texts) = self
+        let (canvas_kind, bez_paths, texts) = self
             .grid_rules
             .draw_grid_primary(self.get_drawing_size(), self.get_grid_size());
-        self.draw_path(&canvas_kind, bez_path, texts);
+
+        self.draw_path(&canvas_kind, bez_paths, texts);
 
         // Secondary grid
-        let (canvas_kind, bez_path, texts) = self
+        let (canvas_kind, bez_paths, texts) = self
             .grid_rules
             .draw_grid_secondary(self.get_drawing_size(), self.get_grid_size());
-        self.draw_path(&canvas_kind, bez_path, texts);
+        self.draw_path(&canvas_kind, bez_paths, texts);
     }
-
     pub fn clear_main_canvas(&mut self) {
         self.c_main_ctx.clear_rect(
             0.,
@@ -414,7 +413,6 @@ impl Canvases {
             self.c_main.height() as f64,
         );
     }
-
     pub fn draw_origin(&self) {
         self.c_grid_ctx.clear_rect(
             0.,
@@ -425,7 +423,7 @@ impl Canvases {
         let origin = to_draw(self.drawing_offset, self.drawing_scale, self.drawing_offset);
         self.draw_path(
             &CanvasKind::Grid,
-            vec![(helper_point_path(origin, 5.), Pattern::Rules)],
+            (helper_point_path(origin, 5.), Pattern::Rules),
             vec![],
         );
     }
@@ -492,50 +490,51 @@ impl Canvases {
     pub fn draw_path(
         &self,
         canvas_kind: &CanvasKind,
-        paths: Vec<(BezPath, Pattern)>,
+        paths: (BezPath, Pattern),
         texts: Vec<CanvasText>,
     ) {
         let ctx = self.get_context(&canvas_kind);
         let scale = self.get_drawing_scale();
         let offset = self.get_drawing_offset();
         ctx.set_font("14px Orbitron");
-        for (path, pattern) in paths.iter() {
-            let (stroke_style, stroke_width, filled) = self.styles.get_styles(*pattern);
-            ctx.set_line_dash(stroke_style).unwrap();
-            ctx.set_line_width(stroke_width);
-            let (fill_color, stroke_color) = self.styles.get_colors(*pattern);
-            ctx.set_stroke_style_str(stroke_color);
-            ctx.set_fill_style_str(fill_color);
-            ctx.begin_path();
-            for cst in path.iter() {
-                match cst {
-                    PathEl::MoveTo(pt) => {
-                        let cpt = to_canvas(pt.to_vec2(), scale, offset);
-                        ctx.move_to(cpt.x, cpt.y);
-                    }
-                    PathEl::LineTo(pt) => {
-                        let cpt = to_canvas(pt.to_vec2(), scale, offset);
-                        ctx.line_to(cpt.x, cpt.y);
-                    }
-                    PathEl::QuadTo(pt1, pt2) => {
-                        let cpt1 = to_canvas(pt1.to_vec2(), scale, offset);
-                        let cpt2 = to_canvas(pt2.to_vec2(), scale, offset);
-                        ctx.quadratic_curve_to(cpt1.x, cpt1.y, cpt2.x, cpt2.y);
-                    }
-                    PathEl::CurveTo(pt1, pt2, pt3) => {
-                        let cpt1 = to_canvas(pt1.to_vec2(), scale, offset);
-                        let cpt2 = to_canvas(pt2.to_vec2(), scale, offset);
-                        let cpt3 = to_canvas(pt3.to_vec2(), scale, offset);
-                        ctx.bezier_curve_to(cpt1.x, cpt1.y, cpt2.x, cpt2.y, cpt3.x, cpt3.y);
-                    }
-                    PathEl::ClosePath => ctx.close_path(),
+        let (path, pattern) = paths;
+
+        let (stroke_style, stroke_width, filled) = self.styles.get_styles(pattern);
+        ctx.set_line_dash(stroke_style).unwrap();
+        ctx.set_line_width(stroke_width);
+        let (fill_color, stroke_color) = self.styles.get_colors(pattern);
+        ctx.set_stroke_style_str(stroke_color);
+        ctx.set_fill_style_str(fill_color);
+        ctx.begin_path();
+        for cst in path.iter() {
+            match cst {
+                PathEl::MoveTo(pt) => {
+                    let cpt = to_canvas(pt.to_vec2(), scale, offset);
+                    ctx.move_to(cpt.x, cpt.y);
                 }
+                PathEl::LineTo(pt) => {
+                    let cpt = to_canvas(pt.to_vec2(), scale, offset);
+                    ctx.line_to(cpt.x, cpt.y);
+                }
+                PathEl::QuadTo(pt1, pt2) => {
+                    let cpt1 = to_canvas(pt1.to_vec2(), scale, offset);
+                    let cpt2 = to_canvas(pt2.to_vec2(), scale, offset);
+                    ctx.quadratic_curve_to(cpt1.x, cpt1.y, cpt2.x, cpt2.y);
+                }
+                PathEl::CurveTo(pt1, pt2, pt3) => {
+                    let cpt1 = to_canvas(pt1.to_vec2(), scale, offset);
+                    let cpt2 = to_canvas(pt2.to_vec2(), scale, offset);
+                    let cpt3 = to_canvas(pt3.to_vec2(), scale, offset);
+                    ctx.bezier_curve_to(cpt1.x, cpt1.y, cpt2.x, cpt2.y, cpt3.x, cpt3.y);
+                }
+                PathEl::ClosePath => ctx.close_path(),
             }
-            if filled {
-                ctx.fill();
-            }
-            ctx.stroke();
         }
+        if filled {
+            ctx.fill();
+        }
+        ctx.stroke();
+
         // Drawing the texts
         for text in texts.iter() {
             self.draw_text(canvas_kind, text);
@@ -867,7 +866,9 @@ impl DrawStyles {
             ComposedSelected(filled) => (&self.pattern_solid, 3., filled),
             BasicNormal => (&self.pattern_dashed, 1., false),
             BasicHighlighted => (&self.pattern_dashed, 3., false),
+            BasicLightHighlighted => (&self.pattern_dashed, 1., false),
             BasicSelected => (&self.pattern_dashed, 3., false),
+            BasicLightSelected => (&self.pattern_dashed, 1., false),
 
             HelperNormal => (&self.pattern_solid, 1., true),
             HelperHighlighted => (&self.pattern_solid, 1., true),
@@ -914,7 +915,9 @@ impl DrawStyles {
             ),
             BasicNormal => (&self.transparent_color, &self.basic_normal_color),
             BasicHighlighted => (&self.basic_highlight_color, &self.basic_highlight_color),
+            BasicLightHighlighted => (&self.basic_highlight_color, &self.basic_highlight_color),
             BasicSelected => (&self.basic_selected_color, &self.basic_selected_color),
+            BasicLightSelected => (&self.basic_selected_color, &self.basic_selected_color),
 
             HelperNormalCircle => (&self.transparent_color, &self.helper_normal_color),
             HelperHighlightedCircle => (&self.transparent_color, &self.helper_highlight_color),
@@ -967,9 +970,12 @@ pub enum Pattern {
     ComposedNormal(bool),
     ComposedHighlighted(bool),
     ComposedSelected(bool),
+
     BasicNormal,
     BasicHighlighted,
+    BasicLightHighlighted,
     BasicSelected,
+    BasicLightSelected,
 
     HelperNormalCircle,
     HelperHighlightedCircle,

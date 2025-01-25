@@ -5,8 +5,9 @@ use crate::canvas::Pattern;
 use crate::dimensions::DimKind;
 use crate::dimensions::Dimension;
 use crate::math::*;
-use crate::prefab::modifiers_path;
+use crate::prefab::*;
 use crate::GetEntityState;
+use crate::KeysStates;
 use crate::ObjectsFuncs;
 use crate::Pointer;
 use crate::Position;
@@ -177,17 +178,18 @@ impl ObjectsFuncs for HelperCircle {
         ()
     }
 
-    fn move_position(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+    fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         self.center.pos = snap_pt(
             self.center.saved_pos + pointer.dpos(),
             pointer.get_snap().val(),
         );
-        pointer.set_pos(self.center.pos);
         true
     }
-    fn move_modifier(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
-        let saved_radius = self.radius.saved_val;
-        let radius = snap_val(saved_radius + pointer.dpos().x, pointer.get_snap().val());
+    fn move_modifier(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
+        let radius = snap_val(
+            (pointer.pos() - self.center.pos).hypot(),
+            pointer.get_snap().val(),
+        );
         if radius >= HelperCircle::MIN_RADIUS {
             self.radius.value = radius;
         }
@@ -214,20 +216,16 @@ impl ObjectsFuncs for HelperCircle {
         &self,
         _: &Size,
         _: (Rect, f64, Vec2),
-    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
-        let mut paths = vec![];
-        let mut texts = vec![];
+    ) -> Vec<(BezPath, Pattern, CanvasText)> {
+        let mut res = vec![];
         let offset = self.radius.value / 2_f64.sqrt();
         let end = self.center.pos + Vec2::new(offset, -offset);
-        let (path, text) = Dimension::new(DimKind::Radius, self.center.pos, end, self.radius.value)
+        let dim = Dimension::new(DimKind::Radius, self.center.pos, end, self.radius.value)
             .get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
-        (paths, texts)
+        res.push(dim);
+        res
     }
-    fn get_paths(&self, _: &Size) -> Vec<BezPath> {
-        vec![]
-    }
+
     fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         let pattern_center = match (self.selected, self.highlighted) {
             (false, false) => Pattern::HelperNormal,
@@ -235,10 +233,9 @@ impl ObjectsFuncs for HelperCircle {
             (true, false) => Pattern::HelperSelected,
             (true, true) => Pattern::HelperSelected,
         };
-        let paths = vec![(
-            modifiers_path(self.center.pos, 1., Self::GRAB_RADIUS),
+        vec![(
+            center_path(self.center.pos, 1., Self::GRAB_RADIUS),
             pattern_center,
-        )];
-        paths
+        )]
     }
 }

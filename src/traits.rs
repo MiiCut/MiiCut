@@ -1,6 +1,6 @@
 use crate::{
     canvas::{CanvasText, Pattern},
-    Pointer,
+    KeysStates, Pointer,
 };
 use kurbo::{BezPath, Rect, Size, Vec2};
 use std::fmt::Debug;
@@ -60,11 +60,11 @@ pub trait ObjectsFuncs: Debug + Clone {
 
     fn toggle_prop(&mut self);
 
-    fn move_position(&mut self, pointer: &mut Pointer, shift_pressed: bool) -> bool;
-    fn move_modifier(&mut self, pointer: &mut Pointer, shift_pressed: bool) -> bool;
+    fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool;
+    fn move_modifier(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool;
     fn get_position(&self) -> Vec2;
 
-    fn get_paths(&self, das: &Size) -> Vec<BezPath>;
+    // fn get_paths(&self, das: &Size) -> Vec<BezPath>;
     fn get_paths_and_patterns(
         &self,
         das: &Size,
@@ -79,7 +79,7 @@ pub trait ObjectsFuncs: Debug + Clone {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>);
+    ) -> Vec<(BezPath, Pattern, CanvasText)>;
     fn get_pattern_status(&self, selected: bool, highlighted: bool) -> Pattern {
         match (selected, highlighted) {
             (false, false) => Pattern::Modifiers,

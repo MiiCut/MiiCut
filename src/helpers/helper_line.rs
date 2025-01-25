@@ -9,6 +9,7 @@ use crate::is_near_line;
 use crate::math::*;
 use crate::prefab::*;
 use crate::traits::*;
+use crate::KeysStates;
 use crate::Pointer;
 use crate::Position;
 use crate::Value;
@@ -51,13 +52,21 @@ impl HelperLine {
     fn select_all_modifiers(&mut self, value: bool) {
         self.angle.selected = value;
     }
-    fn highlight_modifiers_from_pos(&mut self, pos: Vec2, _grab: f64) {
-        self.angle.highlighted =
-            is_near_line(self.center.pos, self.angle.value, pos, Self::GRAB_RADIUS);
+    fn highlight_modifiers_from_pos(&mut self, pointer: &mut Pointer, _grab: f64) {
+        self.angle.highlighted = is_near_line(
+            self.center.pos,
+            self.angle.value,
+            pointer.pos(),
+            Self::GRAB_RADIUS,
+        );
     }
-    fn select_modifiers_from_pos(&mut self, pos: Vec2, _grab: f64) {
-        self.angle.selected =
-            is_near_line(self.center.pos, self.angle.value, pos, Self::GRAB_RADIUS);
+    fn select_modifiers_from_pos(&mut self, pointer: &mut Pointer, _grab: f64) {
+        self.angle.selected = is_near_line(
+            self.center.pos,
+            self.angle.value,
+            pointer.pos(),
+            Self::GRAB_RADIUS,
+        );
     }
 }
 impl Display for HelperLine {
@@ -140,16 +149,27 @@ impl ObjectsFuncs for HelperLine {
         use SetEntityStateFromPos::*;
         match set {
             SelectFromPos => {
-                self.selected = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+                if (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS {
+                    self.selected = true;
+                    pointer.set_pos(self.center.pos);
+                    pointer.save_pos();
+                } else {
+                    self.selected = false;
+                }
             }
             HighliFromPos => {
-                self.highlighted = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+                if (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS {
+                    self.highlighted = true;
+                    pointer.set_pos(self.center.pos);
+                } else {
+                    self.highlighted = false;
+                }
             }
             SelectModifierFromPos => {
-                self.select_modifiers_from_pos(pointer.pos(), pointer.get_grab_dist());
+                self.select_modifiers_from_pos(pointer, pointer.get_grab_dist());
             }
             HighliModifierFromPos => {
-                self.highlight_modifiers_from_pos(pointer.pos(), pointer.get_grab_dist());
+                self.highlight_modifiers_from_pos(pointer, pointer.get_grab_dist());
             }
         }
     }
@@ -158,7 +178,7 @@ impl ObjectsFuncs for HelperLine {
         ()
     }
 
-    fn move_position(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+    fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         self.center.pos = snap_pt(
             self.center.saved_pos + pointer.dpos(),
             pointer.get_snap().val(),
@@ -166,7 +186,7 @@ impl ObjectsFuncs for HelperLine {
         pointer.set_pos(self.center.pos);
         true
     }
-    fn move_modifier(&mut self, pointer: &mut Pointer, _shift_pressed: bool) -> bool {
+    fn move_modifier(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
         if self.angle.selected {
             let angle = (pointer.pos() - self.center.pos).atan2();
             self.angle.value = snap_val(angle / PI * 180., pointer.get_snap().val()) / 180. * PI;
@@ -222,19 +242,15 @@ impl ObjectsFuncs for HelperLine {
         &self,
         _: &Size,
         _: (Rect, f64, Vec2),
-    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
-        let mut paths = vec![];
-        let mut texts = vec![];
+    ) -> Vec<(BezPath, Pattern, CanvasText)> {
+        let mut res = vec![];
         let end = get_point_at_dist_from_angle(self.center.pos, self.angle.value, 200.);
         let dim = Dimension::new(DimKind::Angle, self.center.pos, end, self.angle.value);
-        let (path, text) = dim.get_path_and_pattern();
-        paths.push(path);
-        texts.push(text);
-        (paths, texts)
+        let dim = dim.get_path_and_pattern();
+        res.push(dim);
+        res
     }
-    fn get_paths(&self, _: &Size) -> Vec<BezPath> {
-        vec![]
-    }
+
     fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         let pattern_center = match (self.selected, self.highlighted) {
             (false, false) => Pattern::HelperNormal,
@@ -242,10 +258,9 @@ impl ObjectsFuncs for HelperLine {
             (true, false) => Pattern::HelperSelected,
             (true, true) => Pattern::HelperSelected,
         };
-        let paths = vec![(
-            modifiers_path(self.center.pos, 1., Self::GRAB_RADIUS),
+        vec![(
+            center_path(self.center.pos, 1., Self::GRAB_RADIUS),
             pattern_center,
-        )];
-        paths
+        )]
     }
 }

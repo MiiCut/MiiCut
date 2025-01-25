@@ -112,7 +112,7 @@ impl Dimension {
             ),
         )
     }
-    pub fn get_path_and_pattern(&self) -> ((BezPath, Pattern), CanvasText) {
+    pub fn get_path_and_pattern(&self) -> (BezPath, Pattern, CanvasText) {
         match self.kind {
             DimKind::Radius => self.get_radius_path(),
             DimKind::Linear => self.get_linear_path(),
@@ -121,7 +121,7 @@ impl Dimension {
             DimKind::Angle => self.get_angle_path(),
         }
     }
-    fn get_horizontal_path(&self) -> ((BezPath, Pattern), CanvasText) {
+    fn get_horizontal_path(&self) -> (BezPath, Pattern, CanvasText) {
         let mut path = kurbo::BezPath::new();
         let value = if self.value == 0. {
             self.get_length()
@@ -153,9 +153,9 @@ impl Dimension {
         path.move_to(Vec2::new(end.x - 2., end.y - 2.).to_point());
         path.line_to(Vec2::new(end.x + 2., end.y + 2.).to_point());
 
-        ((path, Pattern::DimensionNormal), text)
+        (path, Pattern::DimensionNormal, text)
     }
-    fn get_vertical_path(&self) -> ((BezPath, Pattern), CanvasText) {
+    fn get_vertical_path(&self) -> (BezPath, Pattern, CanvasText) {
         let mut path = kurbo::BezPath::new();
         let value = if self.value == 0. {
             self.get_length()
@@ -187,9 +187,9 @@ impl Dimension {
         path.move_to(Vec2::new(end.x - 2., end.y - 2.).to_point());
         path.line_to(Vec2::new(end.x + 2., end.y + 2.).to_point());
 
-        ((path, Pattern::DimensionNormal), text)
+        (path, Pattern::DimensionNormal, text)
     }
-    fn get_radius_path(&self) -> ((BezPath, Pattern), CanvasText) {
+    fn get_radius_path(&self) -> (BezPath, Pattern, CanvasText) {
         let mut path = kurbo::BezPath::new();
         let end = self.end + (self.end - self.start).normalize() * 10.;
         let value = if self.value == 0. {
@@ -214,9 +214,9 @@ impl Dimension {
         path.line_to(end.to_point());
         path.line_to(Vec2::new(end.x + 10., end.y).to_point());
 
-        ((path, Pattern::DimensionNormal), text)
+        (path, Pattern::DimensionNormal, text)
     }
-    fn get_angle_path(&self) -> ((BezPath, Pattern), CanvasText) {
+    fn get_angle_path(&self) -> (BezPath, Pattern, CanvasText) {
         let mut path = kurbo::BezPath::new();
         let start = self.start;
         let end = self.end;
@@ -242,9 +242,9 @@ impl Dimension {
         path.line_to(start.to_point());
         path.line_to(angle_pt.to_point());
 
-        ((path, Pattern::DimensionNormal), text)
+        (path, Pattern::DimensionNormal, text)
     }
-    fn get_linear_path(&self) -> ((BezPath, Pattern), CanvasText) {
+    fn get_linear_path(&self) -> (BezPath, Pattern, CanvasText) {
         let mut path = kurbo::BezPath::new();
         let value = if self.value == 0. {
             self.get_length()
@@ -276,6 +276,6 @@ impl Dimension {
         path.move_to((end + unit_perp * self.dim_offset - 2. * unit_rot45).to_point());
         path.line_to((end + unit_perp * self.dim_offset + 2. * unit_rot45).to_point());
 
-        ((path, Pattern::DimensionNormal), text)
+        (path, Pattern::DimensionNormal, text)
     }
 }

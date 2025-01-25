@@ -7,7 +7,7 @@ use crate::{
     dimensions::{DimKind, Dimension},
     math::*,
     prefab::*,
-    Pointer, Value,
+    KeysStates, Pointer, Value,
 };
 use kurbo::{BezPath, Shape, Size, Vec2};
 
@@ -27,16 +27,18 @@ impl PrimArc {
     pub fn new() -> Self {
         PrimArc {
             radius: Value::new(Self::MIN_RADIUS),
-            concavity: true,
-            concavity_saved: true,
+            concavity: false,
+            concavity_saved: false,
             highlighted: false,
             selected: false,
         }
     }
-    pub fn get_center(&self, start: Vec2, end: Vec2) -> Vec2 {
-        // Validate the radius
-        // self.validate_radius(start, end);
-        find_circle_center(start, end, self.radius.value, self.concavity)
+
+    pub fn get_radius(&self) -> f64 {
+        self.radius.value
+    }
+    pub fn get_concavity(&self) -> bool {
+        self.concavity
     }
     pub fn validate_radius(&mut self, start: Vec2, end: Vec2) {
         if self.radius.value.signum() > 0. {
@@ -55,6 +57,7 @@ impl PrimitiveControls for PrimArc {
     const GRAB: f64 = 5.;
 
     fn toggle(&mut self) {
+        log!("toggle");
         self.concavity = !self.concavity;
     }
     fn save_vars(&mut self) {
@@ -68,6 +71,12 @@ impl PrimitiveControls for PrimArc {
     fn update_primitives_vars(&mut self, start: Vec2, end: Vec2, _changed: VertexChange) -> Vec2 {
         self.validate_radius(start, end);
         find_circle_center(start, end, self.radius.value, self.concavity)
+    }
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+    fn is_highlighted(&self) -> bool {
+        self.highlighted
     }
     fn get_state(&self, start: Vec2, end: Vec2, state: GetPrimitiveState) -> Option<Vec2> {
         use GetPrimitiveState::*;
@@ -106,11 +115,11 @@ impl PrimitiveControls for PrimArc {
         match state {
             SelectFromPos => {
                 self.selected = is_point_near_arc(
-                    &create_arc_from_center(
+                    &create_arc_from_radius_and_concavity(
                         start,
                         end,
-                        find_circle_center(start, end, self.radius.value, self.concavity),
-                        self.concavity,
+                        self.radius.value,
+                        self.get_concavity(),
                     ),
                     pointer.pos(),
                     Self::GRAB,
@@ -118,10 +127,10 @@ impl PrimitiveControls for PrimArc {
             }
             HighliFromPos => {
                 self.highlighted = is_point_near_arc(
-                    &create_arc_from_center(
+                    &create_arc_from_radius_and_concavity(
                         start,
                         end,
-                        find_circle_center(start, end, self.radius.value, self.concavity),
+                        self.radius.value,
                         self.concavity,
                     ),
                     pointer.pos(),
@@ -144,11 +153,12 @@ impl PrimitiveControls for PrimArc {
         &mut self,
         start: Vec2,
         end: Vec2,
-        pointer: &mut Pointer,
-        _shift_pressed: bool,
+        pointer: &Pointer,
+        _keys_states: KeysStates,
     ) -> bool {
         if self.radius.selected {
             let center = find_circle_center(start, end, self.radius.saved_val, self.concavity);
+
             let pos = pointer.pos();
             let dpos = pointer.dpos();
             let dpos_proj = perpendicular_point_with_projection(
@@ -162,6 +172,7 @@ impl PrimitiveControls for PrimArc {
             } else {
                 (pos - start).cross(end - start).signum()
             };
+
             self.radius.value = snap_val(
                 sign * (center + dpos_proj - start).hypot(),
                 pointer.get_snap().val(),
@@ -172,15 +183,12 @@ impl PrimitiveControls for PrimArc {
             false
         }
     }
+    // NOT USED, SEE shape_custom
     fn path_elements(&self, start: Vec2, end: Vec2) -> PrimitiveKindIter {
-        let f = create_arc_from_center(
-            start,
-            end,
-            find_circle_center(start, end, self.radius.value, self.concavity),
-            self.concavity,
-        );
+        let f = create_arc_from_radius_and_concavity(start, end, self.radius.value, self.concavity);
         PrimitiveKindIter::Arc(f.path_elements(Self::TOLERANCE))
     }
+    // NOT USED, SEE shape_custom
     fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, _das: &Size) -> (BezPath, Pattern) {
         (
             self.path_elements(start, end).collect(),
@@ -209,18 +217,14 @@ impl PrimitiveControls for PrimArc {
         start: Vec2,
         end: Vec2,
         _das: &Size,
-    ) -> (Vec<(BezPath, Pattern)>, Vec<CanvasText>) {
-        let mut paths = vec![];
-        let mut texts = vec![];
-
-        let center = self.get_center(start, end);
+    ) -> Vec<(BezPath, Pattern, CanvasText)> {
+        let mut res = vec![];
+        let center = find_circle_center(start, end, self.radius.saved_val, self.concavity);
         let offset = self.radius.value / 2_f64.sqrt();
         let end = center + Vec2::new(offset, -offset);
-        let (path, text) =
+        let dim =
             Dimension::new(DimKind::Radius, center, end, self.radius.value).get_path_and_pattern();
-
-        paths.push(path);
-        texts.push(text);
-        (paths, texts)
+        res.push(dim);
+        res
     }
 }

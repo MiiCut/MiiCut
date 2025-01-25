@@ -3,7 +3,7 @@ use kurbo::Vec2;
 use crate::helpers::helpers::Helper;
 use crate::pools::{Pools, PoolsFunctions};
 use crate::shapes::shapes::BasicShape;
-use crate::{traits::*, Pointer};
+use crate::{traits::*, KeysStates, Pointer};
 
 #[derive(Clone, Debug)]
 pub enum ClipboardItem {
@@ -39,12 +39,16 @@ impl Clipboard {
             match item_paste {
                 ClipboardItem::Shapes((shapes, _pos_copy)) => {
                     shapes.iter_mut().for_each(|shape| {
-                        shape.get_kind_mut().move_position(pointer, false);
+                        shape
+                            .get_kind_mut()
+                            .move_position(pointer, KeysStates::default());
                     });
                 }
                 ClipboardItem::Helpers((helpers, _pos_copy)) => {
                     helpers.iter_mut().for_each(|helper| {
-                        helper.get_kind_mut().move_position(pointer, false);
+                        helper
+                            .get_kind_mut()
+                            .move_position(pointer, KeysStates::default());
                     });
                 }
             }
@@ -62,13 +66,17 @@ impl Clipboard {
                             .map(|shape| pointer.set_pos(shape.get_kind().get_position()));
                     }
                     shapes.iter_mut().for_each(|shape| {
-                        shape.get_kind_mut().move_position(pointer, false);
+                        shape
+                            .get_kind_mut()
+                            .move_position(pointer, KeysStates::default());
                     });
                 }
                 ClipboardItem::Helpers((helpers, _pos_copy)) => {
                     // pointer.set_pos_saved(pointer.pos() - *pos_copy);
                     helpers.iter_mut().for_each(|helper| {
-                        helper.get_kind_mut().move_position(pointer, false);
+                        helper
+                            .get_kind_mut()
+                            .move_position(pointer, KeysStates::default());
                     });
                 }
             }

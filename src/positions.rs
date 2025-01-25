@@ -53,13 +53,9 @@ impl Pointer {
     }
     pub fn set_pos(&mut self, pos: Vec2) {
         self.pos = pos;
-        self.pos_saved = pos;
     }
-    pub fn set_pos_rel(&mut self, dpos: Vec2) {
-        self.pos = self.pos_saved + dpos;
-    }
-    pub fn set_pos_saved(&mut self, pos: Vec2) {
-        self.pos_saved = pos;
+    pub fn save_pos(&mut self) {
+        self.pos_saved = self.pos;
     }
     pub fn set_draw_scale(&mut self, scale: f64) {
         self.draw_scale = scale;
