@@ -35,7 +35,7 @@ use pools::{DrawObjects, Pools};
 use positions::*;
 use prefab::modifiers_path;
 use primitives::primitives::GetPrimitiveState;
-use primitives::primitives::StartProperty;
+use primitives::primitives::VertexProperty;
 use shapes::shapes::BSKind;
 use shapes::shapes::{BoolOps, ToogleBoolOpsShapesAction};
 use shapes::shapes_pool::BSid;
@@ -800,7 +800,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                             BSKind::Custom(shape_custom)
                                 if matches!(
                                     shape_custom.get_primitivess_start_property(),
-                                    StartProperty::Nope
+                                    VertexProperty::Nope
                                 ) =>
                             {
                                 // Both conditions succeeded
@@ -811,7 +811,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                                 // A. We were drawing a new shape
                                 if shape.get_kind().good_size() {
                                     if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
-                                        if let StartProperty::RectangleLike =
+                                        if let VertexProperty::RectangleLike =
                                             shape_custom.get_primitivess_start_property()
                                         {
                                             shape_custom.end_creation();
@@ -866,7 +866,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                             BSKind::Custom(shape_custom)
                                 if matches!(
                                     shape_custom.get_primitivess_start_property(),
-                                    StartProperty::Nope
+                                    VertexProperty::Nope
                                 ) =>
                             {
                                 // Go out of creation mode

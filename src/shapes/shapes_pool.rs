@@ -7,7 +7,7 @@ use crate::{
     clipboard::Action,
     math::*,
     pools::{PoolsFunctions, HS},
-    primitives::primitives::StartProperty,
+    primitives::primitives::VertexProperty,
     traits::*,
     IconsShapes, KeysStates, Pointer, Pools,
 };
@@ -74,10 +74,10 @@ impl ShapesPool {
             IconsShapes::Rectangle => {
                 pointer.set_pos(pos2);
                 pointer.save_pos();
-                ShapeCustom::new(StartProperty::RectangleLike, pos1, pos2)
+                ShapeCustom::new(VertexProperty::RectangleLike, pos1, pos2)
             }
             IconsShapes::Disc => ShapeDisc::new(pos1, pos1),
-            IconsShapes::Custom => ShapeCustom::new(StartProperty::Nope, pos1, pos1),
+            IconsShapes::Custom => ShapeCustom::new(VertexProperty::Nope, pos1, pos1),
         };
         BasicShape::new(shid, shape_kind, boolean_op)
     }

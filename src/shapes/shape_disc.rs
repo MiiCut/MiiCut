@@ -74,7 +74,7 @@ impl ShapeDisc {
         self.radius.selected = value;
     }
 
-    fn hs_modifiers_from_pos(&mut self, pointer: &mut Pointer, keys_states: KeysStates, hs: HS) {
+    fn hs_modifiers_from_pos(&mut self, pointer: &mut Pointer, _keys_states: KeysStates, hs: HS) {
         let state_center = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
 
         match hs {
@@ -291,16 +291,10 @@ impl ObjectsFuncs for ShapeDisc {
         _: &Size,
         _: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern)> {
-        vec![
-            // (
-            //     modifiers_path(self.get_radius_modifier(), 1., ShapeDisc::GRAB_RADIUS),
-            //     self.get_pattern_status(self.radius.selected, self.radius.highlighted),
-            // ),
-            (
-                center_path(self.center.pos, 1., ShapeDisc::GRAB_RADIUS),
-                self.get_pattern_status(self.selected, self.highlighted),
-            ),
-        ]
+        vec![(
+            center_path(self.center.pos, 1., ShapeDisc::GRAB_RADIUS),
+            self.get_pattern_status(self.selected, self.highlighted),
+        )]
     }
     fn get_dimensions_paths_and_patterns(
         &self,

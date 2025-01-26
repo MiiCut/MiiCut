@@ -16,469 +16,248 @@ use crate::{
 };
 use kurbo::{ArcAppendIter, BezPath, CubicBezIter, LinePathIter, PathEl, QuadBezIter, Size, Vec2};
 
-#[derive(Copy, Clone, Debug)]
-pub enum VertexChange {
-    StartChanged,
-    EndChanged,
-    Nope,
-}
-
 #[derive(Copy, Debug, Clone)]
-pub enum StartProperty {
+pub enum VertexProperty {
     RectangleLike,
     Nope,
 }
-
 #[derive(Copy, Debug, Clone)]
-pub enum StartModifier {
-    Chamfer(bool),
-    Fillet(bool),
-    Nope(bool),
+pub enum VertexModifier {
+    // Fillet radius or Chamfer distance, fillet concavity
+    Chamfer(Value, ValueBool),
+    Fillet(Value, ValueBool),
+    Nope(Value, ValueBool),
 }
-impl StartModifier {
+impl VertexModifier {
     pub fn toogle(&self) -> Self {
-        use StartModifier::*;
+        use VertexModifier::*;
         match self {
-            Chamfer(value) => Fillet(*value),
-            Fillet(value) => Nope(*value),
-            Nope(value) => Chamfer(*value),
+            Chamfer(radius, concavity) => Fillet(*radius, *concavity),
+            Fillet(radius, concavity) => Nope(*radius, *concavity),
+            Nope(radius, concavity) => Chamfer(*radius, *concavity),
         }
     }
 }
+#[derive(Debug, Clone)]
 
+pub struct Vertex {
+    pos: Position,
+    property: VertexProperty,
+    modifier: VertexModifier,
+}
+impl Vertex {
+    const MIN_OFFSET: f64 = 10.;
+    pub fn new(pos: Vec2, property: VertexProperty) -> Self {
+        Self {
+            pos: Position::new(pos, true),
+            property,
+            modifier: VertexModifier::Nope(Value::new(Self::MIN_OFFSET), ValueBool::new(false)),
+        }
+    }
+    pub fn get_pos(&self) -> &Position {
+        &self.pos
+    }
+    pub fn get_pos_mut(&mut self) -> &mut Position {
+        &mut self.pos
+    }
+    pub fn set_pos(&mut self, pos: Vec2) {
+        self.pos.pos = pos;
+    }
+    pub fn save_pos(&mut self) {
+        self.pos.saved_pos = self.pos.pos;
+    }
+    pub fn restore_pos(&mut self) {
+        self.pos.pos = self.pos.saved_pos;
+    }
+    pub fn save_vars(&mut self) {
+        self.save_pos();
+        self.save_modifier();
+    }
+    pub fn restore_vars(&mut self) {
+        self.restore_pos();
+        self.restore_modifier();
+    }
+
+    pub fn get_property(&self) -> VertexProperty {
+        self.property
+    }
+    pub fn set_property(&mut self, property: VertexProperty) {
+        self.property = property;
+    }
+    pub fn get_modifier(&self) -> VertexModifier {
+        self.modifier
+    }
+    pub fn set_modifier(&mut self, modifier: VertexModifier) {
+        self.modifier = modifier;
+    }
+    pub fn save_modifier(&mut self) {
+        use VertexModifier::*;
+        match &mut self.modifier {
+            Nope(offset, concavity) => {
+                offset.saved_val = offset.value;
+                concavity.saved_val = concavity.value;
+            }
+            Chamfer(offset, concavity) => {
+                offset.saved_val = offset.value;
+                concavity.saved_val = concavity.value;
+            }
+            Fillet(offset, concavity) => {
+                offset.saved_val = offset.value;
+                concavity.saved_val = concavity.value;
+            }
+        }
+    }
+    pub fn restore_modifier(&mut self) {
+        use VertexModifier::*;
+        match &mut self.modifier {
+            Nope(offset, concavity) => {
+                offset.value = offset.saved_val;
+                concavity.value = concavity.saved_val;
+            }
+            Chamfer(offset, concavity) => {
+                offset.value = offset.saved_val;
+                concavity.value = concavity.saved_val;
+            }
+            Fillet(offset, concavity) => {
+                offset.value = offset.saved_val;
+                concavity.value = concavity.saved_val;
+            }
+        }
+    }
+
+    pub fn toogle_modifier(&mut self) {
+        self.modifier = self.modifier.toogle();
+    }
+
+    pub fn get_modifier_offset(&self) -> f64 {
+        use VertexModifier::*;
+        match self.modifier {
+            Nope(offset, _) | Chamfer(offset, _) | Fillet(offset, _) => offset.value,
+        }
+    }
+    pub fn set_modifier_offset(&mut self, offset: f64) {
+        use VertexModifier::*;
+        match self.modifier {
+            Nope(_, concavity) => self.modifier = Nope(Value::new(offset), concavity),
+            Chamfer(_, concavity) => self.modifier = Chamfer(Value::new(offset), concavity),
+            Fillet(_, concavity) => self.modifier = Fillet(Value::new(offset), concavity),
+        }
+    }
+    pub fn get_modifier_offset_saved(&self) -> f64 {
+        use VertexModifier::*;
+        match self.modifier {
+            Nope(offset, _) | Chamfer(offset, _) | Fillet(offset, _) => offset.saved_val,
+        }
+    }
+    pub fn move_pos(&mut self, pointer: &mut Pointer) -> bool {
+        let dpos = pointer.dpos();
+        self.pos.pos = self.pos.saved_pos + dpos;
+        true
+    }
+
+    pub fn get_pattern(&self) -> Pattern {
+        match (self.pos.selected, self.pos.highlighted) {
+            (false, false) => Pattern::Modifiers,
+            (false, true) => Pattern::ModifiersHighlighted,
+            (true, false) => Pattern::ModifiersSelected,
+            (true, true) => Pattern::ModifiersSelected,
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub struct Primitive {
-    kind: PrivitiveKind,
-    start: Position,
-    end: Position,
-    // For start position only
-    start_property: StartProperty,
-    // For start position only
-    // This will be applied also to the end position of the previous Prim
-    // in the custom shape
-    start_modifier: StartModifier,
-    start_modifier_offset: Value,
+    curve: PrimitiveCurve,
+    start: usize,
+    end: usize,
 
-    // Primitives
+    // Primitive curves (not on an enum because of memory retention)
+    // when user switches between curves, the previous values are kept
     // Line
     p_line: PrimLine,
-    //Arc
+    // Arc
     p_arc: PrimArc,
 }
 
 impl Primitive {
-    const MIN_START_MOD_OFFSET: f64 = 10.;
-    pub fn new(kind: PrivitiveKind, start_property: StartProperty, start: Vec2, end: Vec2) -> Self {
-        let start = Position::new(start, true);
-        let end = Position::new(end, true);
+    pub fn new(curve: PrimitiveCurve, start: usize, end: usize) -> Self {
         Self {
-            kind,
+            curve,
             start,
             end,
-            start_property,
-            start_modifier: StartModifier::Nope(false),
-            start_modifier_offset: Value::new(Self::MIN_START_MOD_OFFSET),
             p_line: PrimLine::new(),
             p_arc: PrimArc::new(),
         }
     }
-
-    pub fn get_start_pos(&self) -> Vec2 {
-        self.start.pos
+    pub fn get_start(&self) -> usize {
+        self.start
     }
-    pub fn get_start_saved_pos(&self) -> Vec2 {
-        self.start.saved_pos
+    pub fn get_end(&self) -> usize {
+        self.end
     }
-    pub fn set_start_pos(&mut self, start: Vec2) {
-        self.start.pos = start;
-        self.update_primitives_vars(VertexChange::StartChanged);
+    pub fn get_curve(&self) -> &PrimitiveCurve {
+        &self.curve
     }
-
-    pub fn toogle_start_modifier(&mut self) {
-        self.start_modifier = self.start_modifier.toogle();
+    pub fn get_curve_mut(&mut self) -> &mut PrimitiveCurve {
+        &mut self.curve
     }
-    pub fn get_start_modifier_offset(&self) -> f64 {
-        self.start_modifier_offset.value
+    pub fn set_curve(&mut self, curve: PrimitiveCurve) {
+        self.curve = curve;
     }
-    pub fn set_start_modifier_offset(&mut self, offset: f64) {
-        self.start_modifier_offset.value = offset;
+    pub fn prev_curve(&mut self) {
+        self.curve = self.curve.prev_curve();
     }
-    pub fn get_start_modifier_offset_saved(&self) -> f64 {
-        self.start_modifier_offset.saved_val
-    }
-
-    pub fn get_start_modifier(&self) -> StartModifier {
-        self.start_modifier
-    }
-    pub fn set_start_modifier(&mut self, modifier: StartModifier) {
-        self.start_modifier = modifier;
-    }
-    pub fn get_start_property(&self) -> StartProperty {
-        self.start_property
-    }
-    pub fn set_start_property(&mut self, property: StartProperty) {
-        self.start_property = property;
-    }
-
-    pub fn is_start_selected(&self) -> bool {
-        self.start.selected
-    }
-    pub fn is_start_highlighted(&self) -> bool {
-        self.start.highlighted
-    }
-
-    pub fn get_end_pos(&self) -> Vec2 {
-        self.end.pos
-    }
-    pub fn get_end_saved_position(&self) -> Vec2 {
-        self.end.saved_pos
-    }
-    pub fn set_end_pos(&mut self, end: Vec2) {
-        self.end.pos = end;
-        self.update_primitives_vars(VertexChange::EndChanged);
-    }
-
-    pub fn move_position(&mut self, pointer: &mut Pointer) -> bool {
-        let dpos = pointer.dpos();
-        self.start.pos = self.start.saved_pos + dpos;
-        self.end.pos = self.end.saved_pos + dpos;
-        true
-    }
-
-    pub fn get_prim_kind(&self) -> &PrivitiveKind {
-        &self.kind
-    }
-    pub fn set_prim_kind_next(&mut self) -> Vec2 {
-        self.kind = self.kind.next_kind();
-        use PrivitiveKind::*;
-        match self.kind {
-            PrimLine => (self.start.pos + self.end.pos) / 2.,
-            PrimArc => {
-                self.p_arc.validate_radius(self.start.pos, self.end.pos);
-                find_circle_center(
-                    self.start.pos,
-                    self.end.pos,
-                    self.p_arc.get_radius(),
-                    self.p_arc.get_concavity(),
-                )
-            }
-        }
-    }
-    pub fn set_prim_kind_prev(&mut self) -> Vec2 {
-        self.kind = self.kind.prev_kind();
-        use PrivitiveKind::*;
-        match self.kind {
-            PrimLine => (self.start.pos + self.end.pos) / 2.,
-            PrimArc => {
-                self.p_arc.validate_radius(self.start.pos, self.end.pos);
-                find_circle_center(
-                    self.start.pos,
-                    self.end.pos,
-                    self.p_arc.get_radius(),
-                    self.p_arc.get_concavity(),
-                )
-            }
-        }
-    }
-    pub fn set_prim_kind(&mut self, kind: PrivitiveKind) {
-        self.kind = kind;
+    pub fn next_curve(&mut self) {
+        self.curve = self.curve.next_curve();
     }
 
     pub fn get_line(&self) -> &PrimLine {
         &self.p_line
     }
+    pub fn get_line_mut(&mut self) -> &mut PrimLine {
+        &mut self.p_line
+    }
     pub fn get_arc(&self) -> &PrimArc {
         &self.p_arc
     }
-
+    pub fn get_arc_mut(&mut self) -> &mut PrimArc {
+        &mut self.p_arc
+    }
     pub fn get_vars(&self) -> Primitive {
         Primitive {
-            kind: self.kind.clone(),
-            start: self.start.clone(),
-            end: self.end.clone(),
-            start_property: self.start_property,
-            start_modifier: self.start_modifier.clone(),
-            start_modifier_offset: self.start_modifier_offset,
+            curve: self.curve.clone(),
+            start: self.start,
+            end: self.end,
             p_line: self.p_line.clone(),
             p_arc: self.p_arc.clone(),
         }
     }
     pub fn set_vars(&mut self, vars: &Primitive) {
-        self.kind = vars.kind.clone();
-        self.start = vars.start.clone();
-        self.end = vars.end.clone();
-        self.start_property = vars.start_property;
-        self.start_modifier = vars.start_modifier.clone();
-        self.start_modifier_offset = vars.start_modifier_offset;
+        self.curve = vars.curve.clone();
+        self.start = vars.start;
+        self.end = vars.end;
         self.p_line = vars.p_line.clone();
         self.p_arc = vars.p_arc.clone();
     }
 
-    pub fn get_all_modifiers_positions(&self) -> Vec<Vec2> {
-        let mut modifiers = vec![];
-        modifiers.push(self.start.pos);
-        use PrivitiveKind::*;
-        match self.kind {
-            PrimLine => self
-                .p_line
-                .get_all_controls_positions(self.start.pos, self.end.pos),
-            PrimArc => self
-                .p_arc
-                .get_all_controls_positions(self.start.pos, self.end.pos),
-        }
-    }
     pub fn get_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
-        use PrivitiveKind::*;
-        match self.kind {
-            PrimLine => self.p_line.get_pattern(selected, highlighted),
-            PrimArc => self.p_arc.get_pattern(selected, highlighted),
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.get_pattern(selected, highlighted),
+            CurveArc => self.p_arc.get_pattern(selected, highlighted),
         }
     }
-    pub fn get_paths_and_patterns(&self, das: &Size) -> (BezPath, Pattern) {
-        use PrivitiveKind::*;
-        match self.kind {
-            PrimLine => self
-                .p_line
-                .get_paths_and_patterns(self.start.pos, self.end.pos, das),
-            PrimArc => self
-                .p_arc
-                .get_paths_and_patterns(self.start.pos, self.end.pos, das),
+
+    pub fn save_vars(&mut self) {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.save_vars(),
+            CurveArc => self.p_arc.save_vars(),
         }
-    }
-    pub fn get_dimensions_paths_and_patterns(
-        &self,
-        das: &Size,
-    ) -> Vec<(BezPath, Pattern, CanvasText)> {
-        use PrivitiveKind::*;
-        match self.kind {
-            PrimLine => {
-                self.p_line
-                    .get_dimensions_paths_and_patterns(self.start.pos, self.end.pos, das)
-            }
-            PrimArc => {
-                self.p_arc
-                    .get_dimensions_paths_and_patterns(self.start.pos, self.end.pos, das)
-            }
-        }
-    }
-    pub fn get_mod_paths_and_patterns(&self, das: &Size) -> Vec<(BezPath, Pattern)> {
-        let mut paths_patterns: Vec<(BezPath, Pattern)> = vec![];
-        paths_patterns.push((
-            modifiers_path(self.start.pos, 1., Self::GRAB),
-            match (self.start.selected, self.start.highlighted) {
-                (false, false) => Pattern::Modifiers,
-                (false, true) => Pattern::ModifiersHighlighted,
-                (true, false) => Pattern::ModifiersSelected,
-                (true, true) => Pattern::ModifiersSelected,
-            },
-        ));
-        use PrivitiveKind::*;
-        paths_patterns.extend(match self.kind {
-            PrimLine => self
-                .p_line
-                .get_mod_paths_and_patterns(self.start.pos, self.end.pos, das),
-            PrimArc => self
-                .p_arc
-                .get_mod_paths_and_patterns(self.start.pos, self.end.pos, das),
-        });
-        paths_patterns
     }
 }
 
 impl Primitive {
     const _TOLERANCE: f64 = 0.01;
-    const GRAB: f64 = 5.;
-
-    pub fn toogle(&mut self) -> Vec2 {
-        use PrivitiveKind::*;
-        match self.kind {
-            PrimLine => {
-                self.p_line.toggle();
-                self.p_line
-                    .update_primitives_vars(self.start, self.end, VertexChange::Nope)
-            }
-            PrimArc => {
-                self.p_arc.toggle();
-                self.p_arc
-                    .update_primitives_vars(self.start, self.end, VertexChange::Nope)
-            }
-        }
-    }
-    pub fn save_vars(&mut self) {
-        self.start.saved_pos = self.start.pos;
-        self.end.saved_pos = self.end.pos;
-        self.start_modifier_offset.saved_val = self.start_modifier_offset.value;
-        use PrivitiveKind::*;
-        match self.kind {
-            PrimLine => self.p_line.save_vars(),
-            PrimArc => self.p_arc.save_vars(),
-        }
-    }
-    pub fn restore_saved(&mut self) {
-        self.start.pos = self.start.saved_pos;
-        self.end.pos = self.end.saved_pos;
-        use PrivitiveKind::*;
-        match self.kind {
-            PrimLine => self.p_line.restore_saved(),
-            PrimArc => self.p_arc.restore_saved(),
-        }
-    }
-    pub fn update_primitives_vars(&mut self, changed: VertexChange) -> Vec2 {
-        use PrivitiveKind::*;
-        match self.kind {
-            PrimLine => self
-                .p_line
-                .update_primitives_vars(self.start, self.end, changed),
-            PrimArc => self
-                .p_arc
-                .update_primitives_vars(self.start, self.end, changed),
-        }
-    }
-    pub fn get_state(&self, get: GetPrimitiveState) -> Option<Vec2> {
-        use GetPrimitiveState::*;
-        use PrivitiveKind::*;
-        let start = self.start.pos;
-        let end = self.end.pos;
-        match get {
-            IsSelected => match self.kind {
-                PrimLine => self.p_line.get_state(start, end, IsSelected),
-                PrimArc => self.p_arc.get_state(start, end, IsSelected),
-            },
-            IsHighligh => match self.kind {
-                PrimLine => self.p_line.get_state(start, end, IsHighligh),
-                PrimArc => self.p_arc.get_state(start, end, IsHighligh),
-            },
-            IsStartSelected => return self.start.selected.then_some(self.start.pos),
-            IsStartHighligh => return self.start.highlighted.then_some(self.start.pos),
-
-            IsOtherModifiersSelected => {
-                use PrivitiveKind::*;
-                match self.kind {
-                    PrimLine => self.p_line.get_state(
-                        self.start.pos,
-                        self.end.pos,
-                        IsOtherModifiersSelected,
-                    ),
-                    PrimArc => {
-                        self.p_arc
-                            .get_state(self.start.pos, self.end.pos, IsOtherModifiersSelected)
-                    }
-                }
-            }
-            IsOtherModifiersHighligh => {
-                use PrivitiveKind::*;
-                match self.kind {
-                    PrimLine => self.p_line.get_state(
-                        self.start.pos,
-                        self.end.pos,
-                        IsOtherModifiersHighligh,
-                    ),
-                    PrimArc => {
-                        self.p_arc
-                            .get_state(self.start.pos, self.end.pos, IsOtherModifiersHighligh)
-                    }
-                }
-            }
-        }
-    }
-    pub fn set_state(&mut self, set: SetPrimitiveState) {
-        use PrivitiveKind::*;
-        use SetPrimitiveState::*;
-        let start = self.start.pos;
-        let end = self.end.pos;
-        match set {
-            SetHS(hs, value) => match self.kind {
-                PrimLine => self.p_line.set_state(start, end, SetHS(hs, value)),
-                PrimArc => self.p_arc.set_state(start, end, SetHS(hs, value)),
-            },
-            SetStartHS(hs, value) => match hs {
-                HS::Select => self.start.selected = value,
-                HS::Highlight => self.start.highlighted = value,
-            },
-            SetAllOtherModifiersHS(hs, value) => {
-                use PrivitiveKind::*;
-                match self.kind {
-                    PrimLine => {
-                        self.p_line
-                            .set_state(start, end, SetAllOtherModifiersHS(hs, value))
-                    }
-                    PrimArc => self
-                        .p_arc
-                        .set_state(start, end, SetAllOtherModifiersHS(hs, value)),
-                }
-            }
-        }
-    }
-    pub fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetPrimitiveStateFromPos) {
-        use PrivitiveKind::*;
-        use SetPrimitiveStateFromPos::*;
-        let start = self.start.pos;
-        let end = self.end.pos;
-        match set {
-            SetHSFromPos(hs) => match self.kind {
-                PrimLine => self
-                    .p_line
-                    .set_state_from_pos(start, end, pointer, SetHSFromPos(hs)),
-                PrimArc => self
-                    .p_arc
-                    .set_state_from_pos(start, end, pointer, SetHSFromPos(hs)),
-            },
-            SetStartHSFromPos(hs) => {
-                let state = (self.start.pos - pointer.pos()).hypot() < Self::GRAB;
-                match hs {
-                    HS::Select => {
-                        if state {
-                            self.start.selected = true;
-                            pointer.set_pos(self.start.pos);
-                            pointer.save_pos();
-                        } else {
-                            self.start.selected = false;
-                        }
-                    }
-                    HS::Highlight => {
-                        if state {
-                            self.start.highlighted = true;
-                            pointer.set_pos(self.start.pos);
-                        } else {
-                            self.start.highlighted = false;
-                        }
-                    }
-                }
-            }
-            SetOthersModifiersHSFromPos(hs) => {
-                use PrivitiveKind::*;
-                match self.kind {
-                    PrimLine => self.p_line.set_state_from_pos(
-                        start,
-                        end,
-                        pointer,
-                        SetOthersModifiersHSFromPos(hs),
-                    ),
-                    PrimArc => self.p_arc.set_state_from_pos(
-                        start,
-                        end,
-                        pointer,
-                        SetOthersModifiersHSFromPos(hs),
-                    ),
-                }
-            }
-        }
-    }
-    pub fn move_control_selected(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
-        use PrivitiveKind::*;
-        match self.kind {
-            PrimLine => self.p_line.move_control_selected(
-                self.start.pos,
-                self.end.pos,
-                pointer,
-                keys_states,
-            ),
-            PrimArc => {
-                self.p_arc
-                    .move_control_selected(self.start.pos, self.end.pos, pointer, keys_states)
-            }
-        }
-    }
 }
 
 pub enum PrimitiveKindIter {
@@ -505,34 +284,31 @@ impl Iterator for PrimitiveKindIter {
 }
 
 #[derive(Debug, Clone)]
-pub enum PrivitiveKind {
-    PrimLine,
-    PrimArc,
+pub enum PrimitiveCurve {
+    CurveLine,
+    CurveArc,
 }
-impl PrivitiveKind {
-    pub fn next_kind(&self) -> PrivitiveKind {
-        use PrivitiveKind::*;
+impl PrimitiveCurve {
+    pub fn next_curve(&self) -> PrimitiveCurve {
+        use PrimitiveCurve::*;
         match self {
-            PrimLine => PrimArc,
-            PrimArc => PrimLine,
+            CurveLine => CurveArc,
+            CurveArc => CurveLine,
         }
     }
-    pub fn prev_kind(&self) -> PrivitiveKind {
-        use PrivitiveKind::*;
+    pub fn prev_curve(&self) -> PrimitiveCurve {
+        use PrimitiveCurve::*;
         match self {
-            PrimLine => PrimArc,
-            PrimArc => PrimLine,
+            CurveLine => CurveArc,
+            CurveArc => CurveLine,
         }
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GetPrimitiveState {
-    IsSelected,
-    IsHighligh,
-    IsStartSelected,
-    IsStartHighligh,
-    IsOtherModifiersSelected,
-    IsOtherModifiersHighligh,
+    IsHS(HS),
+    IsStartHS(HS),
+    IsOtherModifiersHS(HS),
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SetPrimitiveState {
@@ -553,13 +329,8 @@ pub trait PrimitiveControls {
 
     fn toggle(&mut self);
     fn save_vars(&mut self);
-    fn restore_saved(&mut self);
-    fn update_primitives_vars(
-        &mut self,
-        start: Position,
-        end: Position,
-        vertex_changed: VertexChange,
-    ) -> Vec2;
+    fn restore_vars(&mut self);
+    fn update_primitives_vars(&mut self, start: Position, end: Position) -> Vec2;
     fn is_selected(&self) -> bool;
     fn is_highlighted(&self) -> bool;
     fn get_state(&self, start: Vec2, end: Vec2, state: GetPrimitiveState) -> Option<Vec2>;

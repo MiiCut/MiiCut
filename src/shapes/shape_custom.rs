@@ -10,10 +10,10 @@ use crate::{
     math::*,
     pools::HS,
     positions::Position,
-    prefab::center_path,
+    prefab::*,
     primitives::primitives::{
-        GetPrimitiveState, Primitive, PrimitiveControls, PrivitiveKind, SetPrimitiveState,
-        SetPrimitiveStateFromPos, StartModifier, StartProperty, VertexChange,
+        GetPrimitiveState, Primitive, PrimitiveControls, PrimitiveCurve, SetPrimitiveState,
+        SetPrimitiveStateFromPos, Vertex, VertexChange, VertexModifier, VertexProperty,
     },
     traits::*,
     KeysStates, Pointer,
@@ -27,7 +27,7 @@ pub struct ShapeCustom {
     prims: Vec<Primitive>,
     current_creation_pos: Option<Position>,
 
-    primitivess_start_property: StartProperty,
+    primitivess_start_property: VertexProperty,
 
     highlighted: bool,
     selected: bool,
@@ -38,45 +38,45 @@ pub struct ShapeCustom {
 impl ShapeCustom {
     pub const MIN_RECT_SIZE: f64 = 10.;
 
-    pub fn new(prims_property: StartProperty, pos1: Vec2, pos2: Vec2) -> BSKind {
+    pub fn new(prims_property: VertexProperty, pos1: Vec2, pos2: Vec2) -> BSKind {
         match prims_property {
-            StartProperty::Nope => BSKind::Custom(ShapeCustom {
-                prims: vec![Primitive::new(
-                    PrivitiveKind::PrimLine,
-                    StartProperty::Nope,
+            VertexProperty::Nope => BSKind::Custom(ShapeCustom {
+                prims: vec![Primitive::new_old(
+                    PrimitiveCurve::CurveLine,
+                    VertexProperty::Nope,
                     pos1,
                     pos2,
                 )],
                 current_creation_pos: Some(Position::new(pos2, true)),
-                primitivess_start_property: StartProperty::Nope,
+                primitivess_start_property: VertexProperty::Nope,
                 highlighted: false,
                 selected: false,
                 segs: BezPath::new(),
                 polygon: Polygon::new(LineString::new(vec![]), vec![]),
             }),
-            StartProperty::RectangleLike => {
-                let p1 = Primitive::new(
-                    PrivitiveKind::PrimLine,
-                    StartProperty::RectangleLike,
+            VertexProperty::RectangleLike => {
+                let p1 = Primitive::new_old(
+                    PrimitiveCurve::CurveLine,
+                    VertexProperty::RectangleLike,
                     pos1,
                     Vec2::new(pos2.x, pos1.y),
                 );
-                let p2 = Primitive::new(
-                    PrivitiveKind::PrimLine,
-                    StartProperty::RectangleLike,
+                let p2 = Primitive::new_old(
+                    PrimitiveCurve::CurveLine,
+                    VertexProperty::RectangleLike,
                     Vec2::new(pos2.x, pos1.y),
                     pos2,
                 );
-                let mut p3 = Primitive::new(
-                    PrivitiveKind::PrimLine,
-                    StartProperty::RectangleLike,
+                let mut p3 = Primitive::new_old(
+                    PrimitiveCurve::CurveLine,
+                    VertexProperty::RectangleLike,
                     pos2,
                     Vec2::new(pos1.x, pos2.y),
                 );
                 p3.set_state(SetPrimitiveState::SetStartHS(HS::Select, true));
-                let p4 = Primitive::new(
-                    PrivitiveKind::PrimLine,
-                    StartProperty::RectangleLike,
+                let p4 = Primitive::new_old(
+                    PrimitiveCurve::CurveLine,
+                    VertexProperty::RectangleLike,
                     Vec2::new(pos1.x, pos2.y),
                     pos1,
                 );
@@ -84,7 +84,7 @@ impl ShapeCustom {
                 BSKind::Custom(ShapeCustom {
                     prims: vec![p1, p2, p3, p4],
                     current_creation_pos: Some(Position::new(Vec2::new(pos1.x, pos2.y), true)),
-                    primitivess_start_property: StartProperty::RectangleLike,
+                    primitivess_start_property: VertexProperty::RectangleLike,
                     highlighted: false,
                     selected: false,
                     segs: BezPath::new(),
@@ -97,13 +97,13 @@ impl ShapeCustom {
         let pos = pointer.pos();
         // Get the last line drawn
         if let Some(last_line) = self.prims.last_mut() {
-            if let PrivitiveKind::PrimLine = last_line.get_prim_kind() {
+            if let PrimitiveCurve::CurveLine = last_line.get_prim_curve() {
                 if let Some(current_pos) = &mut self.current_creation_pos {
                     current_pos.pos = pos;
                     current_pos.saved_pos = pos;
                     last_line.set_end_pos(pos);
-                    self.prims.push(Primitive::new(
-                        PrivitiveKind::PrimLine,
+                    self.prims.push(Primitive::new_old(
+                        PrimitiveCurve::CurveLine,
                         self.primitivess_start_property,
                         pos,
                         pos,
@@ -118,7 +118,7 @@ impl ShapeCustom {
             self.current_creation_pos = None;
             let first_pos = self.prims.first().unwrap().get_start_pos();
             if let Some(last_prim) = self.prims.last_mut() {
-                if let PrivitiveKind::PrimLine = last_prim.get_prim_kind() {
+                if let PrimitiveCurve::CurveLine = last_prim.get_prim_curve() {
                     last_prim.set_end_pos(first_pos);
                 }
             }
@@ -170,7 +170,7 @@ impl ShapeCustom {
         }
         Rect::new(min_x, min_y, max_x, max_y)
     }
-    pub fn get_primitivess_start_property(&self) -> StartProperty {
+    pub fn get_primitivess_start_property(&self) -> VertexProperty {
         self.primitivess_start_property
     }
     pub fn get_prims(&self) -> &Vec<Primitive> {
@@ -189,97 +189,6 @@ impl ShapeCustom {
     }
     fn line_to(&self, start: Vec2, end: Vec2) -> BezPath {
         Line::new(start.to_point(), end.to_point()).into_path(Self::TOLERANCE)
-    }
-    fn get_paths_patterns(&self) -> Vec<(BezPath, Pattern)> {
-        use StartModifier::*;
-        let mut paths_patterns = vec![];
-        let len = self.prims.len();
-        for i in 0..len {
-            let prim_prev = self.get_prev_prim(i);
-            let prim: &Primitive = self.get_prim(i);
-            let prim_next = self.get_next_prim(i);
-
-            let start_mod = prim.get_start_modifier();
-            let end_mod = prim_next.get_start_modifier();
-            let start_modifier_offset = prim.get_start_modifier_offset();
-            let end_modifier_offset = prim_next.get_start_modifier_offset();
-
-            let start = prim.get_start_pos();
-            let start_prev = prim_prev.get_start_pos();
-            let end = prim.get_end_pos();
-            let end_prev = prim_prev.get_end_pos();
-
-            let prim_start_pattern = prim.get_pattern(
-                prim.is_start_selected() || self.selected,
-                prim.is_start_highlighted() || self.highlighted,
-            );
-
-            match prim.get_prim_kind() {
-                PrivitiveKind::PrimLine => {
-                    let selected = prim.get_line().is_selected() || self.selected;
-                    let highlighted = prim.get_line().is_highlighted() || self.highlighted;
-
-                    let start_real = point_from_start(start, end, start_modifier_offset);
-                    let end_real = point_from_end(start, end, end_modifier_offset);
-                    let prev_end_real = point_from_end(start_prev, end_prev, start_modifier_offset);
-
-                    match start_mod {
-                        Nope(_) => {
-                            let ee = if let Nope(_) = end_mod { end } else { end_real };
-                            paths_patterns.push((
-                                self.line_to(start, ee),
-                                prim.get_pattern(selected, highlighted),
-                            ));
-                        }
-                        Chamfer(_) => {
-                            paths_patterns.push((
-                                self.line_to(prev_end_real, start_real),
-                                prim_start_pattern,
-                            ));
-                            let ee = if let Nope(_) = end_mod { end } else { end_real };
-                            paths_patterns.push((
-                                self.line_to(start_real, ee),
-                                prim.get_pattern(selected, highlighted),
-                            ));
-                        }
-                        Fillet(mut concavity) => {
-                            let angle =
-                                (PI - angle_from(start - prev_end_real, start_real - start)) * 0.5;
-                            let mut radius = -start_modifier_offset * angle.tan();
-
-                            if radius > 0. {
-                                concavity = !concavity;
-                                radius = -radius;
-                            }
-                            let f = create_arc_from_radius_and_concavity(
-                                prev_end_real,
-                                start_real,
-                                radius,
-                                concavity,
-                            );
-                            paths_patterns.push((f.into_path(Self::TOLERANCE), prim_start_pattern));
-                            let ee = if let Nope(_) = end_mod { end } else { end_real };
-                            paths_patterns.push((
-                                self.line_to(start_real, ee),
-                                prim.get_pattern(selected, highlighted),
-                            ));
-                        }
-                    }
-                }
-                PrivitiveKind::PrimArc => {
-                    let selected = prim.get_arc().is_selected() || self.selected;
-                    let highlighted = prim.get_arc().is_highlighted() || self.highlighted;
-                    let radius = prim.get_arc().get_radius();
-                    let concavity = prim.get_arc().get_concavity();
-                    let f = create_arc_from_radius_and_concavity(start, end, radius, concavity);
-                    paths_patterns.push((
-                        f.into_path(Self::TOLERANCE),
-                        prim.get_pattern(selected, highlighted),
-                    ));
-                }
-            };
-        }
-        paths_patterns
     }
     fn get_prim(&self, idx: usize) -> &Primitive {
         &self.prims[idx % self.prims.len()]
@@ -346,7 +255,7 @@ impl ShapeCustom {
     fn move_vertex(&mut self, current: usize, dpos: Vec2, snap: f64, pointer_magnetized: bool) {
         // Vertex move: depends on the start property of the current primitive
         match self.get_prim(current).get_start_property() {
-            StartProperty::Nope => {
+            VertexProperty::Nope => {
                 let start_saved = self.get_prim(current).get_start_saved_pos();
 
                 let new_pos = if !pointer_magnetized {
@@ -368,7 +277,7 @@ impl ShapeCustom {
                 self.get_prev_prim_mut(current)
                     .update_primitives_vars(VertexChange::StartChanged);
             }
-            StartProperty::RectangleLike => {
+            VertexProperty::RectangleLike => {
                 let s_saved = self.get_prim(current).get_start_saved_pos();
                 let ps_saved = self.get_prev_prim(current).get_start_saved_pos();
                 let ns_saved = self.get_next_prim(current).get_start_saved_pos();
@@ -422,16 +331,17 @@ impl ShapeCustom {
         }
     }
 
-    fn hs_modifier_from_pos(&mut self, pointer: &mut Pointer, keys_states: KeysStates, hs: HS) {
+    fn hs_modifier_from_pos(&mut self, pointer: &mut Pointer, _keys_states: KeysStates, hs: HS) {
         use GetPrimitiveState::*;
         use SetPrimitiveState::*;
         use SetPrimitiveStateFromPos::*;
+        // First, reset all modifiers
         self.prims.iter_mut().for_each(|prim| {
             prim.set_state(SetHS(hs, false));
             prim.set_state(SetStartHS(hs, false));
             prim.set_state(SetAllOtherModifiersHS(hs, false));
         });
-        // Centroid snap
+        // Centroid pointer snap
         let centroid = self.get_vertices_centroid();
         if (pointer.pos() - centroid).hypot() < Self::GRAB_RADIUS {
             pointer.set_pos(centroid);
@@ -440,20 +350,77 @@ impl ShapeCustom {
             }
             return;
         }
-
+        //
         for prim in self.prims.iter_mut() {
             prim.set_state_from_pos(pointer, SetStartHSFromPos(hs));
             if prim.get_state(IsStartSelected).is_some() {
-                break;
+                return;
             }
             prim.set_state_from_pos(pointer, SetHSFromPos(hs));
             if prim.get_state(IsSelected).is_some() {
-                break;
+                return;
             }
             prim.set_state_from_pos(pointer, SetOthersModifiersHSFromPos(hs));
             if prim.get_state(IsOtherModifiersSelected).is_some() {
-                break;
+                return;
             }
+        }
+
+        // Fillets snap, get fillets centers and test
+        use VertexModifier::*;
+        let len = self.prims.len();
+        for i in 0..len {
+            let prim_prev = self.get_prev_prim(i);
+            let prim: &Primitive = self.get_prim(i);
+
+            let start_mod = prim.get_start_modifier();
+            let start_modifier_offset = prim.get_start_modifier_offset();
+
+            let start = prim.get_start_pos();
+            let start_prev = prim_prev.get_start_pos();
+            let end = prim.get_end_pos();
+            let end_prev = prim_prev.get_end_pos();
+
+            match prim.get_prim_curve() {
+                PrimitiveCurve::CurveLine => {
+                    let start_real = point_from_start(start, end, start_modifier_offset);
+                    let prev_end_real = point_from_end(start_prev, end_prev, start_modifier_offset);
+
+                    match start_mod {
+                        Fillet(mut concavity) => {
+                            let angle =
+                                (PI - angle_from(start - prev_end_real, start_real - start)) * 0.5;
+                            let mut radius = -start_modifier_offset * angle.tan();
+
+                            if radius > 0. {
+                                concavity = !concavity;
+                                radius = -radius;
+                            }
+                            let center = create_arc_from_radius_and_concavity(
+                                prev_end_real,
+                                start_real,
+                                radius,
+                                concavity,
+                            )
+                            .center;
+                            if (pointer.pos() - center.to_vec2()).hypot() < Self::GRAB_RADIUS {
+                                match hs {
+                                    HS::Select => {
+                                        pointer.set_pos(center.to_vec2());
+                                        pointer.save_pos();
+                                    }
+                                    HS::Highlight => {
+                                        pointer.set_pos(center.to_vec2());
+                                    }
+                                }
+                                return;
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+                _ => (),
+            };
         }
     }
     fn hs_all_modifiers(&mut self, value: bool, hs: HS) {
@@ -463,6 +430,98 @@ impl ShapeCustom {
             prim.set_state(SetStartHS(hs, value));
             prim.set_state(SetAllOtherModifiersHS(hs, value));
         });
+    }
+
+    fn get_paths_patterns(&self) -> Vec<(BezPath, Pattern)> {
+        use VertexModifier::*;
+        let mut paths_patterns = vec![];
+        let len = self.prims.len();
+        for i in 0..len {
+            let prim_prev = self.get_prev_prim(i);
+            let prim: &Primitive = self.get_prim(i);
+            let prim_next = self.get_next_prim(i);
+
+            let start_mod = prim.get_start_modifier();
+            let end_mod = prim_next.get_start_modifier();
+            let start_modifier_offset = prim.get_start_modifier_offset();
+            let end_modifier_offset = prim_next.get_start_modifier_offset();
+
+            let start = prim.get_start_pos();
+            let start_prev = prim_prev.get_start_pos();
+            let end = prim.get_end_pos();
+            let end_prev = prim_prev.get_end_pos();
+
+            let prim_start_pattern = prim.get_pattern(
+                prim.is_start_selected() || self.selected,
+                prim.is_start_highlighted() || self.highlighted,
+            );
+
+            match prim.get_prim_curve() {
+                PrimitiveCurve::CurveLine => {
+                    let selected = prim.get_line().is_selected() || self.selected;
+                    let highlighted = prim.get_line().is_highlighted() || self.highlighted;
+
+                    let start_real = point_from_start(start, end, start_modifier_offset);
+                    let end_real = point_from_end(start, end, end_modifier_offset);
+                    let prev_end_real = point_from_end(start_prev, end_prev, start_modifier_offset);
+
+                    match start_mod {
+                        Nope(_) => {
+                            let ee = if let Nope(_) = end_mod { end } else { end_real };
+                            paths_patterns.push((
+                                self.line_to(start, ee),
+                                prim.get_pattern(selected, highlighted),
+                            ));
+                        }
+                        Chamfer(_) => {
+                            paths_patterns.push((
+                                self.line_to(prev_end_real, start_real),
+                                prim_start_pattern,
+                            ));
+                            let ee = if let Nope(_) = end_mod { end } else { end_real };
+                            paths_patterns.push((
+                                self.line_to(start_real, ee),
+                                prim.get_pattern(selected, highlighted),
+                            ));
+                        }
+                        Fillet(mut concavity) => {
+                            let angle =
+                                (PI - angle_from(start - prev_end_real, start_real - start)) * 0.5;
+                            let mut radius = -start_modifier_offset * angle.tan();
+
+                            if radius > 0. {
+                                concavity = !concavity;
+                                radius = -radius;
+                            }
+                            let f = create_arc_from_radius_and_concavity(
+                                prev_end_real,
+                                start_real,
+                                radius,
+                                concavity,
+                            );
+                            paths_patterns.push((f.into_path(Self::TOLERANCE), prim_start_pattern));
+                            let ee = if let Nope(_) = end_mod { end } else { end_real };
+                            paths_patterns.push((
+                                self.line_to(start_real, ee),
+                                prim.get_pattern(selected, highlighted),
+                            ));
+                        }
+                    }
+                }
+                PrimitiveCurve::CurveArc => {
+                    let selected = prim.get_arc().is_selected() || self.selected;
+                    let highlighted = prim.get_arc().is_highlighted() || self.highlighted;
+                    let radius = prim.get_arc().get_radius();
+                    let concavity = prim.get_arc().get_concavity();
+                    let f = create_arc_from_radius_and_concavity(start, end, radius, concavity);
+                    paths_patterns.push((
+                        f.into_path(Self::TOLERANCE),
+                        prim.get_pattern(selected, highlighted),
+                    ));
+                }
+            };
+        }
+        paths_patterns
     }
 }
 impl Display for ShapeCustom {
@@ -538,7 +597,7 @@ impl ObjectsFuncs for ShapeCustom {
 
     fn good_size(&self) -> bool {
         match self.primitivess_start_property {
-            StartProperty::Nope => {
+            VertexProperty::Nope => {
                 if self.prims.len() < 3 {
                     // Minimum segments was not reached
                     log!("Too few segments");
@@ -547,7 +606,7 @@ impl ObjectsFuncs for ShapeCustom {
                     true
                 }
             }
-            StartProperty::RectangleLike => {
+            VertexProperty::RectangleLike => {
                 let len = self.prims.len();
                 if len < 4 {
                     return false;
@@ -633,7 +692,6 @@ impl ObjectsFuncs for ShapeCustom {
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
-        use SetPrimitiveState::*;
         match set {
             SetEntityState::SetHighli(value) => self.highlighted = value,
             SetEntityState::SetSelect(value) => self.selected = value,
@@ -681,10 +739,10 @@ impl ObjectsFuncs for ShapeCustom {
         // Check if we are in creation mode
         if let Some(current_pos) = &mut self.current_creation_pos {
             match self.primitivess_start_property {
-                StartProperty::Nope => {
+                VertexProperty::Nope => {
                     // Yes, update the last line
                     if let Some(last_line) = self.prims.last_mut() {
-                        if let PrivitiveKind::PrimLine = last_line.get_prim_kind() {
+                        if let PrimitiveCurve::CurveLine = last_line.get_prim_curve() {
                             let start_pos = last_line.get_start_pos();
                             if !pointer.is_magnetized() {
                                 current_pos.pos = current_pos.saved_pos + pointer.dpos();
@@ -700,7 +758,7 @@ impl ObjectsFuncs for ShapeCustom {
                     self.update_polygon();
                     true
                 }
-                StartProperty::RectangleLike => {
+                VertexProperty::RectangleLike => {
                     let snap = pointer.get_snap().val();
                     let dpos = pointer.dpos();
                     let magnetized = pointer.is_magnetized();
@@ -724,10 +782,10 @@ impl ObjectsFuncs for ShapeCustom {
                         // Vertex modification (size of chamfer or fillet)
                         let start_mod = self.get_prim(current).get_start_modifier();
                         match start_mod {
-                            StartModifier::Nope(_) => {
+                            VertexModifier::Nope(_) => {
                                 continue;
                             }
-                            StartModifier::Chamfer(_) | StartModifier::Fillet(_) => {
+                            VertexModifier::Chamfer(_) | VertexModifier::Fillet(_) => {
                                 if let Some(radius) = self.modify_vertex(current, dpos, snap) {
                                     vertex_modified = Some((radius, start_mod));
                                     self.update_polygon();
@@ -784,6 +842,73 @@ impl ObjectsFuncs for ShapeCustom {
             center_path(self.get_position(), 1., ShapeCustom::GRAB_RADIUS),
             self.get_pattern_status(self.selected, self.highlighted),
         ));
+        // Filets centers
+        use VertexModifier::*;
+        let len = self.prims.len();
+        for i in 0..len {
+            let prim_prev = self.get_prev_prim(i);
+            let prim: &Primitive = self.get_prim(i);
+            let prim_next = self.get_next_prim(i);
+
+            let start_mod = prim.get_start_modifier();
+            let end_mod = prim_next.get_start_modifier();
+            let start_modifier_offset = prim.get_start_modifier_offset();
+            let end_modifier_offset = prim_next.get_start_modifier_offset();
+
+            let start = prim.get_start_pos();
+            let start_prev = prim_prev.get_start_pos();
+            let end = prim.get_end_pos();
+            let end_prev = prim_prev.get_end_pos();
+
+            let prim_start_pattern = prim.get_pattern(
+                prim.is_start_selected() || self.selected,
+                prim.is_start_highlighted() || self.highlighted,
+            );
+
+            match prim.get_prim_curve() {
+                PrimitiveCurve::CurveLine => {
+                    let selected = prim.get_line().is_selected() || self.selected;
+                    let highlighted = prim.get_line().is_highlighted() || self.highlighted;
+
+                    let start_real = point_from_start(start, end, start_modifier_offset);
+                    let end_real = point_from_end(start, end, end_modifier_offset);
+                    let prev_end_real = point_from_end(start_prev, end_prev, start_modifier_offset);
+
+                    match start_mod {
+                        Nope(_) => (),
+                        Chamfer(_) => (),
+                        Fillet(mut concavity) => {
+                            let angle =
+                                (PI - angle_from(start - prev_end_real, start_real - start)) * 0.5;
+                            let mut radius = -start_modifier_offset * angle.tan();
+
+                            if radius > 0. {
+                                concavity = !concavity;
+                                radius = -radius;
+                            }
+                            let center = create_arc_from_radius_and_concavity(
+                                prev_end_real,
+                                start_real,
+                                radius,
+                                concavity,
+                            )
+                            .center
+                            .to_vec2();
+                            paths_patterns.push((
+                                center_path(center, 1., Self::GRAB_RADIUS),
+                                prim_start_pattern,
+                            ));
+                            let ee = if let Nope(_) = end_mod { end } else { end_real };
+                            paths_patterns.push((
+                                self.line_to(start_real, ee),
+                                prim.get_pattern(selected, highlighted),
+                            ));
+                        }
+                    }
+                }
+                _ => (),
+            };
+        }
         paths_patterns
     }
     fn get_dimensions_paths_and_patterns(

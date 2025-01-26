@@ -8,7 +8,7 @@ use crate::{
 
 use super::primitives::{
     GetPrimitiveState, PrimitiveControls, PrimitiveKindIter, SetPrimitiveState,
-    SetPrimitiveStateFromPos, VertexChange,
+    SetPrimitiveStateFromPos,
 };
 use kurbo::{BezPath, Line, Shape, Size, Vec2};
 
@@ -35,15 +35,10 @@ impl PrimitiveControls for PrimLine {
     fn save_vars(&mut self) {
         ()
     }
-    fn restore_saved(&mut self) {
+    fn restore_vars(&mut self) {
         ()
     }
-    fn update_primitives_vars(
-        &mut self,
-        start: Position,
-        end: Position,
-        _vertex_changed: VertexChange,
-    ) -> Vec2 {
+    fn update_primitives_vars(&mut self, start: Position, end: Position) -> Vec2 {
         (start.pos + end.pos) / 2.
     }
     fn get_state(&self, start: Vec2, end: Vec2, state: GetPrimitiveState) -> Option<Vec2> {

@@ -113,6 +113,25 @@ impl Value {
         }
     }
 }
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct ValueBool {
+    pub saved_val: bool,
+    pub last_val: bool,
+    pub value: bool,
+    pub highlighted: bool,
+    pub selected: bool,
+}
+impl ValueBool {
+    pub fn new(value: bool) -> Self {
+        Self {
+            saved_val: value,
+            last_val: value,
+            value,
+            highlighted: false,
+            selected: false,
+        }
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Position {

@@ -1,6 +1,6 @@
 use super::primitives::{
     GetPrimitiveState, PrimitiveControls, PrimitiveKindIter, SetPrimitiveState,
-    SetPrimitiveStateFromPos, VertexChange,
+    SetPrimitiveStateFromPos,
 };
 use crate::{
     canvas::{CanvasText, Pattern},
@@ -65,29 +65,18 @@ impl PrimitiveControls for PrimArc {
         self.radius.saved_val = self.radius.value;
         self.concavity_saved = self.concavity;
     }
-    fn restore_saved(&mut self) {
+    fn restore_vars(&mut self) {
         self.radius.value = self.radius.saved_val;
         self.concavity = self.concavity_saved;
     }
-    fn update_primitives_vars(
-        &mut self,
-        start: Position,
-        end: Position,
-        vertex_changed: VertexChange,
-    ) -> Vec2 {
-        match vertex_changed {
-            VertexChange::StartChanged | VertexChange::EndChanged => {
-                let old_diam = (start.saved_pos - end.saved_pos).hypot();
-                let new_diam = (start.pos - end.pos).hypot();
-                if old_diam > EPSILON {
-                    self.radius.value = self.radius.saved_val * new_diam / old_diam;
-                }
-                self.validate_radius(start.pos, end.pos);
-            }
-            VertexChange::Nope => {
-                self.validate_radius(start.pos, end.pos);
-            }
+    fn update_primitives_vars(&mut self, start: Position, end: Position) -> Vec2 {
+        let old_diam = (start.saved_pos - end.saved_pos).hypot();
+        let new_diam = (start.pos - end.pos).hypot();
+        if old_diam > EPSILON {
+            self.radius.value = self.radius.saved_val * new_diam / old_diam;
         }
+        self.validate_radius(start.pos, end.pos);
+
         find_circle_center(start.pos, end.pos, self.radius.value, self.concavity)
     }
     fn is_selected(&self) -> bool {
