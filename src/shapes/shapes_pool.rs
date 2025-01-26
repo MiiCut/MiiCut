@@ -1,15 +1,13 @@
 use super::{
     shape_custom::ShapeCustom,
     shape_disc::ShapeDisc,
-    shape_oblong::ShapeOblong,
-    shape_rectangle::ShapeRectangle,
-    shape_rectangle_rounded::ShapeRectRounded,
     shapes::{BSKind, BSKindvars, BasicShape, BoolOps},
 };
 use crate::{
     clipboard::Action,
     math::*,
     pools::{PoolsFunctions, HS},
+    primitives::primitives::StartProperty,
     traits::*,
     IconsShapes, KeysStates, Pointer, Pools,
 };
@@ -66,17 +64,20 @@ pub struct ShapesPool {
 impl ShapesPool {
     pub fn new_shape(
         icon_shape: IconsShapes,
-        pos1: Vec2,
-        pos2: Vec2,
+        pointer: &mut Pointer,
         boolean_op: BoolOps,
     ) -> BasicShape {
         let shid = BSid::new();
+        let pos1 = pointer.pos();
+        let pos2 = pos1 + Vec2::new(ShapeCustom::MIN_RECT_SIZE, ShapeCustom::MIN_RECT_SIZE);
         let shape_kind = match icon_shape {
-            IconsShapes::Rectangle => ShapeRectangle::new(pos1, pos2),
-            IconsShapes::RectangleRounded => ShapeRectRounded::new(pos1, pos2),
-            IconsShapes::Disc => ShapeDisc::new(pos1, pos2),
-            IconsShapes::Oblong => ShapeOblong::new(pos1, pos2),
-            IconsShapes::Custom => ShapeCustom::new(pos1, pos2),
+            IconsShapes::Rectangle => {
+                pointer.set_pos(pos2);
+                pointer.save_pos();
+                ShapeCustom::new(StartProperty::RectangleLike, pos1, pos2)
+            }
+            IconsShapes::Disc => ShapeDisc::new(pos1, pos1),
+            IconsShapes::Custom => ShapeCustom::new(StartProperty::Nope, pos1, pos1),
         };
         BasicShape::new(shid, shape_kind, boolean_op)
     }
@@ -254,7 +255,12 @@ impl PoolsFunctions for ShapesPool {
         });
     }
 
-    fn set_states_from_pos(&mut self, pointer: &mut Pointer, hors: HS) -> bool {
+    fn set_states_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        hors: HS,
+    ) -> bool {
         use GetEntityState::*;
         use SetEntityState::*;
         use SetEntityStateFromPos::*;
@@ -264,7 +270,7 @@ impl PoolsFunctions for ShapesPool {
             self.shapes.values_mut().for_each(|shape| {
                 shape
                     .get_kind_mut()
-                    .set_state_from_pos(pointer, HighliFromPos)
+                    .set_state_from_pos(pointer, keys_states, HighliFromPos)
             });
             true
         } else {
@@ -273,7 +279,7 @@ impl PoolsFunctions for ShapesPool {
             self.shapes.values_mut().for_each(|shape| {
                 shape
                     .get_kind_mut()
-                    .set_state_from_pos(pointer, SelectFromPos);
+                    .set_state_from_pos(pointer, keys_states, SelectFromPos);
                 if shape.get_kind().get_state(IsSelected).is_some() {
                     overlapping_shapes.insert(shape.get_id());
                 }
@@ -379,15 +385,22 @@ impl PoolsFunctions for ShapesPool {
             }
         }
     }
-    fn set_modifiers_states_from_pos(&mut self, pointer: &mut Pointer, hors: HS) -> bool {
+    fn set_modifiers_states_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        hors: HS,
+    ) -> bool {
         use GetEntityState::*;
         use SetEntityStateFromPos::*;
         match hors {
             HS::Highlight => {
                 self.shapes.values_mut().for_each(|shape| {
-                    shape
-                        .get_kind_mut()
-                        .set_state_from_pos(pointer, HighliModifierFromPos);
+                    shape.get_kind_mut().set_state_from_pos(
+                        pointer,
+                        keys_states,
+                        HighliModifierFromPos,
+                    );
                 });
 
                 let mut highlighted = false;
@@ -401,9 +414,11 @@ impl PoolsFunctions for ShapesPool {
             }
             HS::Select => {
                 self.shapes.values_mut().for_each(|shape| {
-                    shape
-                        .get_kind_mut()
-                        .set_state_from_pos(pointer, SelectModifierFromPos);
+                    shape.get_kind_mut().set_state_from_pos(
+                        pointer,
+                        keys_states,
+                        SelectModifierFromPos,
+                    );
                 });
 
                 let mut selected = false;

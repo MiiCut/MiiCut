@@ -35,6 +35,7 @@ use pools::{DrawObjects, Pools};
 use positions::*;
 use prefab::modifiers_path;
 use primitives::primitives::GetPrimitiveState;
+use primitives::primitives::StartProperty;
 use shapes::shapes::BSKind;
 use shapes::shapes::{BoolOps, ToogleBoolOpsShapesAction};
 use shapes::shapes_pool::BSid;
@@ -250,7 +251,14 @@ impl AppVars {
                         .is_some()
                     {
                         primitive.toogle_start_modifier();
-                        log!("switched to {:?}", primitive.get_start_modifier());
+                        let start_modifier = primitive.get_start_modifier();
+                        log!("switched to {:?}", start_modifier);
+                        if shift_pressed {
+                            // Change all primitives modifiers
+                            for prim in shape_custom.get_prims_mut() {
+                                prim.set_start_modifier(start_modifier);
+                            }
+                        }
                         break;
                     }
                 }
@@ -370,9 +378,7 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     use IconsShapes::*;
     user_icons.insert(Arrow);
     user_icons.insert(IShapes(Rectangle));
-    user_icons.insert(IShapes(RectangleRounded));
     user_icons.insert(IShapes(Disc));
-    user_icons.insert(IShapes(Oblong));
     user_icons.insert(IShapes(Custom));
     user_icons.insert(IHelpers(IconsConstruction::Line));
     user_icons.insert(IHelpers(IconsConstruction::Circle));
@@ -719,7 +725,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 if avb.clipboard.is_paste_empty() {
                     let pointer_pos_saved = pointer.pos_saved();
                     avb.pools
-                        .set_objects_states_in_order(&mut pointer, HS::Select);
+                        .set_objects_states_in_order(&mut pointer, keys_states, HS::Select);
                     if avb.keys_states.crtl_cmd_pressed {
                         avb.pools.select_all_shapes_connected();
                         pointer.set_pos(pointer_pos_saved);
@@ -758,12 +764,11 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
             LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
                 pointer.set_pos(mouse_pos);
                 avb.pools.magnet_to_helpers(&mut pointer, keys_states);
-
                 if !avb.clipboard.is_paste_empty() {
                     avb.clipboard.move_paste(&mut pointer);
                 } else {
                     avb.pools
-                        .set_objects_states_in_order(&mut pointer, HS::Highlight);
+                        .set_objects_states_in_order(&mut pointer, keys_states, HS::Highlight);
                 }
             }
             RightDown(_) => {
@@ -791,54 +796,60 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     if let Some(mut shape) = avb.on_creation.get_shape_into() {
                         // When a custom shape is created, we always continue, we stop (and
                         // close the shape) only when the user clicks on the right button
-                        if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
-                            shape_custom.add_point(&mut pointer);
-                            avb.on_creation.set_shape(shape);
-                        } else {
-                            // A. We were drawing a new shape
-                            if shape.get_kind().good_size() {
-                                // Deselect all
-                                shape.get_kind_mut().set_state(SetSelect(false));
-                                shape.get_kind_mut().set_state(SelectAllModifiers(false));
+                        match shape.get_kind_mut() {
+                            BSKind::Custom(shape_custom)
+                                if matches!(
+                                    shape_custom.get_primitivess_start_property(),
+                                    StartProperty::Nope
+                                ) =>
+                            {
+                                // Both conditions succeeded
+                                shape_custom.add_point(&mut pointer);
+                                avb.on_creation.set_shape(shape);
+                            }
+                            _ => {
+                                // A. We were drawing a new shape
+                                if shape.get_kind().good_size() {
+                                    if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
+                                        if let StartProperty::RectangleLike =
+                                            shape_custom.get_primitivess_start_property()
+                                        {
+                                            shape_custom.end_creation();
+                                        }
+                                    }
+                                    // Deselect all
+                                    shape.get_kind_mut().set_state(SetSelect(false));
+                                    shape.get_kind_mut().set_state(SelectAllModifiers(false));
 
-                                avb.pools.add_shape(shape.clone());
+                                    avb.pools.add_shape(shape.clone());
 
-                                // Push the AddShapeAction to the undo/redo system
-                                avb.undo_redo.push(Box::new(AddShapeAction {
-                                    shape: shape.clone(),
-                                }));
-                                //
-                                avb.on_creation = DrawObjects::Nope;
-                                avb.pools.recalc_full_segs();
+                                    // Push the AddShapeAction to the undo/redo system
+                                    avb.undo_redo.push(Box::new(AddShapeAction {
+                                        shape: shape.clone(),
+                                    }));
+
+                                    avb.on_creation = DrawObjects::Nope;
+                                    avb.pools.recalc_full_segs();
+                                }
                             }
                         }
                     } else {
                         // B. We start drawing a new shape
                         avb.on_creation.set_shape(ShapesPool::new_shape(
                             ishape,
-                            pointer.pos(),
-                            pointer.pos(),
+                            &mut pointer,
                             BoolOps::Union,
                         ));
                     }
                 }
 
-                LeftDownMove(mouse_pos_down, mouse_pos) => {
-                    pointer.set_pos(mouse_pos);
-                    avb.pools.magnet_to_helpers(&mut pointer, keys_states);
-                }
-                LeftUp(mouse_pos_up) => {
-                    pointer.set_pos(mouse_pos_up);
-                    pointer.save_pos();
-                    avb.pools.magnet_to_helpers(&mut pointer, keys_states);
-                }
+                LeftDownMove(mouse_pos_down, mouse_pos) => (),
+                LeftUp(mouse_pos_up) => (),
+
                 LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
-                    pointer.set_pos(mouse_pos);
+                    pointer.set_pos_rel(mouse_pos - mouse_pos_up);
                     avb.pools.magnet_to_helpers(&mut pointer, keys_states);
 
-                    if pointer.is_magnetized() {
-                        log!("Magnetized");
-                    }
                     if let Some(shape) = avb.on_creation.get_shape_mut() {
                         _ = shape
                             .get_kind_mut()
@@ -851,25 +862,35 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     pointer.save_pos();
 
                     if let Some(mut shape) = avb.on_creation.get_shape_into() {
-                        if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
-                            // Go out of creation mode
-                            if shape_custom.end_creation() {
-                                // Deselect all
-                                shape.get_kind_mut().set_state(SetSelect(false));
-                                shape.get_kind_mut().set_state(SelectAllModifiers(false));
-                                avb.pools.add_shape(shape.clone());
+                        match shape.get_kind_mut() {
+                            BSKind::Custom(shape_custom)
+                                if matches!(
+                                    shape_custom.get_primitivess_start_property(),
+                                    StartProperty::Nope
+                                ) =>
+                            {
+                                // Go out of creation mode
+                                if shape_custom.end_creation() {
+                                    // Deselect all
+                                    shape.get_kind_mut().set_state(SetSelect(false));
+                                    shape.get_kind_mut().set_state(SelectAllModifiers(false));
+                                    avb.pools.add_shape(shape.clone());
 
-                                // Push the AddShapeAction to the undo/redo system
-                                avb.undo_redo.push(Box::new(AddShapeAction {
-                                    shape: shape.clone(),
-                                }));
+                                    // Push the AddShapeAction to the undo/redo system
+                                    avb.undo_redo.push(Box::new(AddShapeAction {
+                                        shape: shape.clone(),
+                                    }));
+                                    avb.on_creation = DrawObjects::Nope;
+                                    avb.pools.recalc_full_segs();
+                                }
                             }
-                            //
-                            avb.on_creation = DrawObjects::Nope;
-                            avb.pools.recalc_full_segs();
+                            _ => {
+                                //
+                                avb.on_creation = DrawObjects::Nope;
+                                avb.pools.recalc_full_segs();
+                            }
                         }
                     }
-
                     avb.on_creation = DrawObjects::Nope;
                     avb.go_to_arrow_tool();
                 }
@@ -1345,9 +1366,6 @@ fn on_icon_mouseout(av: RefAV, _event: Event) {
         .set_property("display", "none")
         .expect("Failed to set display property");
 }
-
-///////////////
-// Helpers
 
 ///////////////
 // Rendering

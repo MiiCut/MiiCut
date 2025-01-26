@@ -5,6 +5,7 @@ use crate::canvas::Pattern;
 use crate::dimensions::DimKind;
 use crate::dimensions::Dimension;
 use crate::math::*;
+use crate::pools::HS;
 use crate::prefab::*;
 use crate::GetEntityState;
 use crate::KeysStates;
@@ -72,12 +73,19 @@ impl HelperCircle {
         self.radius.selected = value;
     }
 
-    fn highlight_modifiers_from_pos(&mut self, pos: Vec2, grab: f64) {
-        self.radius.highlighted =
-            ((pos - self.center.pos).hypot() - self.radius.value).abs() < grab;
-    }
-    fn select_modifiers_from_pos(&mut self, pos: Vec2, grab: f64) {
-        self.radius.selected = ((pos - self.center.pos).hypot() - self.radius.value).abs() < grab;
+    fn hs_modifiers_from_pos(&mut self, pos: Vec2, hs: HS) {
+        let within_grab_radius = |pos: Vec2, center: Vec2, radius: f64| -> bool {
+            ((pos - center).hypot() - radius).abs() < Self::GRAB_RADIUS
+        };
+        match hs {
+            HS::Select => {
+                self.radius.selected = within_grab_radius(pos, self.center.pos, self.radius.value);
+            }
+            HS::Highlight => {
+                self.radius.highlighted =
+                    within_grab_radius(pos, self.center.pos, self.radius.value);
+            }
+        }
     }
 }
 impl Display for HelperCircle {
@@ -88,7 +96,7 @@ impl Display for HelperCircle {
 
 impl ObjectsFuncs for HelperCircle {
     const TOLERANCE: f64 = 0.01;
-    const GRAB_RADIUS: f64 = 4.;
+    const GRAB_RADIUS: f64 = 5.;
     type Kindvars = HelperKindvars;
 
     fn save_vars(&mut self) {
@@ -156,21 +164,22 @@ impl ObjectsFuncs for HelperCircle {
             HighliAllModifiers(value) => self.highlight_all_modifiers(value),
         }
     }
-    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
+    fn set_state_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        _keys_states: KeysStates,
+        set: SetEntityStateFromPos,
+    ) {
         use SetEntityStateFromPos::*;
         match set {
             SelectFromPos => {
-                self.selected = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+                self.selected = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS
             }
             HighliFromPos => {
-                self.highlighted = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+                self.highlighted = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS
             }
-            SelectModifierFromPos => {
-                self.select_modifiers_from_pos(pointer.pos(), pointer.get_grab_dist());
-            }
-            HighliModifierFromPos => {
-                self.highlight_modifiers_from_pos(pointer.pos(), pointer.get_grab_dist());
-            }
+            SelectModifierFromPos => self.hs_modifiers_from_pos(pointer.pos(), HS::Select),
+            HighliModifierFromPos => self.hs_modifiers_from_pos(pointer.pos(), HS::Highlight),
         }
     }
 

@@ -8,7 +8,8 @@ use super::{
 };
 use crate::{
     canvas::{CanvasText, Pattern},
-    find_circle_center,
+    math::*,
+    pools::HS,
     positions::*,
     prefab::*,
     KeysStates,
@@ -23,9 +24,8 @@ pub enum VertexChange {
 }
 
 #[derive(Copy, Debug, Clone)]
-pub enum StartProps {
-    PrevForceXNextForceY,
-    PrevForceYNextForceX,
+pub enum StartProperty {
+    RectangleLike,
     Nope,
 }
 
@@ -52,7 +52,7 @@ pub struct Primitive {
     start: Position,
     end: Position,
     // For start position only
-    start_props: StartProps,
+    start_property: StartProperty,
     // For start position only
     // This will be applied also to the end position of the previous Prim
     // in the custom shape
@@ -68,14 +68,14 @@ pub struct Primitive {
 
 impl Primitive {
     const MIN_START_MOD_OFFSET: f64 = 10.;
-    pub fn new(kind: PrivitiveKind, start: Vec2, end: Vec2) -> Self {
+    pub fn new(kind: PrivitiveKind, start_property: StartProperty, start: Vec2, end: Vec2) -> Self {
         let start = Position::new(start, true);
         let end = Position::new(end, true);
         Self {
             kind,
             start,
             end,
-            start_props: StartProps::Nope,
+            start_property,
             start_modifier: StartModifier::Nope(false),
             start_modifier_offset: Value::new(Self::MIN_START_MOD_OFFSET),
             p_line: PrimLine::new(),
@@ -83,13 +83,13 @@ impl Primitive {
         }
     }
 
-    pub fn get_start_position(&self) -> Vec2 {
+    pub fn get_start_pos(&self) -> Vec2 {
         self.start.pos
     }
-    pub fn get_start_saved_position(&self) -> Vec2 {
+    pub fn get_start_saved_pos(&self) -> Vec2 {
         self.start.saved_pos
     }
-    pub fn set_start_position(&mut self, start: Vec2) {
+    pub fn set_start_pos(&mut self, start: Vec2) {
         self.start.pos = start;
         self.update_primitives_vars(VertexChange::StartChanged);
     }
@@ -113,6 +113,12 @@ impl Primitive {
     pub fn set_start_modifier(&mut self, modifier: StartModifier) {
         self.start_modifier = modifier;
     }
+    pub fn get_start_property(&self) -> StartProperty {
+        self.start_property
+    }
+    pub fn set_start_property(&mut self, property: StartProperty) {
+        self.start_property = property;
+    }
 
     pub fn is_start_selected(&self) -> bool {
         self.start.selected
@@ -121,13 +127,13 @@ impl Primitive {
         self.start.highlighted
     }
 
-    pub fn get_end_position(&self) -> Vec2 {
+    pub fn get_end_pos(&self) -> Vec2 {
         self.end.pos
     }
     pub fn get_end_saved_position(&self) -> Vec2 {
         self.end.saved_pos
     }
-    pub fn set_end_position(&mut self, end: Vec2) {
+    pub fn set_end_pos(&mut self, end: Vec2) {
         self.end.pos = end;
         self.update_primitives_vars(VertexChange::EndChanged);
     }
@@ -190,7 +196,7 @@ impl Primitive {
             kind: self.kind.clone(),
             start: self.start.clone(),
             end: self.end.clone(),
-            start_props: self.start_props,
+            start_property: self.start_property,
             start_modifier: self.start_modifier.clone(),
             start_modifier_offset: self.start_modifier_offset,
             p_line: self.p_line.clone(),
@@ -201,13 +207,26 @@ impl Primitive {
         self.kind = vars.kind.clone();
         self.start = vars.start.clone();
         self.end = vars.end.clone();
-        self.start_props = vars.start_props;
+        self.start_property = vars.start_property;
         self.start_modifier = vars.start_modifier.clone();
         self.start_modifier_offset = vars.start_modifier_offset;
         self.p_line = vars.p_line.clone();
         self.p_arc = vars.p_arc.clone();
     }
 
+    pub fn get_all_modifiers_positions(&self) -> Vec<Vec2> {
+        let mut modifiers = vec![];
+        modifiers.push(self.start.pos);
+        use PrivitiveKind::*;
+        match self.kind {
+            PrimLine => self
+                .p_line
+                .get_all_controls_positions(self.start.pos, self.end.pos),
+            PrimArc => self
+                .p_arc
+                .get_all_controls_positions(self.start.pos, self.end.pos),
+        }
+    }
     pub fn get_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
         use PrivitiveKind::*;
         match self.kind {
@@ -276,12 +295,12 @@ impl Primitive {
             PrimLine => {
                 self.p_line.toggle();
                 self.p_line
-                    .update_primitives_vars(self.start.pos, self.end.pos, VertexChange::Nope)
+                    .update_primitives_vars(self.start, self.end, VertexChange::Nope)
             }
             PrimArc => {
                 self.p_arc.toggle();
                 self.p_arc
-                    .update_primitives_vars(self.start.pos, self.end.pos, VertexChange::Nope)
+                    .update_primitives_vars(self.start, self.end, VertexChange::Nope)
             }
         }
     }
@@ -309,10 +328,10 @@ impl Primitive {
         match self.kind {
             PrimLine => self
                 .p_line
-                .update_primitives_vars(self.start.pos, self.end.pos, changed),
+                .update_primitives_vars(self.start, self.end, changed),
             PrimArc => self
                 .p_arc
-                .update_primitives_vars(self.start.pos, self.end.pos, changed),
+                .update_primitives_vars(self.start, self.end, changed),
         }
     }
     pub fn get_state(&self, get: GetPrimitiveState) -> Option<Vec2> {
@@ -368,43 +387,24 @@ impl Primitive {
         let start = self.start.pos;
         let end = self.end.pos;
         match set {
-            SetSelect(value) => match self.kind {
-                PrimLine => self.p_line.set_state(start, end, SetSelect(value)),
-                PrimArc => self.p_arc.set_state(start, end, SetSelect(value)),
+            SetHS(hs, value) => match self.kind {
+                PrimLine => self.p_line.set_state(start, end, SetHS(hs, value)),
+                PrimArc => self.p_arc.set_state(start, end, SetHS(hs, value)),
             },
-            SetHighli(value) => match self.kind {
-                PrimLine => self.p_line.set_state(start, end, SetHighli(value)),
-                PrimArc => self.p_arc.set_state(start, end, SetHighli(value)),
+            SetStartHS(hs, value) => match hs {
+                HS::Select => self.start.selected = value,
+                HS::Highlight => self.start.highlighted = value,
             },
-            SetStartSelected(value) => {
-                self.start.selected = value;
-            }
-            SetStartHighligh(value) => {
-                self.start.highlighted = value;
-            }
-            SelectAllOtherModifiers(value) => {
-                // self.end.selected = value;
+            SetAllOtherModifiersHS(hs, value) => {
                 use PrivitiveKind::*;
                 match self.kind {
-                    PrimLine => self
-                        .p_line
-                        .set_state(start, end, SelectAllOtherModifiers(value)),
+                    PrimLine => {
+                        self.p_line
+                            .set_state(start, end, SetAllOtherModifiersHS(hs, value))
+                    }
                     PrimArc => self
                         .p_arc
-                        .set_state(start, end, SelectAllOtherModifiers(value)),
-                }
-            }
-            HighliAllOtherModifiers(value) => {
-                self.start.highlighted = value;
-                // self.end.highlighted = value;
-                use PrivitiveKind::*;
-                match self.kind {
-                    PrimLine => self
-                        .p_line
-                        .set_state(start, end, HighliAllOtherModifiers(value)),
-                    PrimArc => self
-                        .p_arc
-                        .set_state(start, end, HighliAllOtherModifiers(value)),
+                        .set_state(start, end, SetAllOtherModifiersHS(hs, value)),
                 }
             }
         }
@@ -415,70 +415,50 @@ impl Primitive {
         let start = self.start.pos;
         let end = self.end.pos;
         match set {
-            SelectFromPos => match self.kind {
+            SetHSFromPos(hs) => match self.kind {
                 PrimLine => self
                     .p_line
-                    .set_state_from_pos(start, end, pointer, SelectFromPos),
+                    .set_state_from_pos(start, end, pointer, SetHSFromPos(hs)),
                 PrimArc => self
                     .p_arc
-                    .set_state_from_pos(start, end, pointer, SelectFromPos),
+                    .set_state_from_pos(start, end, pointer, SetHSFromPos(hs)),
             },
-            HighliFromPos => match self.kind {
-                PrimLine => self
-                    .p_line
-                    .set_state_from_pos(start, end, pointer, HighliFromPos),
-                PrimArc => self
-                    .p_arc
-                    .set_state_from_pos(start, end, pointer, HighliFromPos),
-            },
-            SelectStartFromPos => {
-                if (self.start.pos - pointer.pos()).hypot() < 2. * Self::GRAB {
-                    self.start.selected = true;
-                    pointer.set_pos(self.start.pos);
-                    pointer.save_pos();
-                } else {
-                    self.start.selected = false;
+            SetStartHSFromPos(hs) => {
+                let state = (self.start.pos - pointer.pos()).hypot() < Self::GRAB;
+                match hs {
+                    HS::Select => {
+                        if state {
+                            self.start.selected = true;
+                            pointer.set_pos(self.start.pos);
+                            pointer.save_pos();
+                        } else {
+                            self.start.selected = false;
+                        }
+                    }
+                    HS::Highlight => {
+                        if state {
+                            self.start.highlighted = true;
+                            pointer.set_pos(self.start.pos);
+                        } else {
+                            self.start.highlighted = false;
+                        }
+                    }
                 }
             }
-            SelectOtherModifierFromPos => {
+            SetOthersModifiersHSFromPos(hs) => {
                 use PrivitiveKind::*;
                 match self.kind {
                     PrimLine => self.p_line.set_state_from_pos(
                         start,
                         end,
                         pointer,
-                        SelectOtherModifierFromPos,
+                        SetOthersModifiersHSFromPos(hs),
                     ),
                     PrimArc => self.p_arc.set_state_from_pos(
                         start,
                         end,
                         pointer,
-                        SelectOtherModifierFromPos,
-                    ),
-                }
-            }
-            HighliStartFromPos => {
-                if (self.start.pos - pointer.pos()).hypot() < 2. * Self::GRAB {
-                    self.start.highlighted = true;
-                    pointer.set_pos(self.start.pos);
-                } else {
-                    self.start.highlighted = false;
-                }
-            }
-            HighliOtherModifierFromPos => {
-                use PrivitiveKind::*;
-                match self.kind {
-                    PrimLine => self.p_line.set_state_from_pos(
-                        start,
-                        end,
-                        pointer,
-                        HighliOtherModifierFromPos,
-                    ),
-                    PrimArc => self.p_arc.set_state_from_pos(
-                        start,
-                        end,
-                        pointer,
-                        HighliOtherModifierFromPos,
+                        SetOthersModifiersHSFromPos(hs),
                     ),
                 }
             }
@@ -556,21 +536,15 @@ pub enum GetPrimitiveState {
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SetPrimitiveState {
-    SetSelect(bool),
-    SetHighli(bool),
-    SetStartSelected(bool),
-    SetStartHighligh(bool),
-    SelectAllOtherModifiers(bool),
-    HighliAllOtherModifiers(bool),
+    SetHS(HS, bool),
+    SetStartHS(HS, bool),
+    SetAllOtherModifiersHS(HS, bool),
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SetPrimitiveStateFromPos {
-    SelectFromPos,
-    HighliFromPos,
-    SelectStartFromPos,
-    HighliStartFromPos,
-    SelectOtherModifierFromPos,
-    HighliOtherModifierFromPos,
+    SetHSFromPos(HS),
+    SetStartHSFromPos(HS),
+    SetOthersModifiersHSFromPos(HS),
 }
 
 pub trait PrimitiveControls {
@@ -580,7 +554,12 @@ pub trait PrimitiveControls {
     fn toggle(&mut self);
     fn save_vars(&mut self);
     fn restore_saved(&mut self);
-    fn update_primitives_vars(&mut self, start: Vec2, end: Vec2, changed: VertexChange) -> Vec2;
+    fn update_primitives_vars(
+        &mut self,
+        start: Position,
+        end: Position,
+        vertex_changed: VertexChange,
+    ) -> Vec2;
     fn is_selected(&self) -> bool;
     fn is_highlighted(&self) -> bool;
     fn get_state(&self, start: Vec2, end: Vec2, state: GetPrimitiveState) -> Option<Vec2>;
@@ -599,6 +578,8 @@ pub trait PrimitiveControls {
         pointer: &Pointer,
         keys_states: KeysStates,
     ) -> bool;
+    fn get_all_controls_positions(&self, start: Vec2, end: Vec2) -> Vec<Vec2>;
+
     fn path_elements(&self, start: Vec2, end: Vec2) -> PrimitiveKindIter;
     fn get_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
         match (selected, highlighted) {

@@ -7,6 +7,7 @@ use crate::dimensions::Dimension;
 use crate::get_line_segment;
 use crate::is_near_line;
 use crate::math::*;
+use crate::pools::HS;
 use crate::prefab::*;
 use crate::traits::*;
 use crate::KeysStates;
@@ -52,21 +53,21 @@ impl HelperLine {
     fn select_all_modifiers(&mut self, value: bool) {
         self.angle.selected = value;
     }
-    fn highlight_modifiers_from_pos(&mut self, pointer: &mut Pointer, _grab: f64) {
-        self.angle.highlighted = is_near_line(
+    fn hs_modifiers_from_pos(&mut self, pointer: &mut Pointer, hs: HS) {
+        let state = is_near_line(
             self.center.pos,
             self.angle.value,
             pointer.pos(),
             Self::GRAB_RADIUS,
         );
-    }
-    fn select_modifiers_from_pos(&mut self, pointer: &mut Pointer, _grab: f64) {
-        self.angle.selected = is_near_line(
-            self.center.pos,
-            self.angle.value,
-            pointer.pos(),
-            Self::GRAB_RADIUS,
-        );
+        match hs {
+            HS::Select => {
+                self.angle.selected = state;
+            }
+            HS::Highlight => {
+                self.angle.highlighted = state;
+            }
+        }
     }
 }
 impl Display for HelperLine {
@@ -77,7 +78,7 @@ impl Display for HelperLine {
 
 impl ObjectsFuncs for HelperLine {
     const TOLERANCE: f64 = 0.01;
-    const GRAB_RADIUS: f64 = 4.;
+    const GRAB_RADIUS: f64 = 5.;
     type Kindvars = HelperKindvars;
 
     fn save_vars(&mut self) {
@@ -145,32 +146,32 @@ impl ObjectsFuncs for HelperLine {
             HighliAllModifiers(value) => self.highlight_all_modifiers(value),
         }
     }
-    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
+    fn set_state_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        _keys_states: KeysStates,
+        set: SetEntityStateFromPos,
+    ) {
+        // Define the closure
+        let within_grab_radius =
+            |pointer: &mut Pointer, center_pos: Vec2, grab_radius: f64| -> bool {
+                if (pointer.pos() - center_pos).hypot() < grab_radius {
+                    true
+                } else {
+                    false
+                }
+            };
+
         use SetEntityStateFromPos::*;
         match set {
             SelectFromPos => {
-                if (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS {
-                    self.selected = true;
-                    pointer.set_pos(self.center.pos);
-                    pointer.save_pos();
-                } else {
-                    self.selected = false;
-                }
+                self.selected = within_grab_radius(pointer, self.center.pos, Self::GRAB_RADIUS);
             }
             HighliFromPos => {
-                if (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS {
-                    self.highlighted = true;
-                    pointer.set_pos(self.center.pos);
-                } else {
-                    self.highlighted = false;
-                }
+                self.highlighted = within_grab_radius(pointer, self.center.pos, Self::GRAB_RADIUS);
             }
-            SelectModifierFromPos => {
-                self.select_modifiers_from_pos(pointer, pointer.get_grab_dist());
-            }
-            HighliModifierFromPos => {
-                self.highlight_modifiers_from_pos(pointer, pointer.get_grab_dist());
-            }
+            SelectModifierFromPos => self.hs_modifiers_from_pos(pointer, HS::Select),
+            HighliModifierFromPos => self.hs_modifiers_from_pos(pointer, HS::Highlight),
         }
     }
 

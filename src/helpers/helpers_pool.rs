@@ -61,7 +61,7 @@ pub struct HelpersPool {
     magnet_points: Vec<Vec2>,
 }
 impl HelpersPool {
-    const MAGNET_RADIUS: f64 = 20.;
+    const MAGNET_RADIUS: f64 = 10.;
     pub fn new_helper(icon_helper: IconsConstruction, pos1: Vec2, pos2: Vec2) -> Helper {
         let dhid = DHid::new();
         let helper_kind = match icon_helper {
@@ -206,7 +206,12 @@ impl PoolsFunctions for HelpersPool {
         });
     }
 
-    fn set_states_from_pos(&mut self, pointer: &mut Pointer, hors: HS) -> bool {
+    fn set_states_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        hors: HS,
+    ) -> bool {
         use GetEntityState::*;
         use SetEntityStateFromPos::*;
         use HS::*;
@@ -214,7 +219,7 @@ impl PoolsFunctions for HelpersPool {
             self.helpers.values_mut().for_each(|helper| {
                 helper
                     .get_kind_mut()
-                    .set_state_from_pos(pointer, HighliFromPos)
+                    .set_state_from_pos(pointer, keys_states, HighliFromPos)
             });
             for helper in self.helpers.values_mut() {
                 if helper.get_kind().get_state(IsHighligh).is_some() {
@@ -226,7 +231,7 @@ impl PoolsFunctions for HelpersPool {
             self.helpers.values_mut().for_each(|helper| {
                 helper
                     .get_kind_mut()
-                    .set_state_from_pos(pointer, SelectFromPos);
+                    .set_state_from_pos(pointer, keys_states, SelectFromPos);
             });
             for helper in self.helpers.values_mut() {
                 if helper.get_kind().get_state(IsSelected).is_some() {
@@ -315,15 +320,22 @@ impl PoolsFunctions for HelpersPool {
             }
         }
     }
-    fn set_modifiers_states_from_pos(&mut self, pointer: &mut Pointer, hors: HS) -> bool {
+    fn set_modifiers_states_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        hors: HS,
+    ) -> bool {
         use GetEntityState::*;
         use SetEntityStateFromPos::*;
         match hors {
             HS::Highlight => {
                 self.helpers.values_mut().for_each(|helper| {
-                    helper
-                        .get_kind_mut()
-                        .set_state_from_pos(pointer, HighliModifierFromPos);
+                    helper.get_kind_mut().set_state_from_pos(
+                        pointer,
+                        keys_states,
+                        HighliModifierFromPos,
+                    );
                 });
                 for helper in self.helpers.values_mut() {
                     if helper.get_kind().get_state(IsAnyModifierHighligh).is_some() {
@@ -333,9 +345,11 @@ impl PoolsFunctions for HelpersPool {
             }
             HS::Select => {
                 self.helpers.values_mut().for_each(|helper| {
-                    helper
-                        .get_kind_mut()
-                        .set_state_from_pos(pointer, SelectModifierFromPos);
+                    helper.get_kind_mut().set_state_from_pos(
+                        pointer,
+                        keys_states,
+                        SelectModifierFromPos,
+                    );
                 });
                 for shape in self.helpers.values_mut() {
                     if shape.get_kind().get_state(IsAnyModifierSelected).is_some() {

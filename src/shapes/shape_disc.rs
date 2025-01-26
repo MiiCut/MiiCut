@@ -9,6 +9,7 @@ use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
+    pools::HS,
     positions::{Position, Value},
     prefab::center_path,
     traits::*,
@@ -32,9 +33,9 @@ pub struct ShapeDisc {
 impl ShapeDisc {
     const MIN_RADIUS: f64 = 2.;
 
-    pub fn new(center: Vec2, _pos2: Vec2) -> BSKind {
+    pub fn new(center: Vec2, pos2: Vec2) -> BSKind {
         let center = Position::new(center, false);
-        let mut radius = Value::new(0.);
+        let mut radius = Value::new((pos2 - center.pos).hypot());
         radius.selected = true;
 
         BSKind::Disc(ShapeDisc {
@@ -73,31 +74,50 @@ impl ShapeDisc {
         self.radius.selected = value;
     }
 
-    fn highlight_modifiers_from_pos(&mut self, pointer: &mut Pointer, grab: f64) {
-        if ((pointer.pos() - self.center.pos).hypot() - self.radius.value).abs() < grab {
-            self.radius.highlighted = true;
-            if (pointer.pos() - self.center.pos).hypot() > EPSILON {
-                pointer.set_pos(
-                    self.center.pos
-                        + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
-                );
+    fn hs_modifiers_from_pos(&mut self, pointer: &mut Pointer, keys_states: KeysStates, hs: HS) {
+        let state_center = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+
+        match hs {
+            HS::Select => {
+                if state_center {
+                    pointer.save_pos();
+                }
+                self.center.selected = state_center;
             }
-        } else {
-            self.radius.highlighted = false;
+            HS::Highlight => {
+                self.center.highlighted = state_center;
+            }
         }
-    }
-    fn select_modifiers_from_pos(&mut self, pointer: &mut Pointer, grab: f64) {
-        if ((pointer.pos() - self.center.pos).hypot() - self.radius.value).abs() < grab {
-            self.radius.selected = true;
-            if (pointer.pos() - self.center.pos).hypot() > EPSILON {
-                pointer.set_pos(
-                    self.center.pos
-                        + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
-                );
-                pointer.save_pos();
+        if state_center {
+            pointer.set_pos(self.center.pos);
+            match hs {
+                HS::Select => {
+                    self.radius.selected = false;
+                }
+                HS::Highlight => {
+                    self.radius.highlighted = false;
+                }
             }
-        } else {
-            self.radius.selected = false;
+            return;
+        }
+
+        let state_radius = ((pointer.pos() - self.center.pos).hypot() - self.radius.value).abs()
+            < Self::GRAB_RADIUS;
+        if state_radius {
+            pointer.set_pos(
+                self.center.pos + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
+            );
+        }
+        match hs {
+            HS::Select => {
+                if state_radius {
+                    pointer.save_pos();
+                }
+                self.radius.selected = state_radius;
+            }
+            HS::Highlight => {
+                self.radius.highlighted = state_radius;
+            }
         }
     }
 }
@@ -209,20 +229,29 @@ impl ObjectsFuncs for ShapeDisc {
             HighliAllModifiers(value) => self.highlight_all_modifiers(value),
         }
     }
-    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
+    fn set_state_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        set: SetEntityStateFromPos,
+    ) {
         use SetEntityStateFromPos::*;
         match set {
             SelectFromPos => {
                 self.selected = self.contains(pointer.pos().to_point());
+                if self.selected {
+                    pointer.set_pos(self.center.pos);
+                    pointer.save_pos();
+                }
             }
             HighliFromPos => {
                 self.highlighted = self.contains(pointer.pos().to_point());
             }
             SelectModifierFromPos => {
-                self.select_modifiers_from_pos(pointer, Self::GRAB_RADIUS);
+                self.hs_modifiers_from_pos(pointer, keys_states, HS::Select);
             }
             HighliModifierFromPos => {
-                self.highlight_modifiers_from_pos(pointer, Self::GRAB_RADIUS);
+                self.hs_modifiers_from_pos(pointer, keys_states, HS::Highlight);
             }
         }
     }

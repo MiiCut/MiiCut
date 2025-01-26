@@ -8,11 +8,12 @@ use super::shapes::{BSKind, BSKindvars};
 use crate::{
     canvas::{CanvasText, Pattern},
     math::*,
+    pools::HS,
     positions::Position,
     prefab::center_path,
     primitives::primitives::{
         GetPrimitiveState, Primitive, PrimitiveControls, PrivitiveKind, SetPrimitiveState,
-        SetPrimitiveStateFromPos, StartModifier,
+        SetPrimitiveStateFromPos, StartModifier, StartProperty, VertexChange,
     },
     traits::*,
     KeysStates, Pointer,
@@ -26,6 +27,8 @@ pub struct ShapeCustom {
     prims: Vec<Primitive>,
     current_creation_pos: Option<Position>,
 
+    primitivess_start_property: StartProperty,
+
     highlighted: bool,
     selected: bool,
 
@@ -33,17 +36,62 @@ pub struct ShapeCustom {
     polygon: Polygon<f64>,
 }
 impl ShapeCustom {
-    const _MIN_SIZE: f64 = 10.;
+    pub const MIN_RECT_SIZE: f64 = 10.;
 
-    pub fn new(pos1: Vec2, pos2: Vec2) -> BSKind {
-        BSKind::Custom(ShapeCustom {
-            prims: vec![Primitive::new(PrivitiveKind::PrimLine, pos1, pos2)],
-            current_creation_pos: Some(Position::new(pos2, true)),
-            highlighted: false,
-            selected: false,
-            segs: BezPath::new(),
-            polygon: Polygon::new(LineString::new(vec![]), vec![]),
-        })
+    pub fn new(prims_property: StartProperty, pos1: Vec2, pos2: Vec2) -> BSKind {
+        match prims_property {
+            StartProperty::Nope => BSKind::Custom(ShapeCustom {
+                prims: vec![Primitive::new(
+                    PrivitiveKind::PrimLine,
+                    StartProperty::Nope,
+                    pos1,
+                    pos2,
+                )],
+                current_creation_pos: Some(Position::new(pos2, true)),
+                primitivess_start_property: StartProperty::Nope,
+                highlighted: false,
+                selected: false,
+                segs: BezPath::new(),
+                polygon: Polygon::new(LineString::new(vec![]), vec![]),
+            }),
+            StartProperty::RectangleLike => {
+                let p1 = Primitive::new(
+                    PrivitiveKind::PrimLine,
+                    StartProperty::RectangleLike,
+                    pos1,
+                    Vec2::new(pos2.x, pos1.y),
+                );
+                let p2 = Primitive::new(
+                    PrivitiveKind::PrimLine,
+                    StartProperty::RectangleLike,
+                    Vec2::new(pos2.x, pos1.y),
+                    pos2,
+                );
+                let mut p3 = Primitive::new(
+                    PrivitiveKind::PrimLine,
+                    StartProperty::RectangleLike,
+                    pos2,
+                    Vec2::new(pos1.x, pos2.y),
+                );
+                p3.set_state(SetPrimitiveState::SetStartHS(HS::Select, true));
+                let p4 = Primitive::new(
+                    PrivitiveKind::PrimLine,
+                    StartProperty::RectangleLike,
+                    Vec2::new(pos1.x, pos2.y),
+                    pos1,
+                );
+
+                BSKind::Custom(ShapeCustom {
+                    prims: vec![p1, p2, p3, p4],
+                    current_creation_pos: Some(Position::new(Vec2::new(pos1.x, pos2.y), true)),
+                    primitivess_start_property: StartProperty::RectangleLike,
+                    highlighted: false,
+                    selected: false,
+                    segs: BezPath::new(),
+                    polygon: Polygon::new(LineString::new(vec![]), vec![]),
+                })
+            }
+        }
     }
     pub fn add_point(&mut self, pointer: &mut Pointer) {
         let pos = pointer.pos();
@@ -53,9 +101,13 @@ impl ShapeCustom {
                 if let Some(current_pos) = &mut self.current_creation_pos {
                     current_pos.pos = pos;
                     current_pos.saved_pos = pos;
-                    last_line.set_end_position(pos);
-                    self.prims
-                        .push(Primitive::new(PrivitiveKind::PrimLine, pos, pos));
+                    last_line.set_end_pos(pos);
+                    self.prims.push(Primitive::new(
+                        PrivitiveKind::PrimLine,
+                        self.primitivess_start_property,
+                        pos,
+                        pos,
+                    ));
                     self.update_polygon();
                 }
             }
@@ -64,17 +116,15 @@ impl ShapeCustom {
     pub fn end_creation(&mut self) -> bool {
         if self.good_size() {
             self.current_creation_pos = None;
-            let first_pos = self.prims.first().unwrap().get_start_position();
+            let first_pos = self.prims.first().unwrap().get_start_pos();
             if let Some(last_prim) = self.prims.last_mut() {
                 if let PrivitiveKind::PrimLine = last_prim.get_prim_kind() {
-                    last_prim.set_end_position(first_pos);
+                    last_prim.set_end_pos(first_pos);
                 }
             }
             self.update_polygon();
             true
         } else {
-            // Minimum segments was not reached
-            log!("Too few segments");
             false
         }
     }
@@ -104,7 +154,7 @@ impl ShapeCustom {
         let mut max_y = f64::MIN;
 
         for prim in self.prims.iter() {
-            let start = prim.get_start_position();
+            let start = prim.get_start_pos();
             if start.x < min_x {
                 min_x = start.x;
             }
@@ -120,13 +170,20 @@ impl ShapeCustom {
         }
         Rect::new(min_x, min_y, max_x, max_y)
     }
+    pub fn get_primitivess_start_property(&self) -> StartProperty {
+        self.primitivess_start_property
+    }
+    pub fn get_prims(&self) -> &Vec<Primitive> {
+        &self.prims
+    }
     pub fn get_prims_mut(&mut self) -> &mut Vec<Primitive> {
         &mut self.prims
     }
+
     fn get_vertices_centroid(&self) -> Vec2 {
         let mut centroid = Vec2::ZERO;
         self.prims.iter().for_each(|prim| {
-            centroid += prim.get_start_position();
+            centroid += prim.get_start_pos();
         });
         centroid / self.prims.len() as f64
     }
@@ -147,10 +204,10 @@ impl ShapeCustom {
             let start_modifier_offset = prim.get_start_modifier_offset();
             let end_modifier_offset = prim_next.get_start_modifier_offset();
 
-            let start = prim.get_start_position();
-            let start_prev = prim_prev.get_start_position();
-            let end = prim.get_end_position();
-            let end_prev = prim_prev.get_end_position();
+            let start = prim.get_start_pos();
+            let start_prev = prim_prev.get_start_pos();
+            let end = prim.get_end_pos();
+            let end_prev = prim_prev.get_end_pos();
 
             let prim_start_pattern = prim.get_pattern(
                 prim.is_start_selected() || self.selected,
@@ -251,9 +308,161 @@ impl ShapeCustom {
         };
         &mut self.prims[prev_index]
     }
-    fn _get_next_prim_mut(&mut self, idx: usize) -> &mut Primitive {
+    fn get_prev_prev_prim_mut(&mut self, idx: usize) -> &mut Primitive {
+        let prev_index = if idx == 0 {
+            self.prims.len() - 1
+        } else {
+            idx - 1
+        };
+        let prev_prev_index = if prev_index == 0 {
+            self.prims.len() - 1
+        } else {
+            prev_index - 1
+        };
+        &mut self.prims[prev_prev_index]
+    }
+    fn get_next_prim_mut(&mut self, idx: usize) -> &mut Primitive {
         let next_index = (idx + 1) % self.prims.len();
         &mut self.prims[next_index]
+    }
+
+    fn modify_vertex(&mut self, current: usize, dpos: Vec2, snap: f64) -> Option<f64> {
+        // To calculate the new radius from dpos, we need to project dpos on
+        // the bisector of the angle formed by the two lines
+        let start_prev = self.get_prev_prim(current).get_start_pos();
+        let end_prev = self.get_prev_prim(current).get_end_pos();
+        let end = self.get_prim(current).get_end_pos();
+
+        let (dpos_proj, sign) = project_onto_bisector(start_prev, end_prev, end, dpos);
+        let radius_saved = self.get_prim(current).get_start_modifier_offset_saved();
+        let radius = radius_saved + snap_val(dpos_proj.hypot() * sign, snap);
+        if radius > 0. {
+            self.get_prim_mut(current).set_start_modifier_offset(radius);
+            Some(radius)
+        } else {
+            None
+        }
+    }
+    fn move_vertex(&mut self, current: usize, dpos: Vec2, snap: f64, pointer_magnetized: bool) {
+        // Vertex move: depends on the start property of the current primitive
+        match self.get_prim(current).get_start_property() {
+            StartProperty::Nope => {
+                let start_saved = self.get_prim(current).get_start_saved_pos();
+
+                let new_pos = if !pointer_magnetized {
+                    let prev_start = self.get_prev_prim(current).get_start_pos();
+                    let end = self.get_prim(current).get_end_pos();
+                    // We want the lengths of the two adjacent edges to be rounded
+                    // at a multiple of snap
+                    move_b_with_snapping(prev_start, start_saved, end, dpos, snap)
+                } else {
+                    start_saved + dpos
+                };
+
+                self.get_prim_mut(current).set_start_pos(new_pos);
+                self.get_prev_prim_mut(current).set_end_pos(new_pos);
+
+                // Update adjacent primitives controls
+                self.get_prim_mut(current)
+                    .update_primitives_vars(VertexChange::StartChanged);
+                self.get_prev_prim_mut(current)
+                    .update_primitives_vars(VertexChange::StartChanged);
+            }
+            StartProperty::RectangleLike => {
+                let s_saved = self.get_prim(current).get_start_saved_pos();
+                let ps_saved = self.get_prev_prim(current).get_start_saved_pos();
+                let ns_saved = self.get_next_prim(current).get_start_saved_pos();
+
+                let pv = s_saved - ps_saved;
+                let v = s_saved - ns_saved;
+                if pv.hypot() < EPSILON || v.hypot() < EPSILON {
+                    return;
+                }
+                let pv_norm = pv.normalize();
+                let v_norm = v.normalize();
+                let (dpos_proj_pv, dpos_proj_v) = get_coordinates_in_base(pv_norm, v_norm, dpos);
+
+                let (new_ns, new_ps, new_s) = if !pointer_magnetized {
+                    let new_pv = pv_norm * snap_val(pv.hypot() + dpos_proj_pv, snap);
+                    let new_v = v_norm * snap_val(v.hypot() + dpos_proj_v, snap);
+
+                    let new_ns = ns_saved + new_pv - pv;
+                    let new_ps = ps_saved + new_v - v;
+
+                    let new_s = new_ns + new_v;
+
+                    (new_ns, new_ps, new_s)
+                } else {
+                    (
+                        ns_saved + pv_norm * dpos_proj_pv,
+                        ps_saved + v_norm * dpos_proj_v,
+                        s_saved + pv_norm * dpos_proj_pv + v_norm * dpos_proj_v,
+                    )
+                };
+                if (new_s - new_ps).hypot() > EPSILON && (new_s - new_ns).hypot() > EPSILON {
+                    // Update start
+                    self.get_prim_mut(current).set_start_pos(new_s);
+                    self.get_prev_prim_mut(current).set_end_pos(new_s);
+
+                    // Update next start
+                    self.get_next_prim_mut(current).set_start_pos(new_ns);
+                    self.get_prim_mut(current).set_end_pos(new_ns);
+
+                    // Update prev start
+                    self.get_prev_prim_mut(current).set_start_pos(new_ps);
+                    self.get_prev_prev_prim_mut(current).set_end_pos(new_ps);
+
+                    // Update adjacent primitives controls
+                    self.get_prim_mut(current)
+                        .update_primitives_vars(VertexChange::StartChanged);
+                    self.get_prev_prim_mut(current)
+                        .update_primitives_vars(VertexChange::StartChanged);
+                }
+            }
+        }
+    }
+
+    fn hs_modifier_from_pos(&mut self, pointer: &mut Pointer, keys_states: KeysStates, hs: HS) {
+        use GetPrimitiveState::*;
+        use SetPrimitiveState::*;
+        use SetPrimitiveStateFromPos::*;
+        self.prims.iter_mut().for_each(|prim| {
+            prim.set_state(SetHS(hs, false));
+            prim.set_state(SetStartHS(hs, false));
+            prim.set_state(SetAllOtherModifiersHS(hs, false));
+        });
+        // Centroid snap
+        let centroid = self.get_vertices_centroid();
+        if (pointer.pos() - centroid).hypot() < Self::GRAB_RADIUS {
+            pointer.set_pos(centroid);
+            if let HS::Select = hs {
+                pointer.save_pos();
+            }
+            return;
+        }
+
+        for prim in self.prims.iter_mut() {
+            prim.set_state_from_pos(pointer, SetStartHSFromPos(hs));
+            if prim.get_state(IsStartSelected).is_some() {
+                break;
+            }
+            prim.set_state_from_pos(pointer, SetHSFromPos(hs));
+            if prim.get_state(IsSelected).is_some() {
+                break;
+            }
+            prim.set_state_from_pos(pointer, SetOthersModifiersHSFromPos(hs));
+            if prim.get_state(IsOtherModifiersSelected).is_some() {
+                break;
+            }
+        }
+    }
+    fn hs_all_modifiers(&mut self, value: bool, hs: HS) {
+        use SetPrimitiveState::*;
+        self.prims.iter_mut().for_each(|prim| {
+            prim.set_state(SetHS(hs, value));
+            prim.set_state(SetStartHS(hs, value));
+            prim.set_state(SetAllOtherModifiersHS(hs, value));
+        });
     }
 }
 impl Display for ShapeCustom {
@@ -328,7 +537,28 @@ impl ObjectsFuncs for ShapeCustom {
     }
 
     fn good_size(&self) -> bool {
-        self.prims.len() >= 3
+        match self.primitivess_start_property {
+            StartProperty::Nope => {
+                if self.prims.len() < 3 {
+                    // Minimum segments was not reached
+                    log!("Too few segments");
+                    false
+                } else {
+                    true
+                }
+            }
+            StartProperty::RectangleLike => {
+                let len = self.prims.len();
+                if len < 4 {
+                    return false;
+                }
+                let start = self.prims[0].get_start_pos();
+                let end = self.prims[2].get_start_pos();
+                let width = (end.x - start.x).abs();
+                let height = (end.y - start.y).abs();
+                width >= Self::MIN_RECT_SIZE && height >= Self::MIN_RECT_SIZE
+            }
+        }
     }
 
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
@@ -407,26 +637,18 @@ impl ObjectsFuncs for ShapeCustom {
         match set {
             SetEntityState::SetHighli(value) => self.highlighted = value,
             SetEntityState::SetSelect(value) => self.selected = value,
-            SetEntityState::SelectAllModifiers(value) => {
-                self.prims.iter_mut().for_each(|prim| {
-                    prim.set_state(SetSelect(value));
-                    prim.set_state(SetStartSelected(value));
-                    prim.set_state(SelectAllOtherModifiers(value));
-                });
-            }
+            SetEntityState::SelectAllModifiers(value) => self.hs_all_modifiers(value, HS::Select),
             SetEntityState::HighliAllModifiers(value) => {
-                self.prims.iter_mut().for_each(|prim| {
-                    prim.set_state(SetHighli(value));
-                    prim.set_state(SetStartHighligh(value));
-                    prim.set_state(HighliAllOtherModifiers(value));
-                });
+                self.hs_all_modifiers(value, HS::Highlight)
             }
         }
     }
-    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
-        use GetPrimitiveState::*;
-        use SetPrimitiveState::*;
-        use SetPrimitiveStateFromPos::*;
+    fn set_state_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        set: SetEntityStateFromPos,
+    ) {
         match set {
             SetEntityStateFromPos::HighliFromPos => {
                 self.highlighted = self.contains(pointer.pos().to_point());
@@ -435,48 +657,10 @@ impl ObjectsFuncs for ShapeCustom {
                 self.selected = self.contains(pointer.pos().to_point())
             }
             SetEntityStateFromPos::SelectModifierFromPos => {
-                self.prims.iter_mut().for_each(|prim| {
-                    prim.set_state(SetSelect(false));
-                    prim.set_state(SetStartSelected(false));
-                    prim.set_state(SelectAllOtherModifiers(false));
-                });
-
-                for prim in self.prims.iter_mut() {
-                    prim.set_state_from_pos(pointer, SelectStartFromPos);
-                    if prim.get_state(IsStartSelected).is_some() {
-                        break;
-                    }
-                    prim.set_state_from_pos(pointer, SelectFromPos);
-                    if prim.get_state(IsSelected).is_some() {
-                        break;
-                    }
-                    prim.set_state_from_pos(pointer, SelectOtherModifierFromPos);
-                    if prim.get_state(IsOtherModifiersSelected).is_some() {
-                        break;
-                    }
-                }
+                self.hs_modifier_from_pos(pointer, keys_states, HS::Select);
             }
             SetEntityStateFromPos::HighliModifierFromPos => {
-                self.prims.iter_mut().for_each(|prim| {
-                    prim.set_state(SetHighli(false));
-                    prim.set_state(SetStartHighligh(false));
-                    prim.set_state(HighliAllOtherModifiers(false));
-                });
-
-                for prim in self.prims.iter_mut() {
-                    prim.set_state_from_pos(pointer, HighliStartFromPos);
-                    if prim.get_state(IsStartHighligh).is_some() {
-                        break;
-                    }
-                    prim.set_state_from_pos(pointer, HighliFromPos);
-                    if prim.get_state(IsHighligh).is_some() {
-                        break;
-                    }
-                    prim.set_state_from_pos(pointer, HighliOtherModifierFromPos);
-                    if prim.get_state(IsOtherModifiersHighligh).is_some() {
-                        break;
-                    }
-                }
+                self.hs_modifier_from_pos(pointer, keys_states, HS::Highlight);
             }
         }
     }
@@ -496,80 +680,77 @@ impl ObjectsFuncs for ShapeCustom {
     fn move_modifier(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
         // Check if we are in creation mode
         if let Some(current_pos) = &mut self.current_creation_pos {
-            // Yes, update the last line
-            if let Some(last_line) = self.prims.last_mut() {
-                if let PrivitiveKind::PrimLine = last_line.get_prim_kind() {
-                    let start_pos = last_line.get_start_position();
-                    if !pointer.is_magnetized() {
-                        current_pos.pos = current_pos.saved_pos + pointer.dpos();
-                        current_pos.pos =
-                            snap_pt(current_pos.pos - start_pos, pointer.get_snap().val())
-                                + start_pos;
-                    } else {
-                        current_pos.pos = current_pos.saved_pos + pointer.dpos();
+            match self.primitivess_start_property {
+                StartProperty::Nope => {
+                    // Yes, update the last line
+                    if let Some(last_line) = self.prims.last_mut() {
+                        if let PrivitiveKind::PrimLine = last_line.get_prim_kind() {
+                            let start_pos = last_line.get_start_pos();
+                            if !pointer.is_magnetized() {
+                                current_pos.pos = current_pos.saved_pos + pointer.dpos();
+                                current_pos.pos =
+                                    snap_pt(current_pos.pos - start_pos, pointer.get_snap().val())
+                                        + start_pos;
+                            } else {
+                                current_pos.pos = current_pos.saved_pos + pointer.dpos();
+                            }
+                            last_line.set_end_pos(current_pos.pos);
+                        }
                     }
-                    last_line.set_end_position(current_pos.pos);
+                    self.update_polygon();
+                    true
+                }
+                StartProperty::RectangleLike => {
+                    let snap = pointer.get_snap().val();
+                    let dpos = pointer.dpos();
+                    let magnetized = pointer.is_magnetized();
+                    // Vertex move
+                    self.move_vertex(2, dpos, snap, magnetized);
+                    self.update_polygon();
+                    return true;
                 }
             }
-            self.update_polygon();
-            true
         } else {
             // Move the first polygon vertex found in case of multiples (normally not the case)
             // Also, since each primitive has start/end vertices, we need to move the end vertex
             // of the previous primitive
             let snap = pointer.get_snap().val();
-            let len = self.prims.len();
             let dpos = pointer.dpos();
-
-            for current in 0..len {
+            let magnetized = pointer.is_magnetized();
+            let mut vertex_modified = None;
+            for current in 0..self.prims.len() {
                 if self.get_prim(current).is_start_selected() {
                     if keys_states.crtl_cmd_pressed {
-                        // If Cmd (Crtl) pressed, move the radius
-                        if let StartModifier::Nope(_) = self.get_prim(current).get_start_modifier()
-                        {
-                            continue;
-                        } else {
-                            // To calculate the new radius, we need to project dpos on
-                            // the bisector of the angle formed by the two lines
-                            let start_prev = self.get_prev_prim(current).get_start_position();
-                            let end_prev = self.get_prev_prim(current).get_end_position();
-                            let end = self.get_prim(current).get_end_position();
-                            let (dpos_proj, sign) =
-                                project_onto_bisector(start_prev, end_prev, end, dpos);
-                            let radius_saved =
-                                self.get_prim(current).get_start_modifier_offset_saved();
-                            let radius = radius_saved + snap_val(dpos_proj.hypot() * sign, snap);
-                            if radius > 0. {
-                                self.get_prim_mut(current).set_start_modifier_offset(radius);
-                                self.update_polygon();
+                        // Vertex modification (size of chamfer or fillet)
+                        let start_mod = self.get_prim(current).get_start_modifier();
+                        match start_mod {
+                            StartModifier::Nope(_) => {
+                                continue;
                             }
-                            return true;
+                            StartModifier::Chamfer(_) | StartModifier::Fillet(_) => {
+                                if let Some(radius) = self.modify_vertex(current, dpos, snap) {
+                                    vertex_modified = Some((radius, start_mod));
+                                    self.update_polygon();
+                                    break;
+                                }
+                            }
                         }
                     } else {
-                        // Otherwise, move the vertex
-                        let pos_saved = self.get_prim(current).get_start_saved_position();
-
-                        if !pointer.is_magnetized() {
-                            let a = self.get_prev_prim(current).get_start_position();
-                            let c = self.get_prim(current).get_end_position();
-                            // We want the lengths of the two adjacent edges to be snapped
-                            let new_pos = move_b_with_snapping(a, pos_saved, c, dpos, snap);
-                            log!(
-                                "L1: {}, L2: {}",
-                                (new_pos - a).hypot(),
-                                (c - new_pos).hypot()
-                            );
-                            self.get_prim_mut(current).set_start_position(new_pos);
-                            self.get_prev_prim_mut(current).set_end_position(new_pos);
-                        } else {
-                            self.get_prim_mut(current)
-                                .set_start_position(pos_saved + dpos);
-                            self.get_prev_prim_mut(current)
-                                .set_end_position(pos_saved + dpos);
-                        }
+                        // Vertex move
+                        self.move_vertex(current, dpos, snap, magnetized);
                         self.update_polygon();
                         return true;
                     }
+                }
+            }
+            if let Some((radius, start_mod)) = vertex_modified {
+                if keys_states.crtl_cmd_pressed && keys_states.shift_pressed {
+                    for prim in self.prims.iter_mut() {
+                        prim.set_start_modifier(start_mod);
+                        prim.set_start_modifier_offset(radius);
+                    }
+                    self.update_polygon();
+                    return true;
                 }
             }
 
@@ -585,6 +766,7 @@ impl ObjectsFuncs for ShapeCustom {
             moved
         }
     }
+
     fn get_position(&self) -> Vec2 {
         self.get_vertices_centroid()
     }

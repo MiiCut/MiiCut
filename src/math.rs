@@ -1919,3 +1919,21 @@ pub fn move_b_with_snapping(a: Vec2, b: Vec2, c: Vec2, dpos: Vec2, snap: f64) ->
         }
     }
 }
+
+pub fn get_coordinates_in_base(v1: Vec2, v2: Vec2, p: Vec2) -> (f64, f64) {
+    let det = v1.x * v2.y - v1.y * v2.x;
+
+    // Check if the vectors are linearly independent
+    if det.abs() < EPSILON {
+        return (0., 0.); // The base is not valid
+    }
+
+    // Compute the inverse of the base matrix
+    let inv_mat = [[v2.y / det, -v2.x / det], [-v1.y / det, v1.x / det]];
+
+    // Multiply the inverse matrix by the point `p`
+    let a = inv_mat[0][0] * p.x + inv_mat[0][1] * p.y;
+    let b = inv_mat[1][0] * p.x + inv_mat[1][1] * p.y;
+
+    (a, b)
+}

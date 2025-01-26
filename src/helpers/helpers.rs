@@ -115,11 +115,16 @@ impl ObjectsFuncs for HelperKind {
             Circle(sh) => sh.set_state(set),
         }
     }
-    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos) {
+    fn set_state_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        set: SetEntityStateFromPos,
+    ) {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.set_state_from_pos(pointer, set),
-            Circle(sh) => sh.set_state_from_pos(pointer, set),
+            Line(sh) => sh.set_state_from_pos(pointer, keys_states, set),
+            Circle(sh) => sh.set_state_from_pos(pointer, keys_states, set),
         }
     }
 

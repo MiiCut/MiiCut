@@ -2,7 +2,8 @@ use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
-    KeysStates, Pointer,
+    pools::HS,
+    KeysStates, Pointer, Position,
 };
 
 use super::primitives::{
@@ -37,8 +38,13 @@ impl PrimitiveControls for PrimLine {
     fn restore_saved(&mut self) {
         ()
     }
-    fn update_primitives_vars(&mut self, start: Vec2, end: Vec2, _changed: VertexChange) -> Vec2 {
-        (start + end) / 2.
+    fn update_primitives_vars(
+        &mut self,
+        start: Position,
+        end: Position,
+        _vertex_changed: VertexChange,
+    ) -> Vec2 {
+        (start.pos + end.pos) / 2.
     }
     fn get_state(&self, start: Vec2, end: Vec2, state: GetPrimitiveState) -> Option<Vec2> {
         use GetPrimitiveState::*;
@@ -59,8 +65,10 @@ impl PrimitiveControls for PrimLine {
     fn set_state(&mut self, _start: Vec2, _end: Vec2, state: SetPrimitiveState) {
         use SetPrimitiveState::*;
         match state {
-            SetSelect(value) => self.selected = value,
-            SetHighli(value) => self.highlighted = value,
+            SetHS(hs, value) => match hs {
+                HS::Select => self.selected = value,
+                HS::Highlight => self.highlighted = value,
+            },
             _ => (),
         }
     }
@@ -71,16 +79,14 @@ impl PrimitiveControls for PrimLine {
         pointer: &mut Pointer,
         state: SetPrimitiveStateFromPos,
     ) {
+        let res_state =
+            || -> bool { distance_to_segment(start, end, pointer.pos(), Self::GRAB) < Self::GRAB };
         use SetPrimitiveStateFromPos::*;
         match state {
-            SelectFromPos => {
-                self.selected =
-                    distance_to_segment(start, end, pointer.pos(), Self::GRAB) < Self::GRAB
-            }
-            HighliFromPos => {
-                self.highlighted =
-                    distance_to_segment(start, end, pointer.pos(), Self::GRAB) < Self::GRAB
-            }
+            SetHSFromPos(hs) => match hs {
+                HS::Select => self.selected = res_state(),
+                HS::Highlight => self.highlighted = res_state(),
+            },
             _ => (),
         }
     }
@@ -92,6 +98,9 @@ impl PrimitiveControls for PrimLine {
         _keys_states: KeysStates,
     ) -> bool {
         false
+    }
+    fn get_all_controls_positions(&self, _: Vec2, _: Vec2) -> Vec<Vec2> {
+        vec![]
     }
 
     fn path_elements(&self, start: Vec2, end: Vec2) -> PrimitiveKindIter {

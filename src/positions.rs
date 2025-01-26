@@ -24,7 +24,6 @@ pub struct Pointer {
     pos: Vec2,
 
     snap: SnapValue,
-    grab_dist: f64,
     draw_scale: f64,
     active: bool,
     magnetized: bool,
@@ -36,7 +35,6 @@ impl Pointer {
             pos: Vec2::new(0., 0.),
 
             snap: SnapValue::Snap10,
-            grab_dist: 5.,
             draw_scale: 1.,
             active: false,
             magnetized: false,
@@ -53,6 +51,9 @@ impl Pointer {
     }
     pub fn set_pos(&mut self, pos: Vec2) {
         self.pos = pos;
+    }
+    pub fn set_pos_rel(&mut self, dpos: Vec2) {
+        self.pos = self.pos_saved + dpos;
     }
     pub fn save_pos(&mut self) {
         self.pos_saved = self.pos;
@@ -71,12 +72,6 @@ impl Pointer {
     }
     pub fn is_active(&self) -> bool {
         self.active
-    }
-    pub fn get_grab_dist(&self) -> f64 {
-        self.grab_dist
-    }
-    pub fn set_grab_dist(&mut self, grab_dist: f64) {
-        self.grab_dist = grab_dist;
     }
     pub fn set_magnetized(&mut self, magnetized: bool) {
         self.magnetized = magnetized;

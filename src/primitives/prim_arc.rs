@@ -6,8 +6,9 @@ use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
+    pools::HS,
     prefab::*,
-    KeysStates, Pointer, Value,
+    KeysStates, Pointer, Position, Value,
 };
 use kurbo::{BezPath, Shape, Size, Vec2};
 
@@ -68,9 +69,26 @@ impl PrimitiveControls for PrimArc {
         self.radius.value = self.radius.saved_val;
         self.concavity = self.concavity_saved;
     }
-    fn update_primitives_vars(&mut self, start: Vec2, end: Vec2, _changed: VertexChange) -> Vec2 {
-        self.validate_radius(start, end);
-        find_circle_center(start, end, self.radius.value, self.concavity)
+    fn update_primitives_vars(
+        &mut self,
+        start: Position,
+        end: Position,
+        vertex_changed: VertexChange,
+    ) -> Vec2 {
+        match vertex_changed {
+            VertexChange::StartChanged | VertexChange::EndChanged => {
+                let old_diam = (start.saved_pos - end.saved_pos).hypot();
+                let new_diam = (start.pos - end.pos).hypot();
+                if old_diam > EPSILON {
+                    self.radius.value = self.radius.saved_val * new_diam / old_diam;
+                }
+                self.validate_radius(start.pos, end.pos);
+            }
+            VertexChange::Nope => {
+                self.validate_radius(start.pos, end.pos);
+            }
+        }
+        find_circle_center(start.pos, end.pos, self.radius.value, self.concavity)
     }
     fn is_selected(&self) -> bool {
         self.selected
@@ -97,10 +115,15 @@ impl PrimitiveControls for PrimArc {
     fn set_state(&mut self, _start: Vec2, _end: Vec2, state: SetPrimitiveState) {
         use SetPrimitiveState::*;
         match state {
-            SetSelect(value) => self.selected = value,
-            SetHighli(value) => self.highlighted = value,
-            SelectAllOtherModifiers(value) => self.radius.selected = value,
-            HighliAllOtherModifiers(value) => self.radius.highlighted = value,
+            SetHS(hs, value) => match hs {
+                HS::Select => self.selected = value,
+                HS::Highlight => self.highlighted = value,
+            },
+
+            SetAllOtherModifiersHS(hs, value) => match hs {
+                HS::Select => self.radius.selected = value,
+                HS::Highlight => self.radius.highlighted = value,
+            },
             _ => (),
         }
     }
@@ -112,38 +135,41 @@ impl PrimitiveControls for PrimArc {
         state: SetPrimitiveStateFromPos,
     ) {
         use SetPrimitiveStateFromPos::*;
+        let res_state = || -> bool {
+            is_point_near_arc(
+                &create_arc_from_radius_and_concavity(
+                    start,
+                    end,
+                    self.radius.value,
+                    self.get_concavity(),
+                ),
+                pointer.pos(),
+                Self::GRAB,
+            )
+        };
         match state {
-            SelectFromPos => {
-                self.selected = is_point_near_arc(
-                    &create_arc_from_radius_and_concavity(
-                        start,
-                        end,
-                        self.radius.value,
-                        self.get_concavity(),
-                    ),
-                    pointer.pos(),
-                    Self::GRAB,
-                );
-            }
-            HighliFromPos => {
-                self.highlighted = is_point_near_arc(
-                    &create_arc_from_radius_and_concavity(
-                        start,
-                        end,
-                        self.radius.value,
-                        self.concavity,
-                    ),
-                    pointer.pos(),
-                    Self::GRAB,
-                );
-            }
-            SelectOtherModifierFromPos => {
+            SetHSFromPos(hs) => match hs {
+                HS::Select => self.selected = res_state(),
+                HS::Highlight => self.highlighted = res_state(),
+            },
+            SetOthersModifiersHSFromPos(hs) => {
                 let center = find_circle_center(start, end, self.radius.value, self.concavity);
-                self.radius.selected = (pointer.pos() - center).hypot() < Self::GRAB;
-            }
-            HighliOtherModifierFromPos => {
-                let center = find_circle_center(start, end, self.radius.value, self.concavity);
-                self.radius.highlighted = (pointer.pos() - center).hypot() < Self::GRAB;
+                let state = (pointer.pos() - center).hypot() < Self::GRAB;
+                match hs {
+                    HS::Select => {
+                        self.radius.selected = state;
+                        if self.radius.selected {
+                            pointer.set_pos(center);
+                            pointer.save_pos();
+                        }
+                    }
+                    HS::Highlight => {
+                        self.radius.highlighted = state;
+                        if self.radius.highlighted {
+                            pointer.set_pos(center);
+                        }
+                    }
+                }
             }
             _ => (),
         }
@@ -183,6 +209,15 @@ impl PrimitiveControls for PrimArc {
             false
         }
     }
+    fn get_all_controls_positions(&self, start: Vec2, end: Vec2) -> Vec<Vec2> {
+        vec![find_circle_center(
+            start,
+            end,
+            self.radius.value,
+            self.concavity,
+        )]
+    }
+
     // NOT USED, SEE shape_custom
     fn path_elements(&self, start: Vec2, end: Vec2) -> PrimitiveKindIter {
         let f = create_arc_from_radius_and_concavity(start, end, self.radius.value, self.concavity);

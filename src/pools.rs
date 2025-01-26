@@ -59,7 +59,7 @@ pub struct MoveBundle {
     pub magnet_pos: Vec2,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum HS {
     Highlight,
     Select,
@@ -123,6 +123,8 @@ pub struct Pools {
     pub helpers: HelpersPool,
 }
 impl Pools {
+    const _GRAB_DIST: f64 = 10.;
+
     pub fn new() -> Self {
         Self {
             shapes: ShapesPool::new(),
@@ -147,26 +149,37 @@ impl Pools {
         self.shapes.set_state(value, hs);
         self.helpers.set_state(value, hs);
     }
-    pub fn set_objects_states_in_order(&mut self, pointer: &mut Pointer, hors: HS) -> bool {
-        if self.shapes.set_modifiers_states_from_pos(pointer, hors) {
+    pub fn set_objects_states_in_order(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        hors: HS,
+    ) -> bool {
+        if self
+            .shapes
+            .set_modifiers_states_from_pos(pointer, keys_states, hors)
+        {
             // log!("S set_mod_hs_from_pos");
             self.shapes.set_state(false, hors);
             self.helpers.set_state(false, hors);
             self.helpers.set_modifiers_state(false, hors);
             return true;
         }
-        if self.helpers.set_states_from_pos(pointer, hors) {
+        if self.helpers.set_states_from_pos(pointer, keys_states, hors) {
             // log!("H set_hs_from_pos");
             self.shapes.set_state(false, hors);
             self.helpers.set_modifiers_state(false, hors);
             return true;
         }
-        if self.helpers.set_modifiers_states_from_pos(pointer, hors) {
+        if self
+            .helpers
+            .set_modifiers_states_from_pos(pointer, keys_states, hors)
+        {
             // log!("H set_mod_hs_from_pos");
             self.shapes.set_state(false, hors);
             return true;
         }
-        if self.shapes.set_states_from_pos(pointer, hors) {
+        if self.shapes.set_states_from_pos(pointer, keys_states, hors) {
             // log!("S set_hs_from_pos");
             return true;
         }
@@ -308,13 +321,23 @@ pub trait PoolsFunctions {
 
     fn save_vars(&mut self);
 
-    fn set_states_from_pos(&mut self, pointer: &mut Pointer, hors: HS) -> bool;
+    fn set_states_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        hors: HS,
+    ) -> bool;
     fn set_state(&mut self, value: bool, hors: HS);
     fn get_state(&self, hors: HS) -> Vec<Self::Id>;
     fn get_state_if_one(&self, hors: HS) -> Option<Self::Id>;
     fn get_state_and_vars(&self, hors: HS) -> Vec<(Self::Id, Self::ObjectKindvars)>;
     fn set_id_state(&mut self, id: Self::Id, value: bool, hors: HS);
-    fn set_modifiers_states_from_pos(&mut self, pointer: &mut Pointer, hors: HS) -> bool;
+    fn set_modifiers_states_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        hors: HS,
+    ) -> bool;
     fn set_modifiers_state(&mut self, value: bool, hors: HS);
     fn get_first_selected_modifier_vars(&self) -> Option<(Self::Id, Self::ObjectKindvars)>;
 

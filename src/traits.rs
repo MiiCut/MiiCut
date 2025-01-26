@@ -56,7 +56,12 @@ pub trait ObjectsFuncs: Debug + Clone {
 
     fn get_state(&self, get: GetEntityState) -> Option<Vec2>;
     fn set_state(&mut self, set: SetEntityState);
-    fn set_state_from_pos(&mut self, pointer: &mut Pointer, set: SetEntityStateFromPos);
+    fn set_state_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        set: SetEntityStateFromPos,
+    );
 
     fn toggle_prop(&mut self);
 
@@ -64,7 +69,6 @@ pub trait ObjectsFuncs: Debug + Clone {
     fn move_modifier(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool;
     fn get_position(&self) -> Vec2;
 
-    // fn get_paths(&self, das: &Size) -> Vec<BezPath>;
     fn get_paths_and_patterns(
         &self,
         das: &Size,
