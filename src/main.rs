@@ -33,10 +33,9 @@ use pools::PoolsFunctions;
 use pools::HS;
 use pools::{DrawObjects, Pools};
 use positions::*;
-use prefab::modifiers_path;
-use primitives::primitives::GetPrimitiveState;
+use prefab::*;
 use primitives::primitives::VertexProperty;
-use shapes::shapes::BSKind;
+use shapes::shapes::ShapeKind;
 use shapes::shapes::{BoolOps, ToogleBoolOpsShapesAction};
 use shapes::shapes_pool::BSid;
 use shapes::shapes_pool::{AddShapeAction, DeleteShapeAction, ShapesPool};
@@ -197,72 +196,57 @@ impl AppVars {
         }
     }
     fn toogle_primitive_prop(&mut self) {
-        use GetPrimitiveState::*;
         let o_shid = self
             .pools
             .shapes
             .get_first_selected_modifier_vars()
             .and_then(|(shid, _)| Some(shid));
         if let Some(shid) = o_shid {
-            let mut o_pos = None;
             self.pools
                 .shapes
                 .get_mut(shid)
                 .and_then(|shape| {
-                    if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
-                        Some(shape_custom)
+                    if let ShapeKind::KindPolygon(shape_polygon) = shape.get_kind_mut() {
+                        Some(shape_polygon)
                     } else {
                         None
                     }
                 })
-                .map(|shape_custom| {
-                    let prims = shape_custom.get_prims_mut();
-
-                    prims.iter_mut().for_each(|prim| {
-                        if prim.get_state(IsSelected).is_some() {
-                            o_pos = Some(prim.toogle());
-                        }
-                    });
-                    shape_custom.update_polygon();
+                .map(|shape_polygon| {
+                    shape_polygon.toggle_selected_prop();
+                    shape_polygon.update_polygon();
                 });
-            if let Some(_pos) = o_pos {
-                // avb.pointer.set_pos(pos);
-            };
             self.pools.recalc_full_segs();
         }
     }
-    fn change_shape_custom(&mut self, shid: BSid) {
+    fn change_polygon_vertex_or_edge(&mut self, shid: BSid) {
+        use GetEntityState::*;
+        use HS::*;
         let shift_pressed = self.keys_states.shift_pressed;
         if let Some(shape) = self.pools.shapes.get_mut(shid) {
-            if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
-                for primitive in shape_custom.get_prims_mut() {
-                    // A) Change first edge selected and return
-                    if primitive.get_state(GetPrimitiveState::IsSelected).is_some() {
-                        if shift_pressed {
-                            primitive.set_prim_kind_prev();
-                        } else {
-                            primitive.set_prim_kind_next();
-                        }
-                        break;
-                    }
-                    // B) Change first vertex selected and return
-                    if primitive
-                        .get_state(GetPrimitiveState::IsStartSelected)
+            if let ShapeKind::KindPolygon(shape_polygon) = shape.get_kind_mut() {
+                for idx in 0..shape_polygon.get_primitives_len() as i64 {
+                    // A) Change first edge selected and break if found
+                    if shape_polygon
+                        .primitive_get_state(idx, IsHS(Select))
                         .is_some()
                     {
-                        primitive.toogle_start_modifier();
-                        let start_modifier = primitive.get_start_modifier();
-                        log!("switched to {:?}", start_modifier);
                         if shift_pressed {
-                            // Change all primitives modifiers
-                            for prim in shape_custom.get_prims_mut() {
-                                prim.set_start_modifier(start_modifier);
-                            }
+                            shape_polygon.primitive_selected_prev_curve();
+                            break;
+                        } else {
+                            shape_polygon.primitive_selected_next_curve();
+                            break;
                         }
+                    }
+                    // B) Change first vertex selected and break if found
+                    let s = shape_polygon.get_primitive_start_mut(idx);
+                    if s.get_pos().is_hs(HS::Select) {
+                        s.toogle_modifier();
                         break;
                     }
                 }
-                shape_custom.update_polygon();
+                shape_polygon.update_polygon();
                 self.pools.shapes.recalc_full_segs();
             }
         }
@@ -703,15 +687,16 @@ fn convert_svg_to_shapes(_av: RefAV, svg_data: String) {
 
 #[allow(unused_variables)]
 fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
+    use GetEntityState::*;
     use MouseState::*;
+    use SetEntityState::*;
+    use HS::*;
     let icon_selected = avb.icon_selected.clone();
     let keys_states = avb.keys_states;
 
     let mut pointer = avb.pointer;
     pointer.set_draw_scale(avb.canvases.get_drawing_scale());
 
-    use GetEntityState::*;
-    use SetEntityState::*;
     match icon_selected {
         Icons::Arrow => match avb.mouse.get_mouse_state() {
             LeftDown(mouse_pos_down) => {
@@ -794,42 +779,30 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     avb.pools.magnet_to_helpers(&mut pointer, keys_states);
 
                     if let Some(mut shape) = avb.on_creation.get_shape_into() {
-                        // When a custom shape is created, we always continue, we stop (and
-                        // close the shape) only when the user clicks on the right button
-                        match shape.get_kind_mut() {
-                            BSKind::Custom(shape_custom)
-                                if matches!(
-                                    shape_custom.get_primitivess_start_property(),
-                                    VertexProperty::Nope
-                                ) =>
-                            {
-                                // Both conditions succeeded
-                                shape_custom.add_point(&mut pointer);
-                                avb.on_creation.set_shape(shape);
-                            }
-                            _ => {
-                                // A. We were drawing a new shape
-                                if shape.get_kind().good_size() {
-                                    if let BSKind::Custom(shape_custom) = shape.get_kind_mut() {
-                                        if let VertexProperty::RectangleLike =
-                                            shape_custom.get_primitivess_start_property()
-                                        {
-                                            shape_custom.end_creation();
-                                        }
+                        // A. We are/were drawing a new shape
+                        if shape.get_kind().good_size() {
+                            if let ShapeKind::KindPolygon(shape_polygon) = shape.get_kind_mut() {
+                                match shape_polygon.get_vertices_property() {
+                                    VertexProperty::Nope => {
+                                        shape_polygon.add_vertex(pointer.pos());
+                                        avb.on_creation.set_shape(shape);
                                     }
-                                    // Deselect all
-                                    shape.get_kind_mut().set_state(SetSelect(false));
-                                    shape.get_kind_mut().set_state(SelectAllModifiers(false));
+                                    VertexProperty::RectangleLike => {
+                                        shape_polygon.finish_draw();
+                                        // Deselect all
+                                        shape_polygon.set_state(SetHS(Select, false));
+                                        shape_polygon.set_state(SetAllControlsHS(Select, false));
 
-                                    avb.pools.add_shape(shape.clone());
+                                        avb.pools.add_shape(shape.clone());
 
-                                    // Push the AddShapeAction to the undo/redo system
-                                    avb.undo_redo.push(Box::new(AddShapeAction {
-                                        shape: shape.clone(),
-                                    }));
+                                        // Push the AddShapeAction to the undo/redo system
+                                        avb.undo_redo.push(Box::new(AddShapeAction {
+                                            shape: shape.clone(),
+                                        }));
 
-                                    avb.on_creation = DrawObjects::Nope;
-                                    avb.pools.recalc_full_segs();
+                                        avb.on_creation = DrawObjects::Nope;
+                                        avb.pools.recalc_full_segs();
+                                    }
                                 }
                             }
                         }
@@ -853,7 +826,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     if let Some(shape) = avb.on_creation.get_shape_mut() {
                         _ = shape
                             .get_kind_mut()
-                            .move_modifier(&mut pointer, keys_states);
+                            .move_controls(&mut pointer, keys_states);
                     }
                 }
 
@@ -863,17 +836,19 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
 
                     if let Some(mut shape) = avb.on_creation.get_shape_into() {
                         match shape.get_kind_mut() {
-                            BSKind::Custom(shape_custom)
+                            ShapeKind::KindPolygon(shape_custom)
                                 if matches!(
-                                    shape_custom.get_primitivess_start_property(),
+                                    shape_custom.get_vertices_property(),
                                     VertexProperty::Nope
                                 ) =>
                             {
                                 // Go out of creation mode
-                                if shape_custom.end_creation() {
+                                if shape_custom.finish_draw() {
                                     // Deselect all
-                                    shape.get_kind_mut().set_state(SetSelect(false));
-                                    shape.get_kind_mut().set_state(SelectAllModifiers(false));
+                                    shape.get_kind_mut().set_state(SetHS(Select, false));
+                                    shape
+                                        .get_kind_mut()
+                                        .set_state(SetAllControlsHS(Select, false));
                                     avb.pools.add_shape(shape.clone());
 
                                     // Push the AddShapeAction to the undo/redo system
@@ -909,8 +884,10 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                         log!("Helper too small");
                     } else {
                         // A. We were drawing a new helper, finish all
-                        helper.get_kind_mut().set_state(SetSelect(false));
-                        helper.get_kind_mut().set_state(SelectAllModifiers(false));
+                        helper.get_kind_mut().set_state(SetHS(Select, false));
+                        helper
+                            .get_kind_mut()
+                            .set_state(SetAllControlsHS(Select, false));
 
                         avb.pools.add_helper(helper.clone());
                         // Push the AddHelperAction to the undo/redo system
@@ -948,10 +925,14 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 avb.pools.magnet_to_helpers(&mut pointer, keys_states);
 
                 if let Some(helper) = avb.on_creation.get_helper_mut() {
-                    if helper.get_kind().get_state(IsAnyModifierSelected).is_some() {
+                    if helper
+                        .get_kind()
+                        .get_state(IsAnyControlHS(Select))
+                        .is_some()
+                    {
                         _ = helper
                             .get_kind_mut()
-                            .move_modifier(&mut pointer, keys_states);
+                            .move_controls(&mut pointer, keys_states);
                     }
                 }
             }
@@ -1268,7 +1249,7 @@ fn on_window_keydown(av: RefAV, event: Event) {
                 // Change ShapeCustom: A) edge (line, arc,...) or B) vertex (none, fillet, chamfer)
                 Tab => {
                     if let Some(shid_custom) = avb.pools.shapes.get_shape_custom_on_select() {
-                        avb.change_shape_custom(shid_custom);
+                        avb.change_polygon_vertex_or_edge(shid_custom);
                     }
                 }
                 // Toggle primitive property (concavity for arc)
@@ -1421,11 +1402,15 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
 
     // SHAPES: Draw dimensions
     use GetEntityState::*;
+    use HS::*;
     for shape in avb.pools.shapes.values() {
-        if shape.get_kind().get_state(IsSelected).is_some()
-            || shape.get_kind().get_state(IsHighligh).is_some()
-            || shape.get_kind().get_state(IsAnyModifierSelected).is_some()
-            || shape.get_kind().get_state(IsAnyModifierHighligh).is_some()
+        if shape.get_kind().get_state(IsHS(Select)).is_some()
+            || shape.get_kind().get_state(IsHS(Highlight)).is_some()
+            || shape.get_kind().get_state(IsAnyControlHS(Select)).is_some()
+            || shape
+                .get_kind()
+                .get_state(IsAnyControlHS(Highlight))
+                .is_some()
         {
             for (path, pattern, text) in shape
                 .get_kind()
@@ -1457,10 +1442,16 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
 
     // HELPERS: Draw dimensions
     for helper in avb.pools.helpers.values() {
-        if helper.get_kind().get_state(IsSelected).is_some()
-            || helper.get_kind().get_state(IsHighligh).is_some()
-            || helper.get_kind().get_state(IsAnyModifierSelected).is_some()
-            || helper.get_kind().get_state(IsAnyModifierHighligh).is_some()
+        if helper.get_kind().get_state(IsHS(Select)).is_some()
+            || helper.get_kind().get_state(IsHS(Highlight)).is_some()
+            || helper
+                .get_kind()
+                .get_state(IsAnyControlHS(Select))
+                .is_some()
+            || helper
+                .get_kind()
+                .get_state(IsAnyControlHS(Highlight))
+                .is_some()
         {
             for (path, pattern, text) in helper
                 .get_kind()

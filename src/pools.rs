@@ -4,7 +4,7 @@ use crate::{
         helpers_pool::{AddHelperAction, HelpersPool},
     },
     shapes::{
-        shapes::{BasicShape, MoveShapesAction},
+        shapes::{MiiShape, MoveShapesAction},
         shapes_pool::{AddShapeAction, ShapesPool},
     },
     traits::*,
@@ -67,25 +67,25 @@ pub enum HS {
 
 #[derive(Clone, Debug)]
 pub enum DrawObjects {
-    Shape(BasicShape),
+    Shape(MiiShape),
     Helper(Helper),
     Nope,
 }
 #[allow(dead_code)]
 impl DrawObjects {
-    pub fn get_shape_into(&self) -> Option<BasicShape> {
+    pub fn get_shape_into(&self) -> Option<MiiShape> {
         match self {
             DrawObjects::Shape(s) => Some(s.clone()),
             _ => None,
         }
     }
-    pub fn get_shape(&self) -> Option<&BasicShape> {
+    pub fn get_shape(&self) -> Option<&MiiShape> {
         match self {
             DrawObjects::Shape(s) => Some(s),
             _ => None,
         }
     }
-    pub fn get_shape_mut(&mut self) -> Option<&mut BasicShape> {
+    pub fn get_shape_mut(&mut self) -> Option<&mut MiiShape> {
         match self {
             DrawObjects::Shape(s) => Some(s),
             _ => None,
@@ -109,7 +109,7 @@ impl DrawObjects {
             _ => None,
         }
     }
-    pub fn set_shape(&mut self, shape: BasicShape) {
+    pub fn set_shape(&mut self, shape: MiiShape) {
         *self = DrawObjects::Shape(shape);
     }
     pub fn set_helper(&mut self, helper: Helper) {
@@ -131,7 +131,7 @@ impl Pools {
             helpers: HelpersPool::new(),
         }
     }
-    pub fn add_shape(&mut self, shape: BasicShape) {
+    pub fn add_shape(&mut self, shape: MiiShape) {
         self.shapes.add(shape);
     }
     pub fn add_helper(&mut self, helper: Helper) {
@@ -293,7 +293,7 @@ impl Pools {
     pub fn create_magnet_points(&mut self) {
         self.helpers.create_helpers_magnet_points();
     }
-    pub fn delete_shapes_selection(&mut self) -> Option<Vec<BasicShape>> {
+    pub fn delete_shapes_selection(&mut self) -> Option<Vec<MiiShape>> {
         self.shapes.delete_selection()
     }
     pub fn delete_helpers_selection(&mut self) -> Option<Vec<Helper>> {

@@ -2,12 +2,12 @@ use kurbo::Vec2;
 
 use crate::helpers::helpers::Helper;
 use crate::pools::{Pools, PoolsFunctions};
-use crate::shapes::shapes::BasicShape;
+use crate::shapes::shapes::MiiShape;
 use crate::{traits::*, KeysStates, Pointer};
 
 #[derive(Clone, Debug)]
 pub enum ClipboardItem {
-    Shapes((Vec<BasicShape>, Vec2)),
+    Shapes((Vec<MiiShape>, Vec2)),
     Helpers((Vec<Helper>, Vec2)),
 }
 
@@ -24,7 +24,7 @@ impl Clipboard {
         }
     }
 
-    pub fn copy_shapes(&mut self, shapes: Vec<BasicShape>, pointer_pos: Vec2) {
+    pub fn copy_shapes(&mut self, shapes: Vec<MiiShape>, pointer_pos: Vec2) {
         self.item_copy = Some(ClipboardItem::Shapes((shapes, pointer_pos)));
         self.item_paste = None;
     }

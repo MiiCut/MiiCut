@@ -4,7 +4,7 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
-use super::shapes::{BSKind, BSKindvars};
+
 use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
@@ -18,6 +18,8 @@ use crate::{
 use geo::{LineString, Polygon};
 use kurbo::{BezPath, Circle, CirclePathIter, Point, Rect, Shape, Size, Vec2};
 use std::fmt::Display;
+
+use super::shapes::ShapeKind;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeDisc {
@@ -33,12 +35,13 @@ pub struct ShapeDisc {
 impl ShapeDisc {
     const MIN_RADIUS: f64 = 2.;
 
-    pub fn new(center: Vec2, pos2: Vec2) -> BSKind {
+    pub fn new(center: Vec2, pos2: Vec2) -> ShapeKind {
+        use HS::*;
         let center = Position::new(center, false);
         let mut radius = Value::new((pos2 - center.pos).hypot());
-        radius.selected = true;
+        radius.set_hs(Select, true);
 
-        BSKind::Disc(ShapeDisc {
+        ShapeKind::KindDisc(ShapeDisc {
             center,
             radius,
             highlighted: false,
@@ -61,63 +64,29 @@ impl ShapeDisc {
         let radius = self.radius.value;
         Circle::new(center.to_point(), radius)
     }
-    // fn get_radius_modifier(&self) -> Vec2 {
-    //     let center = self.center.pos;
-    //     let radius = self.radius.value;
-    //     center + Vec2::new(radius, 0.)
-    // }
 
-    fn highlight_all_modifiers(&mut self, value: bool) {
-        self.radius.highlighted = value;
-    }
-    fn select_all_modifiers(&mut self, value: bool) {
-        self.radius.selected = value;
-    }
+    fn hs_controls_from_pos(&mut self, pointer: &mut Pointer, _keys_states: KeysStates, hs: HS) {
+        use HS::*;
+        // center
+        self.center.set_hs_from_pos(hs, pointer);
 
-    fn hs_modifiers_from_pos(&mut self, pointer: &mut Pointer, _keys_states: KeysStates, hs: HS) {
-        let state_center = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+        // circonference
+        let within_grab_radius = |pos: Vec2, center: Vec2, radius: f64| -> bool {
+            ((pos - center).hypot() - radius).abs() < Self::GRAB_RADIUS
+        };
+        self.radius.set_hs(
+            hs,
+            within_grab_radius(pointer.pos(), self.center.pos, self.radius.value),
+        );
 
-        match hs {
-            HS::Select => {
-                if state_center {
-                    pointer.save_pos();
-                }
-                self.center.selected = state_center;
-            }
-            HS::Highlight => {
-                self.center.highlighted = state_center;
-            }
-        }
-        if state_center {
-            pointer.set_pos(self.center.pos);
-            match hs {
-                HS::Select => {
-                    self.radius.selected = false;
-                }
-                HS::Highlight => {
-                    self.radius.highlighted = false;
-                }
-            }
-            return;
-        }
-
-        let state_radius = ((pointer.pos() - self.center.pos).hypot() - self.radius.value).abs()
-            < Self::GRAB_RADIUS;
-        if state_radius {
+        // Pointer update
+        if self.radius.is_hs(hs) {
             pointer.set_pos(
                 self.center.pos + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
             );
         }
-        match hs {
-            HS::Select => {
-                if state_radius {
-                    pointer.save_pos();
-                }
-                self.radius.selected = state_radius;
-            }
-            HS::Highlight => {
-                self.radius.highlighted = state_radius;
-            }
+        if self.radius.is_hs(Select) {
+            pointer.save_pos();
         }
     }
 }
@@ -160,73 +129,60 @@ impl Shape for ShapeDisc {
 impl ObjectsFuncs for ShapeDisc {
     const TOLERANCE: f64 = 0.01;
     const GRAB_RADIUS: f64 = 5.;
-    type Kindvars = BSKindvars;
+    type Kindvars = ShapeKind;
 
     fn save_vars(&mut self) {
         self.center.saved_pos = self.center.pos;
         self.radius.saved_val = self.radius.value;
     }
-    fn restore_saved(&mut self) {
+    fn restore_vars(&mut self) {
         self.center.pos = self.center.saved_pos;
         self.radius.value = self.radius.saved_val;
         self.update_polygon();
     }
-    fn get_vars(&self) -> BSKindvars {
-        BSKindvars::Disc(self.center, self.radius)
+    fn get_vars(&self) -> ShapeKind {
+        ShapeKind::KindDisc(ShapeDisc {
+            center: self.center.clone(),
+            radius: self.radius.clone(),
+            highlighted: false,
+            selected: false,
+            segs: BezPath::new(),
+            polygon: Polygon::new(LineString::new(vec![]), vec![]),
+        })
     }
-    fn set_vars(&mut self, vars: &BSKindvars) {
-        if let BSKindvars::Disc(center, radius) = vars {
-            self.center = center.clone();
-            self.radius = radius.clone();
+    fn set_vars(&mut self, vars: &ShapeKind) {
+        if let ShapeKind::KindDisc(shape_disc) = vars {
+            self.center = shape_disc.center;
+            self.radius = shape_disc.radius;
         }
         self.update_polygon();
     }
     fn good_size(&self) -> bool {
         self.radius.value >= ShapeDisc::MIN_RADIUS
     }
-
+    fn finish_draw(&mut self) -> bool {
+        self.radius.value >= ShapeDisc::MIN_RADIUS
+    }
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use GetEntityState::*;
+        use HS::*;
         match get {
-            IsSelected => {
-                if self.selected {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
-            IsHighligh => {
-                if self.highlighted {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
-            IsAnyModifierSelected => {
-                let select = self.radius.selected;
-                if select {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
-            IsAnyModifierHighligh => {
-                let highlight = self.radius.highlighted;
-                if highlight {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
+            IsHS(Select) => self.selected.then(|| self.get_position()),
+            IsHS(Highlight) => self.highlighted.then(|| self.get_position()),
+            IsAnyControlHS(Select) => self.radius.is_hs(Select).then(|| self.get_position()),
+            IsAnyControlHS(Highlight) => self.radius.is_hs(Highlight).then(|| self.get_position()),
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
         use SetEntityState::*;
+        use HS::*;
         match set {
-            SetSelect(value) => self.selected = value,
-            SetHighli(value) => self.highlighted = value,
-            SelectAllModifiers(value) => self.select_all_modifiers(value),
-            HighliAllModifiers(value) => self.highlight_all_modifiers(value),
+            SetHS(Select, value) => self.selected = value,
+            SetHS(Highlight, value) => self.highlighted = value,
+            SetAllControlsHS(hs, value) => {
+                self.center.set_hs(hs, value);
+                self.radius.set_hs(hs, value);
+            }
         }
     }
     fn set_state_from_pos(
@@ -237,36 +193,31 @@ impl ObjectsFuncs for ShapeDisc {
     ) {
         use SetEntityStateFromPos::*;
         match set {
-            SelectFromPos => {
-                self.selected = self.contains(pointer.pos().to_point());
-                if self.selected {
-                    pointer.set_pos(self.center.pos);
-                    pointer.save_pos();
+            SetHSFromPos(hs) => match hs {
+                HS::Select => {
+                    self.selected = self.contains(pointer.pos().to_point());
+                    if self.selected {
+                        pointer.set_pos(self.center.pos);
+                        pointer.save_pos();
+                    }
                 }
-            }
-            HighliFromPos => {
-                self.highlighted = self.contains(pointer.pos().to_point());
-            }
-            SelectModifierFromPos => {
-                self.hs_modifiers_from_pos(pointer, keys_states, HS::Select);
-            }
-            HighliModifierFromPos => {
-                self.hs_modifiers_from_pos(pointer, keys_states, HS::Highlight);
-            }
+                HS::Highlight => {
+                    self.highlighted = self.contains(pointer.pos().to_point());
+                }
+            },
+            SetControlHSFromPos(hs) => self.hs_controls_from_pos(pointer, keys_states, hs),
         }
     }
-
-    fn toggle_prop(&mut self) {
+    fn toggle_selected_prop(&mut self) {
         ()
     }
-
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         let dpos = pointer.dpos();
         self.center.pos = self.center.saved_pos + dpos;
         self.update_polygon();
         true
     }
-    fn move_modifier(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
+    fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
         let radius = if pointer.is_magnetized() {
             (pointer.pos() - self.center.pos).hypot()
         } else {
@@ -310,14 +261,15 @@ impl ObjectsFuncs for ShapeDisc {
         res
     }
     fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
+        use HS::*;
         let pattern = if self.selected {
             Pattern::BasicSelected
         } else if self.highlighted {
             Pattern::BasicHighlighted
         } else {
-            if self.radius.selected {
+            if self.radius.is_hs(Select) {
                 Pattern::BasicLightSelected
-            } else if self.radius.highlighted {
+            } else if self.radius.is_hs(Highlight) {
                 Pattern::BasicLightHighlighted
             } else {
                 Pattern::BasicNormal

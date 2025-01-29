@@ -4,7 +4,7 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
-use super::shapes::{BSKind, BSKindvars};
+use super::shapes::ShapeKind;
 use crate::{
     canvas::{CanvasText, Pattern},
     math::*,
@@ -13,7 +13,7 @@ use crate::{
     prefab::*,
     primitives::primitives::{
         GetPrimitiveState, Primitive, PrimitiveControls, PrimitiveCurve, SetPrimitiveState,
-        SetPrimitiveStateFromPos, Vertex, VertexChange, VertexModifier, VertexProperty,
+        SetPrimitiveStateFromPos, VertexModifier, VertexProperty,
     },
     traits::*,
     KeysStates, Pointer,
@@ -38,9 +38,9 @@ pub struct ShapeCustom {
 impl ShapeCustom {
     pub const MIN_RECT_SIZE: f64 = 10.;
 
-    pub fn new(prims_property: VertexProperty, pos1: Vec2, pos2: Vec2) -> BSKind {
+    pub fn new(prims_property: VertexProperty, pos1: Vec2, pos2: Vec2) -> ShapeKind {
         match prims_property {
-            VertexProperty::Nope => BSKind::Custom(ShapeCustom {
+            VertexProperty::Nope => ShapeKind::KindPolygon(ShapeCustom {
                 prims: vec![Primitive::new_old(
                     PrimitiveCurve::CurveLine,
                     VertexProperty::Nope,
@@ -81,7 +81,7 @@ impl ShapeCustom {
                     pos1,
                 );
 
-                BSKind::Custom(ShapeCustom {
+                ShapeKind::KindPolygon(ShapeCustom {
                     prims: vec![p1, p2, p3, p4],
                     current_creation_pos: Some(Position::new(Vec2::new(pos1.x, pos2.y), true)),
                     primitivess_start_property: VertexProperty::RectangleLike,
@@ -570,24 +570,24 @@ impl Shape for ShapeCustom {
 impl ObjectsFuncs for ShapeCustom {
     const TOLERANCE: f64 = 0.01;
     const GRAB_RADIUS: f64 = 5.;
-    type Kindvars = BSKindvars;
+    type Kindvars = MiiShapeVars;
 
     fn save_vars(&mut self) {
         self.prims.iter_mut().for_each(|prim| prim.save_vars());
     }
-    fn restore_saved(&mut self) {
+    fn restore_vars(&mut self) {
         self.prims.iter_mut().for_each(|prim| prim.restore_saved());
         self.update_polygon();
     }
-    fn get_vars(&self) -> BSKindvars {
+    fn get_vars(&self) -> MiiShapeVars {
         let mut vars = vec![];
         self.prims.iter().for_each(|prim| {
             vars.push(prim.get_vars());
         });
-        BSKindvars::Custom(vars)
+        MiiShapeVars::MiiPolygon(vars)
     }
-    fn set_vars(&mut self, vars: &BSKindvars) {
-        if let BSKindvars::Custom(prim_vars) = vars {
+    fn set_vars(&mut self, vars: &MiiShapeVars) {
+        if let MiiShapeVars::MiiPolygon(prim_vars) = vars {
             for (prim, prim_vars) in self.prims.iter_mut().zip(prim_vars.iter()) {
                 prim.set_vars(prim_vars);
             }
@@ -637,7 +637,7 @@ impl ObjectsFuncs for ShapeCustom {
                     None
                 }
             }
-            IsAnyModifierSelected => {
+            IsAnyControlSelected => {
                 if self
                     .prims
                     .iter()
@@ -663,7 +663,7 @@ impl ObjectsFuncs for ShapeCustom {
                     }
                 }
             }
-            IsAnyModifierHighligh => {
+            IsAnyControlHighligh => {
                 if self
                     .prims
                     .iter()
@@ -695,10 +695,8 @@ impl ObjectsFuncs for ShapeCustom {
         match set {
             SetEntityState::SetHighli(value) => self.highlighted = value,
             SetEntityState::SetSelect(value) => self.selected = value,
-            SetEntityState::SelectAllModifiers(value) => self.hs_all_modifiers(value, HS::Select),
-            SetEntityState::HighliAllModifiers(value) => {
-                self.hs_all_modifiers(value, HS::Highlight)
-            }
+            SetEntityState::SelectAllControls(value) => self.hs_all_modifiers(value, HS::Select),
+            SetEntityState::HighliAllControls(value) => self.hs_all_modifiers(value, HS::Highlight),
         }
     }
     fn set_state_from_pos(
@@ -714,10 +712,10 @@ impl ObjectsFuncs for ShapeCustom {
             SetEntityStateFromPos::SelectFromPos => {
                 self.selected = self.contains(pointer.pos().to_point())
             }
-            SetEntityStateFromPos::SelectModifierFromPos => {
+            SetEntityStateFromPos::SelectControlFromPos => {
                 self.hs_modifier_from_pos(pointer, keys_states, HS::Select);
             }
-            SetEntityStateFromPos::HighliModifierFromPos => {
+            SetEntityStateFromPos::HighliControlFromPos => {
                 self.hs_modifier_from_pos(pointer, keys_states, HS::Highlight);
             }
         }

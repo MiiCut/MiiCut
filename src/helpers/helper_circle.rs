@@ -6,6 +6,7 @@ use crate::dimensions::DimKind;
 use crate::dimensions::Dimension;
 use crate::math::*;
 use crate::pools::HS;
+use crate::positions::Status;
 use crate::prefab::*;
 use crate::GetEntityState;
 use crate::KeysStates;
@@ -29,8 +30,7 @@ pub struct HelperCircle {
     center: Position,
     radius: Value,
 
-    highlighted: bool,
-    selected: bool,
+    state: Status,
 }
 impl HelperCircle {
     const MIN_RADIUS: f64 = 10.;
@@ -38,53 +38,45 @@ impl HelperCircle {
     pub fn new(center: Vec2, _pos2: Vec2) -> HelperKind {
         let center = Position::new(center, true);
         let mut radius = Value::new(0.);
-        radius.selected = true;
+        radius.set_hs(HS::Select, true);
 
         HelperKind::Circle(HelperCircle {
             center,
             radius,
-            highlighted: false,
-            selected: false,
+            state: Status::default(),
         })
     }
     pub fn get_radius(&self) -> f64 {
         self.radius.value
     }
-    pub fn magnet_to(&self, pos: Vec2) -> Option<Vec2> {
-        if self.selected {
-            return None;
-        }
-        if (pos - self.center.pos).hypot() < Self::GRAB_RADIUS {
-            Some(self.center.pos)
-        } else {
-            None
-        }
-    }
+
     fn get_circle(&self) -> Circle {
         let center = self.center.pos;
         let radius = self.radius.value;
         Circle::new(center.to_point(), radius)
     }
 
-    fn highlight_all_modifiers(&mut self, value: bool) {
-        self.radius.highlighted = value;
-    }
-    fn select_all_modifiers(&mut self, value: bool) {
-        self.radius.selected = value;
-    }
+    fn hs_controls_from_pos(&mut self, pointer: &mut Pointer, _keys_states: KeysStates, hs: HS) {
+        // center
+        self.center.set_hs_from_pos(hs, pointer);
 
-    fn hs_modifiers_from_pos(&mut self, pos: Vec2, hs: HS) {
+        // circonference
         let within_grab_radius = |pos: Vec2, center: Vec2, radius: f64| -> bool {
             ((pos - center).hypot() - radius).abs() < Self::GRAB_RADIUS
         };
-        match hs {
-            HS::Select => {
-                self.radius.selected = within_grab_radius(pos, self.center.pos, self.radius.value);
-            }
-            HS::Highlight => {
-                self.radius.highlighted =
-                    within_grab_radius(pos, self.center.pos, self.radius.value);
-            }
+        self.radius.set_hs(
+            hs,
+            within_grab_radius(pointer.pos(), self.center.pos, self.radius.value),
+        );
+
+        // Pointer update
+        if self.radius.is_hs(hs) {
+            pointer.set_pos(
+                self.center.pos + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
+            );
+        }
+        if self.radius.is_hs(HS::Select) {
+            pointer.save_pos();
         }
     }
 }
@@ -103,7 +95,7 @@ impl ObjectsFuncs for HelperCircle {
         self.center.saved_pos = self.center.pos;
         self.radius.saved_val = self.radius.value;
     }
-    fn restore_saved(&mut self) {
+    fn restore_vars(&mut self) {
         self.center.pos = self.center.saved_pos;
         self.radius.value = self.radius.saved_val;
     }
@@ -119,49 +111,20 @@ impl ObjectsFuncs for HelperCircle {
     fn good_size(&self) -> bool {
         self.radius.value >= Self::MIN_RADIUS
     }
-
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use GetEntityState::*;
         match get {
-            IsSelected => {
-                if self.selected {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
-            IsHighligh => {
-                if self.highlighted {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
-            IsAnyModifierSelected => {
-                let select = self.radius.selected;
-                if select {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
-            IsAnyModifierHighligh => {
-                let highlight = self.radius.highlighted;
-                if highlight {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
+            IsHS(hs) | IsAnyControlHS(hs) => self.state.is_hs(hs).then(|| self.get_position()),
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
         use SetEntityState::*;
         match set {
-            SetSelect(value) => self.selected = value,
-            SetHighli(value) => self.highlighted = value,
-            SelectAllModifiers(value) => self.select_all_modifiers(value),
-            HighliAllModifiers(value) => self.highlight_all_modifiers(value),
+            SetHS(hs, value) => self.state.set_hs(hs, value),
+            SetAllControlsHS(hs, value) => {
+                self.center.set_hs(hs, value);
+                self.radius.set_hs(hs, value);
+            }
         }
     }
     fn set_state_from_pos(
@@ -171,19 +134,21 @@ impl ObjectsFuncs for HelperCircle {
         set: SetEntityStateFromPos,
     ) {
         use SetEntityStateFromPos::*;
+        // A closure to check if pointer is within the grab radius
+        let within_grab_radius =
+            |pointer: &Pointer, center: Vec2| (pointer.pos() - center).hypot() < Self::GRAB_RADIUS;
+
         match set {
-            SelectFromPos => {
-                self.selected = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS
+            SetHSFromPos(hs) => self
+                .state
+                .set_hs(hs, within_grab_radius(pointer, self.center.pos)),
+            SetControlHSFromPos(hs) => {
+                self.center.set_hs_from_pos(hs, pointer);
             }
-            HighliFromPos => {
-                self.highlighted = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS
-            }
-            SelectModifierFromPos => self.hs_modifiers_from_pos(pointer.pos(), HS::Select),
-            HighliModifierFromPos => self.hs_modifiers_from_pos(pointer.pos(), HS::Highlight),
         }
     }
 
-    fn toggle_prop(&mut self) {
+    fn toggle_selected_prop(&mut self) {
         ()
     }
 
@@ -194,7 +159,7 @@ impl ObjectsFuncs for HelperCircle {
         );
         true
     }
-    fn move_modifier(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
+    fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
         let radius = snap_val(
             (pointer.pos() - self.center.pos).hypot(),
             pointer.get_snap().val(),
@@ -213,7 +178,8 @@ impl ObjectsFuncs for HelperCircle {
         _: &Size,
         _: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern)> {
-        let pattern_circle = match (self.radius.selected, self.radius.highlighted) {
+        use HS::*;
+        let pattern_circle = match (self.radius.is_hs(Select), self.radius.is_hs(Highlight)) {
             (false, false) => Pattern::HelperNormalCircle,
             (false, true) => Pattern::HelperHighlightedCircle,
             (true, false) => Pattern::HelperSelectedCircle,
@@ -236,7 +202,8 @@ impl ObjectsFuncs for HelperCircle {
     }
 
     fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
-        let pattern_center = match (self.selected, self.highlighted) {
+        use HS::*;
+        let pattern_center = match (self.state.is_hs(Select), self.state.is_hs(Highlight)) {
             (false, false) => Pattern::HelperNormal,
             (false, true) => Pattern::HelperHighlighted,
             (true, false) => Pattern::HelperSelected,

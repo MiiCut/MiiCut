@@ -1,14 +1,12 @@
-use super::primitives::{
-    GetPrimitiveState, PrimitiveControls, PrimitiveKindIter, SetPrimitiveState,
-    SetPrimitiveStateFromPos,
-};
+use super::primitives::{PrimitiveControls, PrimitiveKindIter};
 use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
     pools::HS,
     prefab::*,
-    KeysStates, Pointer, Position, Value,
+    GetEntityState, KeysStates, Pointer, Position, SetEntityState, SetEntityStateFromPos, Status,
+    Value,
 };
 use kurbo::{BezPath, Shape, Size, Vec2};
 
@@ -19,8 +17,7 @@ pub struct PrimArc {
     radius: Value,
     concavity: bool,
     concavity_saved: bool,
-    highlighted: bool,
-    selected: bool,
+    state: Status,
 }
 impl PrimArc {
     const MIN_RADIUS: f64 = 10.;
@@ -30,11 +27,9 @@ impl PrimArc {
             radius: Value::new(Self::MIN_RADIUS),
             concavity: false,
             concavity_saved: false,
-            highlighted: false,
-            selected: false,
+            state: Status::default(),
         }
     }
-
     pub fn get_radius(&self) -> f64 {
         self.radius.value
     }
@@ -57,7 +52,7 @@ impl PrimitiveControls for PrimArc {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 5.;
 
-    fn toggle(&mut self) {
+    fn toggle_prop(&mut self) {
         log!("toggle");
         self.concavity = !self.concavity;
     }
@@ -79,41 +74,22 @@ impl PrimitiveControls for PrimArc {
 
         find_circle_center(start.pos, end.pos, self.radius.value, self.concavity)
     }
-    fn is_selected(&self) -> bool {
-        self.selected
-    }
-    fn is_highlighted(&self) -> bool {
-        self.highlighted
-    }
-    fn get_state(&self, start: Vec2, end: Vec2, state: GetPrimitiveState) -> Option<Vec2> {
-        use GetPrimitiveState::*;
+
+    fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2> {
+        use GetEntityState::*;
         match state {
-            IsSelected => self.selected.then(|| (start + end) / 2.),
-            IsHighligh => self.highlighted.then(|| (start + end) / 2.),
-            IsOtherModifiersSelected => self
+            IsHS(hs) => self.state.is_hs(hs).then(|| (start + end) / 2.),
+            IsAnyControlHS(hs) => self
                 .radius
-                .selected
+                .is_hs(hs)
                 .then(|| find_circle_center(start, end, self.radius.value, self.concavity)),
-            IsOtherModifiersHighligh => self
-                .radius
-                .highlighted
-                .then(|| find_circle_center(start, end, self.radius.value, self.concavity)),
-            _ => None,
         }
     }
-    fn set_state(&mut self, _start: Vec2, _end: Vec2, state: SetPrimitiveState) {
-        use SetPrimitiveState::*;
+    fn set_state(&mut self, _start: Vec2, _end: Vec2, state: SetEntityState) {
+        use SetEntityState::*;
         match state {
-            SetHS(hs, value) => match hs {
-                HS::Select => self.selected = value,
-                HS::Highlight => self.highlighted = value,
-            },
-
-            SetAllOtherModifiersHS(hs, value) => match hs {
-                HS::Select => self.radius.selected = value,
-                HS::Highlight => self.radius.highlighted = value,
-            },
-            _ => (),
+            SetHS(hs, value) => self.state.set_hs(hs, value),
+            SetAllControlsHS(hs, value) => self.radius.set_hs(hs, value),
         }
     }
     fn set_state_from_pos(
@@ -121,9 +97,10 @@ impl PrimitiveControls for PrimArc {
         start: Vec2,
         end: Vec2,
         pointer: &mut Pointer,
-        state: SetPrimitiveStateFromPos,
+        state: SetEntityStateFromPos,
     ) {
-        use SetPrimitiveStateFromPos::*;
+        use SetEntityStateFromPos::*;
+        use HS::*;
         let res_state = || -> bool {
             is_point_near_arc(
                 &create_arc_from_radius_and_concavity(
@@ -137,30 +114,18 @@ impl PrimitiveControls for PrimArc {
             )
         };
         match state {
-            SetHSFromPos(hs) => match hs {
-                HS::Select => self.selected = res_state(),
-                HS::Highlight => self.highlighted = res_state(),
-            },
-            SetOthersModifiersHSFromPos(hs) => {
+            SetHSFromPos(hs) => self.state.set_hs(hs, res_state()),
+            SetControlHSFromPos(hs) => {
                 let center = find_circle_center(start, end, self.radius.value, self.concavity);
                 let state = (pointer.pos() - center).hypot() < Self::GRAB;
-                match hs {
-                    HS::Select => {
-                        self.radius.selected = state;
-                        if self.radius.selected {
-                            pointer.set_pos(center);
-                            pointer.save_pos();
-                        }
-                    }
-                    HS::Highlight => {
-                        self.radius.highlighted = state;
-                        if self.radius.highlighted {
-                            pointer.set_pos(center);
-                        }
-                    }
+                self.radius.set_hs(hs, state);
+                if self.radius.is_hs(hs) {
+                    pointer.set_pos(center);
+                }
+                if self.radius.is_hs(Select) {
+                    pointer.save_pos();
                 }
             }
-            _ => (),
         }
     }
 
@@ -171,7 +136,7 @@ impl PrimitiveControls for PrimArc {
         pointer: &Pointer,
         _keys_states: KeysStates,
     ) -> bool {
-        if self.radius.selected {
+        if self.radius.is_hs(HS::Select) {
             let center = find_circle_center(start, end, self.radius.saved_val, self.concavity);
 
             let pos = pointer.pos();
@@ -214,17 +179,20 @@ impl PrimitiveControls for PrimArc {
     }
     // NOT USED, SEE shape_custom
     fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, _das: &Size) -> (BezPath, Pattern) {
+        use HS::*;
         (
             self.path_elements(start, end).collect(),
-            self.get_pattern(self.selected, self.highlighted),
+            self.get_pattern(self.state.is_hs(Select), self.state.is_hs(Highlight)),
         )
     }
+
     fn get_mod_paths_and_patterns(
         &self,
         start: Vec2,
         end: Vec2,
         _das: &Size,
     ) -> Vec<(BezPath, Pattern)> {
+        use HS::*;
         let mut paths_patterns: Vec<(BezPath, Pattern)> = vec![];
         paths_patterns.push((
             modifiers_path(
@@ -232,7 +200,7 @@ impl PrimitiveControls for PrimArc {
                 1.,
                 Self::GRAB,
             ),
-            self.get_mod_pattern(self.radius.selected, self.radius.highlighted),
+            self.get_mod_pattern(self.radius.is_hs(Select), self.radius.is_hs(Highlight)),
         ));
         paths_patterns
     }

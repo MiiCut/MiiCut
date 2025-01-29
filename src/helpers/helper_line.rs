@@ -8,6 +8,7 @@ use crate::get_line_segment;
 use crate::is_near_line;
 use crate::math::*;
 use crate::pools::HS;
+use crate::positions::Status;
 use crate::prefab::*;
 use crate::traits::*;
 use crate::KeysStates;
@@ -29,30 +30,23 @@ pub struct HelperLine {
     center: Position,
     angle: Value,
 
-    highlighted: bool,
-    selected: bool,
+    state: Status,
 }
 impl HelperLine {
     pub fn new(position: Vec2, pos2: Vec2) -> HelperKind {
         let position = Position::new(position, true);
         let mut angle = Value::new((pos2 - position.pos).atan2());
-        angle.selected = true;
+        angle.set_hs(HS::Select, true);
         HelperKind::Line(HelperLine {
             center: position,
             angle,
-            highlighted: false,
-            selected: false,
+            state: Status::default(),
         })
     }
     pub fn get_angle(&self) -> f64 {
         self.angle.value
     }
-    fn highlight_all_modifiers(&mut self, value: bool) {
-        self.angle.highlighted = value;
-    }
-    fn select_all_modifiers(&mut self, value: bool) {
-        self.angle.selected = value;
-    }
+
     fn hs_modifiers_from_pos(&mut self, pointer: &mut Pointer, hs: HS) {
         let state = is_near_line(
             self.center.pos,
@@ -60,14 +54,7 @@ impl HelperLine {
             pointer.pos(),
             Self::GRAB_RADIUS,
         );
-        match hs {
-            HS::Select => {
-                self.angle.selected = state;
-            }
-            HS::Highlight => {
-                self.angle.highlighted = state;
-            }
-        }
+        self.angle.set_hs(hs, state);
     }
 }
 impl Display for HelperLine {
@@ -85,7 +72,7 @@ impl ObjectsFuncs for HelperLine {
         self.center.saved_pos = self.center.pos;
         self.angle.saved_val = self.angle.value;
     }
-    fn restore_saved(&mut self) {
+    fn restore_vars(&mut self) {
         self.center.pos = self.center.saved_pos;
         self.angle.value = self.angle.saved_val;
     }
@@ -105,77 +92,40 @@ impl ObjectsFuncs for HelperLine {
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use GetEntityState::*;
         match get {
-            IsSelected => {
-                if self.selected {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
-            IsHighligh => {
-                if self.highlighted {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
-            IsAnyModifierSelected => {
-                let select = self.angle.selected;
-                if select {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
-            IsAnyModifierHighligh => {
-                let highlight = self.angle.highlighted;
-                if highlight {
-                    Some(self.get_position())
-                } else {
-                    None
-                }
-            }
+            IsHS(hs) => self.state.is_hs(hs).then(|| self.get_position()),
+            IsAnyControlHS(hs) => self.angle.is_hs(hs).then(|| self.center.pos),
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
         use SetEntityState::*;
         match set {
-            SetSelect(value) => self.selected = value,
-            SetHighli(value) => self.highlighted = value,
-            SelectAllModifiers(value) => self.select_all_modifiers(value),
-            HighliAllModifiers(value) => self.highlight_all_modifiers(value),
+            SetHS(hs, value) => self.state.set_hs(hs, value),
+            SetAllControlsHS(hs, value) => self.angle.set_hs(hs, value),
         }
     }
+
     fn set_state_from_pos(
         &mut self,
         pointer: &mut Pointer,
         _keys_states: KeysStates,
         set: SetEntityStateFromPos,
     ) {
-        // Define the closure
-        let within_grab_radius =
-            |pointer: &mut Pointer, center_pos: Vec2, grab_radius: f64| -> bool {
-                if (pointer.pos() - center_pos).hypot() < grab_radius {
-                    true
-                } else {
-                    false
-                }
-            };
-
         use SetEntityStateFromPos::*;
+        // A closure to check if pointer is within the grab radius
+        let within_grab_radius =
+            |pointer: &Pointer, center: Vec2| (pointer.pos() - center).hypot() < Self::GRAB_RADIUS;
+
         match set {
-            SelectFromPos => {
-                self.selected = within_grab_radius(pointer, self.center.pos, Self::GRAB_RADIUS);
+            SetHSFromPos(hs) => self
+                .state
+                .set_hs(hs, within_grab_radius(pointer, self.center.pos)),
+            SetControlHSFromPos(hs) => {
+                self.hs_modifiers_from_pos(pointer, hs);
             }
-            HighliFromPos => {
-                self.highlighted = within_grab_radius(pointer, self.center.pos, Self::GRAB_RADIUS);
-            }
-            SelectModifierFromPos => self.hs_modifiers_from_pos(pointer, HS::Select),
-            HighliModifierFromPos => self.hs_modifiers_from_pos(pointer, HS::Highlight),
         }
     }
 
-    fn toggle_prop(&mut self) {
+    fn toggle_selected_prop(&mut self) {
         ()
     }
 
@@ -187,8 +137,8 @@ impl ObjectsFuncs for HelperLine {
         pointer.set_pos(self.center.pos);
         true
     }
-    fn move_modifier(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
-        if self.angle.selected {
+    fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
+        if self.angle.is_hs(HS::Select) {
             let angle = (pointer.pos() - self.center.pos).atan2();
             self.angle.value = snap_val(angle / PI * 180., pointer.get_snap().val()) / 180. * PI;
             return true;
@@ -205,9 +155,9 @@ impl ObjectsFuncs for HelperLine {
         cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern)> {
         // Determine the appropriate pattern
-        let pattern_line = if self.angle.selected {
+        let pattern_line = if self.angle.is_hs(HS::Select) {
             Pattern::HelperSelectedCircle
-        } else if self.angle.highlighted {
+        } else if self.angle.is_hs(HS::Highlight) {
             Pattern::HelperHighlightedCircle
         } else {
             Pattern::HelperNormalCircle
@@ -253,7 +203,8 @@ impl ObjectsFuncs for HelperLine {
     }
 
     fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
-        let pattern_center = match (self.selected, self.highlighted) {
+        use HS::*;
+        let pattern_center = match (self.state.is_hs(Select), self.state.is_hs(Highlight)) {
             (false, false) => Pattern::HelperNormal,
             (false, true) => Pattern::HelperHighlighted,
             (true, false) => Pattern::HelperSelected,

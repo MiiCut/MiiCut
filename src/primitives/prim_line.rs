@@ -1,27 +1,21 @@
+use super::primitives::{PrimitiveControls, PrimitiveKindIter};
 use crate::{
     canvas::{CanvasText, Pattern},
     dimensions::{DimKind, Dimension},
     math::*,
     pools::HS,
-    KeysStates, Pointer, Position,
-};
-
-use super::primitives::{
-    GetPrimitiveState, PrimitiveControls, PrimitiveKindIter, SetPrimitiveState,
-    SetPrimitiveStateFromPos,
+    GetEntityState, KeysStates, Pointer, Position, SetEntityState, SetEntityStateFromPos, Status,
 };
 use kurbo::{BezPath, Line, Shape, Size, Vec2};
 
 #[derive(Debug, Clone)]
 pub struct PrimLine {
-    highlighted: bool,
-    selected: bool,
+    state: Status,
 }
 impl PrimLine {
     pub fn new() -> Self {
         PrimLine {
-            highlighted: false,
-            selected: false,
+            state: Status::default(),
         }
     }
 }
@@ -29,7 +23,7 @@ impl PrimitiveControls for PrimLine {
     const TOLERANCE: f64 = 0.01;
     const GRAB: f64 = 5.;
 
-    fn toggle(&mut self) {
+    fn toggle_prop(&mut self) {
         ()
     }
     fn save_vars(&mut self) {
@@ -41,29 +35,17 @@ impl PrimitiveControls for PrimLine {
     fn update_primitives_vars(&mut self, start: Position, end: Position) -> Vec2 {
         (start.pos + end.pos) / 2.
     }
-    fn get_state(&self, start: Vec2, end: Vec2, state: GetPrimitiveState) -> Option<Vec2> {
-        use GetPrimitiveState::*;
+    fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2> {
+        use GetEntityState::*;
         match state {
-            IsSelected => self.selected.then(|| (start + end) / 2.),
-            IsHighligh => self.highlighted.then(|| (start + end) / 2.),
-            IsOtherModifiersSelected => None,
-            IsOtherModifiersHighligh => None,
-            _ => None,
+            IsHS(hs) => self.state.is_hs(hs).then(|| (start + end) / 2.),
+            IsAnyControlHS(_) => None,
         }
     }
-    fn is_selected(&self) -> bool {
-        self.selected
-    }
-    fn is_highlighted(&self) -> bool {
-        self.highlighted
-    }
-    fn set_state(&mut self, _start: Vec2, _end: Vec2, state: SetPrimitiveState) {
-        use SetPrimitiveState::*;
+    fn set_state(&mut self, _start: Vec2, _end: Vec2, state: SetEntityState) {
+        use SetEntityState::*;
         match state {
-            SetHS(hs, value) => match hs {
-                HS::Select => self.selected = value,
-                HS::Highlight => self.highlighted = value,
-            },
+            SetHS(hs, value) => self.state.set_hs(hs, value),
             _ => (),
         }
     }
@@ -72,16 +54,14 @@ impl PrimitiveControls for PrimLine {
         start: Vec2,
         end: Vec2,
         pointer: &mut Pointer,
-        state: SetPrimitiveStateFromPos,
+        state: SetEntityStateFromPos,
     ) {
-        let res_state =
-            || -> bool { distance_to_segment(start, end, pointer.pos(), Self::GRAB) < Self::GRAB };
-        use SetPrimitiveStateFromPos::*;
+        use SetEntityStateFromPos::*;
         match state {
-            SetHSFromPos(hs) => match hs {
-                HS::Select => self.selected = res_state(),
-                HS::Highlight => self.highlighted = res_state(),
-            },
+            SetHSFromPos(hs) => self.state.set_hs(
+                hs,
+                distance_to_segment(start, end, pointer.pos(), Self::GRAB) < Self::GRAB,
+            ),
             _ => (),
         }
     }
@@ -104,9 +84,10 @@ impl PrimitiveControls for PrimLine {
         )
     }
     fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, _das: &Size) -> (BezPath, Pattern) {
+        use HS::*;
         (
             self.path_elements(start, end).collect(),
-            self.get_pattern(self.selected, self.highlighted),
+            self.get_pattern(self.state.is_hs(Select), self.state.is_hs(Highlight)),
         )
     }
     fn get_mod_paths_and_patterns(

@@ -1,5 +1,6 @@
 use crate::{
     canvas::{CanvasText, Pattern},
+    pools::HS,
     KeysStates, Pointer,
 };
 use kurbo::{BezPath, Rect, Size, Vec2};
@@ -7,24 +8,18 @@ use std::fmt::Debug;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GetEntityState {
-    IsSelected,
-    IsHighligh,
-    IsAnyModifierSelected,
-    IsAnyModifierHighligh,
+    IsHS(HS),
+    IsAnyControlHS(HS),
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SetEntityState {
-    SetSelect(bool),
-    SetHighli(bool),
-    SelectAllModifiers(bool),
-    HighliAllModifiers(bool),
+    SetHS(HS, bool),
+    SetAllControlsHS(HS, bool),
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SetEntityStateFromPos {
-    SelectFromPos,
-    HighliFromPos,
-    SelectModifierFromPos,
-    HighliModifierFromPos,
+    SetHSFromPos(HS),
+    SetControlHSFromPos(HS),
 }
 
 pub trait NewId {
@@ -49,11 +44,11 @@ pub trait ObjectsFuncs: Debug + Clone {
     type Kindvars;
 
     fn save_vars(&mut self);
-    fn restore_saved(&mut self);
+    fn restore_vars(&mut self);
     fn get_vars(&self) -> Self::Kindvars;
     fn set_vars(&mut self, vars: &Self::Kindvars);
     fn good_size(&self) -> bool;
-
+    fn finish_draw(&mut self) -> bool;
     fn get_state(&self, get: GetEntityState) -> Option<Vec2>;
     fn set_state(&mut self, set: SetEntityState);
     fn set_state_from_pos(
@@ -62,11 +57,9 @@ pub trait ObjectsFuncs: Debug + Clone {
         keys_states: KeysStates,
         set: SetEntityStateFromPos,
     );
-
-    fn toggle_prop(&mut self);
-
+    fn toggle_selected_prop(&mut self);
     fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool;
-    fn move_modifier(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool;
+    fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool;
     fn get_position(&self) -> Vec2;
 
     fn get_paths_and_patterns(

@@ -27,7 +27,7 @@ impl Action for MoveHelpersAction {
         for (dhid, vars) in &self.dhids_vars {
             if let Some(shape) = pools.helpers.get_mut(*dhid) {
                 shape.get_kind_mut().set_vars(vars);
-                shape.get_kind_mut().restore_saved();
+                shape.get_kind_mut().restore_vars();
             }
         }
     }
@@ -72,11 +72,11 @@ impl ObjectsFuncs for HelperKind {
             Circle(sh) => sh.save_vars(),
         }
     }
-    fn restore_saved(&mut self) {
+    fn restore_vars(&mut self) {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.restore_saved(),
-            Circle(sh) => sh.restore_saved(),
+            Line(sh) => sh.restore_vars(),
+            Circle(sh) => sh.restore_vars(),
         }
     }
     fn get_vars(&self) -> HelperKindvars {
@@ -128,11 +128,11 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn toggle_prop(&mut self) {
+    fn toggle_selected_prop(&mut self) {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.toggle_prop(),
-            Circle(sh) => sh.toggle_prop(),
+            Line(sh) => sh.toggle_selected_prop(),
+            Circle(sh) => sh.toggle_selected_prop(),
         }
     }
 
@@ -143,11 +143,11 @@ impl ObjectsFuncs for HelperKind {
             Circle(sh) => sh.move_position(pointer, keys_states),
         }
     }
-    fn move_modifier(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
+    fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.move_modifier(pointer, keys_states),
-            Circle(sh) => sh.move_modifier(pointer, keys_states),
+            Line(sh) => sh.move_controls(pointer, keys_states),
+            Circle(sh) => sh.move_controls(pointer, keys_states),
         }
     }
     fn get_position(&self) -> Vec2 {

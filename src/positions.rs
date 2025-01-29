@@ -1,6 +1,8 @@
 // use crate::math::*;
 use kurbo::Vec2;
 
+use crate::pools::HS;
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SnapValue {
     Snap1,
@@ -80,16 +82,22 @@ impl Pointer {
         self.magnetized
     }
 }
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Modifier {
-    pub highlighted: bool,
-    pub selected: bool,
+#[derive(Default, Copy, Clone, Debug, PartialEq)]
+pub struct Status {
+    highlighted: bool,
+    selected: bool,
 }
-impl Modifier {
-    pub fn new() -> Self {
-        Self {
-            highlighted: false,
-            selected: false,
+impl Status {
+    pub fn is_hs(&self, hs: HS) -> bool {
+        match hs {
+            HS::Highlight => self.highlighted,
+            HS::Select => self.selected,
+        }
+    }
+    pub fn set_hs(&mut self, hs: HS, value: bool) {
+        match hs {
+            HS::Highlight => self.highlighted = value,
+            HS::Select => self.selected = value,
         }
     }
 }
@@ -99,8 +107,8 @@ pub struct Value {
     pub saved_val: f64,
     pub last_val: f64,
     pub value: f64,
-    pub highlighted: bool,
-    pub selected: bool,
+    highlighted: bool,
+    selected: bool,
 }
 impl Value {
     pub fn new(value: f64) -> Self {
@@ -112,14 +120,26 @@ impl Value {
             selected: false,
         }
     }
+    pub fn is_hs(&self, hs: HS) -> bool {
+        match hs {
+            HS::Highlight => self.highlighted,
+            HS::Select => self.selected,
+        }
+    }
+    pub fn set_hs(&mut self, hs: HS, value: bool) {
+        match hs {
+            HS::Highlight => self.highlighted = value,
+            HS::Select => self.selected = value,
+        }
+    }
 }
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ValueBool {
     pub saved_val: bool,
     pub last_val: bool,
     pub value: bool,
-    pub highlighted: bool,
-    pub selected: bool,
+    highlighted: bool,
+    selected: bool,
 }
 impl ValueBool {
     pub fn new(value: bool) -> Self {
@@ -131,6 +151,18 @@ impl ValueBool {
             selected: false,
         }
     }
+    pub fn is_hs(&self, hs: HS) -> bool {
+        match hs {
+            HS::Highlight => self.highlighted,
+            HS::Select => self.selected,
+        }
+    }
+    pub fn set_hs(&mut self, hs: HS, value: bool) {
+        match hs {
+            HS::Highlight => self.highlighted = value,
+            HS::Select => self.selected = value,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -139,11 +171,13 @@ pub struct Position {
     pub last_pos: Vec2,
     pub pos: Vec2,
     pub magnet: bool,
-    pub highlighted: bool,
-    pub selected: bool,
+    highlighted: bool,
+    selected: bool,
 }
 
 impl Position {
+    const GRAB_RADIUS: f64 = 5.;
+
     pub fn new(pos: Vec2, magnet: bool) -> Self {
         Self {
             saved_pos: pos,
@@ -154,6 +188,36 @@ impl Position {
             selected: false,
         }
     }
+    pub fn is_hs(&self, hs: HS) -> bool {
+        match hs {
+            HS::Highlight => self.highlighted,
+            HS::Select => self.selected,
+        }
+    }
+    pub fn set_hs(&mut self, hs: HS, value: bool) {
+        match hs {
+            HS::Highlight => self.highlighted = value,
+            HS::Select => self.selected = value,
+        }
+    }
+    pub fn set_hs_from_pos(&mut self, hs: HS, pointer: &mut Pointer) {
+        let state = (pointer.pos() - self.pos).hypot() < Self::GRAB_RADIUS;
+        match hs {
+            HS::Highlight => {
+                self.highlighted = state;
+                if self.highlighted {
+                    pointer.set_pos(self.pos);
+                }
+            }
+            HS::Select => {
+                self.selected = state;
+                if self.selected {
+                    pointer.set_pos(self.pos);
+                    pointer.save_pos();
+                }
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -162,13 +226,26 @@ pub struct RadiusValue {
     pub up: bool,
     pub saved_up: bool,
 }
-
 impl RadiusValue {
+    const GRAB_RADIUS: f64 = 5.;
+
     pub fn new(radius: f64, up: bool) -> Self {
         Self {
             radius: Value::new(radius),
             up,
             saved_up: up,
+        }
+    }
+    pub fn is_hs(&self, hs: HS) -> bool {
+        match hs {
+            HS::Highlight => self.radius.highlighted,
+            HS::Select => self.radius.selected,
+        }
+    }
+    pub fn set_hs(&mut self, hs: HS, value: bool) {
+        match hs {
+            HS::Highlight => self.radius.highlighted = value,
+            HS::Select => self.radius.selected = value,
         }
     }
 }

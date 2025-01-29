@@ -1,18 +1,10 @@
-use super::{
-    prim_arc::PrimArc,
-    // prim_cbez::PrimCBez,
-    // prim_cbez_smooth::PrimCBezSmooth,
-    prim_line::PrimLine,
-    // prim_qbez::PrimQBez,
-    // prim_qbez_smooth::PrimQBezSmooth,
-};
+use crate::positions::{Pointer, Position, Value, ValueBool};
+use crate::primitives::prim_arc::PrimArc;
+use crate::primitives::prim_line::PrimLine;
 use crate::{
     canvas::{CanvasText, Pattern},
-    math::*,
     pools::HS,
-    positions::*,
-    prefab::*,
-    KeysStates,
+    GetEntityState, KeysStates, SetEntityState, SetEntityStateFromPos,
 };
 use kurbo::{ArcAppendIter, BezPath, CubicBezIter, LinePathIter, PathEl, QuadBezIter, Size, Vec2};
 
@@ -38,8 +30,8 @@ impl VertexModifier {
         }
     }
 }
-#[derive(Debug, Clone)]
 
+#[derive(Copy, Debug, Clone)]
 pub struct Vertex {
     pos: Position,
     property: VertexProperty,
@@ -149,136 +141,19 @@ impl Vertex {
             Nope(offset, _) | Chamfer(offset, _) | Fillet(offset, _) => offset.saved_val,
         }
     }
-    pub fn move_pos(&mut self, pointer: &mut Pointer) -> bool {
+    pub fn move_pos(&mut self, pointer: &Pointer) -> bool {
         let dpos = pointer.dpos();
         self.pos.pos = self.pos.saved_pos + dpos;
         true
     }
 
     pub fn get_pattern(&self) -> Pattern {
-        match (self.pos.selected, self.pos.highlighted) {
+        use HS::*;
+        match (self.pos.is_hs(Select), self.pos.is_hs(Highlight)) {
             (false, false) => Pattern::Modifiers,
             (false, true) => Pattern::ModifiersHighlighted,
             (true, false) => Pattern::ModifiersSelected,
             (true, true) => Pattern::ModifiersSelected,
-        }
-    }
-}
-#[derive(Debug, Clone)]
-pub struct Primitive {
-    curve: PrimitiveCurve,
-    start: usize,
-    end: usize,
-
-    // Primitive curves (not on an enum because of memory retention)
-    // when user switches between curves, the previous values are kept
-    // Line
-    p_line: PrimLine,
-    // Arc
-    p_arc: PrimArc,
-}
-
-impl Primitive {
-    pub fn new(curve: PrimitiveCurve, start: usize, end: usize) -> Self {
-        Self {
-            curve,
-            start,
-            end,
-            p_line: PrimLine::new(),
-            p_arc: PrimArc::new(),
-        }
-    }
-    pub fn get_start(&self) -> usize {
-        self.start
-    }
-    pub fn get_end(&self) -> usize {
-        self.end
-    }
-    pub fn get_curve(&self) -> &PrimitiveCurve {
-        &self.curve
-    }
-    pub fn get_curve_mut(&mut self) -> &mut PrimitiveCurve {
-        &mut self.curve
-    }
-    pub fn set_curve(&mut self, curve: PrimitiveCurve) {
-        self.curve = curve;
-    }
-    pub fn prev_curve(&mut self) {
-        self.curve = self.curve.prev_curve();
-    }
-    pub fn next_curve(&mut self) {
-        self.curve = self.curve.next_curve();
-    }
-
-    pub fn get_line(&self) -> &PrimLine {
-        &self.p_line
-    }
-    pub fn get_line_mut(&mut self) -> &mut PrimLine {
-        &mut self.p_line
-    }
-    pub fn get_arc(&self) -> &PrimArc {
-        &self.p_arc
-    }
-    pub fn get_arc_mut(&mut self) -> &mut PrimArc {
-        &mut self.p_arc
-    }
-    pub fn get_vars(&self) -> Primitive {
-        Primitive {
-            curve: self.curve.clone(),
-            start: self.start,
-            end: self.end,
-            p_line: self.p_line.clone(),
-            p_arc: self.p_arc.clone(),
-        }
-    }
-    pub fn set_vars(&mut self, vars: &Primitive) {
-        self.curve = vars.curve.clone();
-        self.start = vars.start;
-        self.end = vars.end;
-        self.p_line = vars.p_line.clone();
-        self.p_arc = vars.p_arc.clone();
-    }
-
-    pub fn get_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
-        use PrimitiveCurve::*;
-        match self.curve {
-            CurveLine => self.p_line.get_pattern(selected, highlighted),
-            CurveArc => self.p_arc.get_pattern(selected, highlighted),
-        }
-    }
-
-    pub fn save_vars(&mut self) {
-        use PrimitiveCurve::*;
-        match self.curve {
-            CurveLine => self.p_line.save_vars(),
-            CurveArc => self.p_arc.save_vars(),
-        }
-    }
-}
-
-impl Primitive {
-    const _TOLERANCE: f64 = 0.01;
-}
-
-pub enum PrimitiveKindIter {
-    Line(LinePathIter),
-    Arc(std::iter::Chain<std::iter::Once<PathEl>, ArcAppendIter>),
-    QBez(QuadBezIter),
-    QBezSmooth(QuadBezIter),
-    CBez(CubicBezIter),
-    CBezSmooth(CubicBezIter),
-}
-impl Iterator for PrimitiveKindIter {
-    type Item = PathEl;
-    fn next(&mut self) -> Option<Self::Item> {
-        use PrimitiveKindIter::*;
-        match self {
-            Line(sh) => sh.next(),
-            Arc(sh) => sh.next(),
-            QBez(sh) => sh.next(),
-            QBezSmooth(sh) => sh.next(),
-            CBez(sh) => sh.next(),
-            CBezSmooth(sh) => sh.next(),
         }
     }
 }
@@ -304,43 +179,265 @@ impl PrimitiveCurve {
         }
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum GetPrimitiveState {
-    IsHS(HS),
-    IsStartHS(HS),
-    IsOtherModifiersHS(HS),
+
+#[derive(Debug, Clone)]
+pub struct Primitive {
+    curve: PrimitiveCurve,
+    start: usize,
+    end: usize,
+    // Primitive curves (not on an enum because of memory retention)
+    // when user switches between curves, the previous values are kept
+    // Line
+    p_line: PrimLine,
+    // Arc
+    p_arc: PrimArc,
 }
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SetPrimitiveState {
-    SetHS(HS, bool),
-    SetStartHS(HS, bool),
-    SetAllOtherModifiersHS(HS, bool),
+
+impl Primitive {
+    const _TOLERANCE: f64 = 0.01;
+
+    pub fn new(curve: PrimitiveCurve, start: usize, end: usize) -> Self {
+        Self {
+            curve,
+            start,
+            end,
+            p_line: PrimLine::new(),
+            p_arc: PrimArc::new(),
+        }
+    }
+    pub fn get_start(&self) -> i64 {
+        self.start as i64
+    }
+    pub fn get_end(&self) -> i64 {
+        self.end as i64
+    }
+    pub fn get_curve(&self) -> &PrimitiveCurve {
+        &self.curve
+    }
+    pub fn get_curve_mut(&mut self) -> &mut PrimitiveCurve {
+        &mut self.curve
+    }
+    pub fn set_curve(&mut self, curve: PrimitiveCurve) {
+        self.curve = curve;
+    }
+    pub fn prev_curve(&mut self) {
+        self.curve = self.curve.prev_curve();
+    }
+    pub fn next_curve(&mut self) {
+        self.curve = self.curve.next_curve();
+    }
+
+    // pub fn get_line(&self) -> &PrimLine {
+    //     &self.p_line
+    // }
+    // pub fn get_line_mut(&mut self) -> &mut PrimLine {
+    //     &mut self.p_line
+    // }
+    // pub fn get_arc(&self) -> &PrimArc {
+    //     &self.p_arc
+    // }
+    // pub fn get_arc_mut(&mut self) -> &mut PrimArc {
+    //     &mut self.p_arc
+    // }
+
+    pub fn get_vars(&self) -> Primitive {
+        Primitive {
+            curve: self.curve.clone(),
+            start: self.start,
+            end: self.end,
+            p_line: self.p_line.clone(),
+            p_arc: self.p_arc.clone(),
+        }
+    }
+    pub fn set_vars(&mut self, vars: &Primitive) {
+        self.curve = vars.curve.clone();
+        self.start = vars.start;
+        self.end = vars.end;
+        // self.p_line = vars.p_line.clone();
+        // self.p_arc = vars.p_arc.clone();
+    }
+    pub fn save_vars(&mut self) {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.save_vars(),
+            CurveArc => self.p_arc.save_vars(),
+        }
+    }
+
+    pub fn get_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.get_pattern(selected, highlighted),
+            CurveArc => self.p_arc.get_pattern(selected, highlighted),
+        }
+    }
 }
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SetPrimitiveStateFromPos {
-    SetHSFromPos(HS),
-    SetStartHSFromPos(HS),
-    SetOthersModifiersHSFromPos(HS),
+pub enum PrimitiveKindIter {
+    Line(LinePathIter),
+    Arc(std::iter::Chain<std::iter::Once<PathEl>, ArcAppendIter>),
+    QBez(QuadBezIter),
+    QBezSmooth(QuadBezIter),
+    CBez(CubicBezIter),
+    CBezSmooth(CubicBezIter),
+}
+impl Iterator for PrimitiveKindIter {
+    type Item = PathEl;
+    fn next(&mut self) -> Option<Self::Item> {
+        use PrimitiveKindIter::*;
+        match self {
+            Line(sh) => sh.next(),
+            Arc(sh) => sh.next(),
+            QBez(sh) => sh.next(),
+            QBezSmooth(sh) => sh.next(),
+            CBez(sh) => sh.next(),
+            CBezSmooth(sh) => sh.next(),
+        }
+    }
+}
+
+impl PrimitiveControls for Primitive {
+    const TOLERANCE: f64 = 0.01;
+    const GRAB: f64 = 5.;
+
+    fn toggle_prop(&mut self) {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.toggle_prop(),
+            CurveArc => self.p_arc.toggle_prop(),
+        }
+    }
+    fn save_vars(&mut self) {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.save_vars(),
+            CurveArc => self.p_arc.save_vars(),
+        }
+    }
+    fn restore_vars(&mut self) {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.restore_vars(),
+            CurveArc => self.p_arc.restore_vars(),
+        }
+    }
+    fn update_primitives_vars(&mut self, start: Position, end: Position) -> Vec2 {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.update_primitives_vars(start, end),
+            CurveArc => self.p_arc.update_primitives_vars(start, end),
+        }
+    }
+    fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2> {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.get_state(start, end, state),
+            CurveArc => self.p_arc.get_state(start, end, state),
+        }
+    }
+    fn set_state(&mut self, start: Vec2, end: Vec2, state: SetEntityState) {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.set_state(start, end, state),
+            CurveArc => self.p_arc.set_state(start, end, state),
+        }
+    }
+    fn set_state_from_pos(
+        &mut self,
+        start: Vec2,
+        end: Vec2,
+        pointer: &mut Pointer,
+        state: SetEntityStateFromPos,
+    ) {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.set_state_from_pos(start, end, pointer, state),
+            CurveArc => self.p_arc.set_state_from_pos(start, end, pointer, state),
+        }
+    }
+    fn move_control_selected(
+        &mut self,
+        start: Vec2,
+        end: Vec2,
+        pointer: &Pointer,
+        keys_states: KeysStates,
+    ) -> bool {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self
+                .p_line
+                .move_control_selected(start, end, pointer, keys_states),
+            CurveArc => self
+                .p_arc
+                .move_control_selected(start, end, pointer, keys_states),
+        }
+    }
+    fn get_all_controls_positions(&self, start: Vec2, end: Vec2) -> Vec<Vec2> {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.get_all_controls_positions(start, end),
+            CurveArc => self.p_arc.get_all_controls_positions(start, end),
+        }
+    }
+    fn path_elements(&self, start: Vec2, end: Vec2) -> PrimitiveKindIter {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.path_elements(start, end),
+            CurveArc => self.p_arc.path_elements(start, end),
+        }
+    }
+    fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, das: &Size) -> (BezPath, Pattern) {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self.p_line.get_paths_and_patterns(start, end, das),
+            CurveArc => self.p_arc.get_paths_and_patterns(start, end, das),
+        }
+    }
+    fn get_mod_paths_and_patterns(
+        &self,
+        start: Vec2,
+        end: Vec2,
+        das: &Size,
+    ) -> Vec<(BezPath, Pattern)> {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => vec![self.p_line.get_paths_and_patterns(start, end, das)],
+            CurveArc => self.p_arc.get_mod_paths_and_patterns(start, end, das),
+        }
+    }
+    fn get_dimensions_paths_and_patterns(
+        &self,
+        start: Vec2,
+        end: Vec2,
+        das: &Size,
+    ) -> Vec<(BezPath, Pattern, CanvasText)> {
+        use PrimitiveCurve::*;
+        match self.curve {
+            CurveLine => self
+                .p_line
+                .get_dimensions_paths_and_patterns(start, end, das),
+            CurveArc => self
+                .p_arc
+                .get_dimensions_paths_and_patterns(start, end, das),
+        }
+    }
 }
 
 pub trait PrimitiveControls {
     const TOLERANCE: f64;
     const GRAB: f64;
 
-    fn toggle(&mut self);
+    fn toggle_prop(&mut self);
     fn save_vars(&mut self);
     fn restore_vars(&mut self);
     fn update_primitives_vars(&mut self, start: Position, end: Position) -> Vec2;
-    fn is_selected(&self) -> bool;
-    fn is_highlighted(&self) -> bool;
-    fn get_state(&self, start: Vec2, end: Vec2, state: GetPrimitiveState) -> Option<Vec2>;
-    fn set_state(&mut self, start: Vec2, end: Vec2, state: SetPrimitiveState);
+    fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2>;
+    fn set_state(&mut self, start: Vec2, end: Vec2, state: SetEntityState);
     fn set_state_from_pos(
         &mut self,
         start: Vec2,
         end: Vec2,
         pointer: &mut Pointer,
-        state: SetPrimitiveStateFromPos,
+        state: SetEntityStateFromPos,
     );
     fn move_control_selected(
         &mut self,
