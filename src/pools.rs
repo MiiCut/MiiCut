@@ -131,68 +131,41 @@ impl Pools {
             helpers: HelpersPool::new(),
         }
     }
-    pub fn add_shape(&mut self, shape: MiiShape) {
-        self.shapes.add(shape);
-    }
-    pub fn add_helper(&mut self, helper: Helper) {
-        self.helpers.add(helper);
-    }
-    pub fn save_vars(&mut self) {
-        self.helpers.values_mut().for_each(|helper| {
-            helper.get_kind_mut().save_vars();
-        });
-        self.shapes.values_mut().for_each(|helper| {
-            helper.get_kind_mut().save_vars();
-        });
-    }
-    pub fn set_objects_state(&mut self, value: bool, hs: HS) {
-        self.shapes.set_state(value, hs);
-        self.helpers.set_state(value, hs);
-    }
     pub fn set_objects_states_in_order(
         &mut self,
         pointer: &mut Pointer,
         keys_states: KeysStates,
-        hors: HS,
+        hs: HS,
     ) -> bool {
         if self
             .shapes
-            .set_modifiers_states_from_pos(pointer, keys_states, hors)
+            .set_controls_states_from_pos(pointer, keys_states, hs)
         {
             // log!("S set_mod_hs_from_pos");
-            self.shapes.set_state(false, hors);
-            self.helpers.set_state(false, hors);
-            self.helpers.set_modifiers_state(false, hors);
+            self.shapes.set_state(hs, false);
+            self.helpers.set_state(hs, false);
+            self.helpers.set_controls_state(hs, false);
             return true;
         }
-        if self.helpers.set_states_from_pos(pointer, keys_states, hors) {
+        if self.helpers.set_states_from_pos(pointer, keys_states, hs) {
             // log!("H set_hs_from_pos");
-            self.shapes.set_state(false, hors);
-            self.helpers.set_modifiers_state(false, hors);
+            self.shapes.set_state(hs, false);
+            self.helpers.set_controls_state(hs, false);
             return true;
         }
         if self
             .helpers
-            .set_modifiers_states_from_pos(pointer, keys_states, hors)
+            .set_controls_states_from_pos(pointer, keys_states, hs)
         {
             // log!("H set_mod_hs_from_pos");
-            self.shapes.set_state(false, hors);
+            self.shapes.set_state(hs, false);
             return true;
         }
-        if self.shapes.set_states_from_pos(pointer, keys_states, hors) {
+        if self.shapes.set_states_from_pos(pointer, keys_states, hs) {
             // log!("S set_hs_from_pos");
             return true;
         }
         false
-    }
-    pub fn clear_all_hs(&mut self) {
-        self.shapes.set_state(false, HS::Select);
-        self.shapes.set_modifiers_state(false, HS::Select);
-        self.helpers.set_state(false, HS::Select);
-        self.helpers.set_modifiers_state(false, HS::Select);
-    }
-    pub fn select_all_shapes_connected(&mut self) -> bool {
-        self.shapes.select_all_connected()
     }
     pub fn paste_to_pool(&mut self, clip_item: ClipboardItem) -> Box<PasteAction> {
         match &clip_item {
@@ -282,23 +255,6 @@ impl Pools {
         }
         move_action
     }
-    pub fn recalc_full_segs(&mut self) {
-        self.shapes.recalc_full_segs();
-    }
-    pub fn magnet_to_helpers(&mut self, pointer: &mut Pointer, keys_states: KeysStates) {
-        if !keys_states.alt_pressed {
-            self.helpers.magnet_to_point(pointer);
-        }
-    }
-    pub fn create_magnet_points(&mut self) {
-        self.helpers.create_helpers_magnet_points();
-    }
-    pub fn delete_shapes_selection(&mut self) -> Option<Vec<MiiShape>> {
-        self.shapes.delete_selection()
-    }
-    pub fn delete_helpers_selection(&mut self) -> Option<Vec<Helper>> {
-        self.helpers.delete_selection()
-    }
 }
 
 pub trait PoolsFunctions {
@@ -321,25 +277,30 @@ pub trait PoolsFunctions {
 
     fn save_vars(&mut self);
 
+    fn create_magnet_points(&mut self);
+    fn magnet_points(&self) -> impl Iterator<Item = &Vec2>;
+    fn magnet_to_point(&self, pointer: &mut Pointer, keys_states: KeysStates);
+
+    fn get_state(&mut self, hors: HS) -> Vec<Self::Id>;
+    fn set_state(&mut self, hors: HS, value: bool);
     fn set_states_from_pos(
         &mut self,
         pointer: &mut Pointer,
         keys_states: KeysStates,
         hors: HS,
     ) -> bool;
-    fn set_state(&mut self, value: bool, hors: HS);
-    fn get_state(&self, hors: HS) -> Vec<Self::Id>;
-    fn get_state_if_one(&self, hors: HS) -> Option<Self::Id>;
-    fn get_state_and_vars(&self, hors: HS) -> Vec<(Self::Id, Self::ObjectKindvars)>;
-    fn set_id_state(&mut self, id: Self::Id, value: bool, hors: HS);
-    fn set_modifiers_states_from_pos(
+
+    fn get_state_if_one(&mut self, hors: HS) -> Option<Self::Id>;
+    fn get_state_and_vars(&mut self, hors: HS) -> Vec<(Self::Id, Self::ObjectKindvars)>;
+
+    fn set_controls_state(&mut self, hors: HS, value: bool);
+    fn set_controls_states_from_pos(
         &mut self,
         pointer: &mut Pointer,
         keys_states: KeysStates,
         hors: HS,
     ) -> bool;
-    fn set_modifiers_state(&mut self, value: bool, hors: HS);
-    fn get_first_selected_modifier_vars(&self) -> Option<(Self::Id, Self::ObjectKindvars)>;
+    fn get_first_selected_modifier_vars(&mut self) -> Option<(Self::Id, Self::ObjectKindvars)>;
 
     fn move_position(
         &mut self,

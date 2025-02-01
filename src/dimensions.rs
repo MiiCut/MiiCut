@@ -245,37 +245,49 @@ impl Dimension {
         (path, Pattern::DimensionNormal, text)
     }
     fn get_linear_path(&self) -> (BezPath, Pattern, CanvasText) {
-        let mut path = kurbo::BezPath::new();
-        let value = if self.value == 0. {
+        use Pattern::*;
+        let mut path = BezPath::new();
+        let value = if self.value < EPSILON {
             self.get_length()
         } else {
             self.value
         };
         let start = self.start;
         let end = self.end;
-        let unit_perp = unit_perpendicular(start, end, false);
-        let unit_rot45 = rotate_vector(end - start, PI / 4.).normalize();
-        let text = CanvasText::new(
-            format!("{:.1}", value),
-            TextPos::PosCustom(self.get_center() + unit_perp * (self.dim_offset + 10.)),
-            CanvasTextConfig::new(
-                self.get_text_pattern(false, false),
-                self.get_text_angle(),
-                TextAlign::Center,
-                14,
-                0.5,
-            ),
-        );
+        if let Some(unit_perp) = unit_perpendicular(start, end, false) {
+            let unit_rot45 = rotate_vector(end - start, PI / 4.).normalize();
+            let text = CanvasText::new(
+                format!("{:.1}", value),
+                TextPos::PosCustom(self.get_center() + unit_perp * (self.dim_offset + 10.)),
+                CanvasTextConfig::new(
+                    self.get_text_pattern(false, false),
+                    self.get_text_angle(),
+                    TextAlign::Center,
+                    14,
+                    0.5,
+                ),
+            );
 
-        path.move_to((start + unit_perp * self.dim_offset).to_point());
-        path.line_to((end + unit_perp * self.dim_offset).to_point());
+            path.move_to((start + unit_perp * self.dim_offset).to_point());
+            path.line_to((end + unit_perp * self.dim_offset).to_point());
 
-        path.move_to((start + unit_perp * self.dim_offset - 2. * unit_rot45).to_point());
-        path.line_to((start + unit_perp * self.dim_offset + 2. * unit_rot45).to_point());
+            path.move_to((start + unit_perp * self.dim_offset - 2. * unit_rot45).to_point());
+            path.line_to((start + unit_perp * self.dim_offset + 2. * unit_rot45).to_point());
 
-        path.move_to((end + unit_perp * self.dim_offset - 2. * unit_rot45).to_point());
-        path.line_to((end + unit_perp * self.dim_offset + 2. * unit_rot45).to_point());
+            path.move_to((end + unit_perp * self.dim_offset - 2. * unit_rot45).to_point());
+            path.line_to((end + unit_perp * self.dim_offset + 2. * unit_rot45).to_point());
 
-        (path, Pattern::DimensionNormal, text)
+            (path, DimensionNormal, text)
+        } else {
+            (
+                path,
+                DimensionNormal,
+                CanvasText::new(
+                    "".into(),
+                    TextPos::PosCustom(Vec2::new(0., 0.)),
+                    CanvasTextConfig::new(DimensionNormal, 0., TextAlign::Center, 14, 0.5),
+                ),
+            )
+        }
     }
 }

@@ -89,11 +89,17 @@ impl ObjectsFuncs for HelperLine {
         true
     }
 
+    fn finish_draw(&mut self) -> bool {
+        self.angle.set_hs(HS::Select, false);
+        self.angle.set_hs(HS::Highlight, false);
+        true
+    }
+
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use GetEntityState::*;
         match get {
             IsHS(hs) => self.state.is_hs(hs).then(|| self.get_position()),
-            IsAnyControlHS(hs) => self.angle.is_hs(hs).then(|| self.center.pos),
+            GetFirstControlHS(hs) => self.angle.is_hs(hs).then(|| self.center.pos),
         }
     }
     fn set_state(&mut self, set: SetEntityState) {

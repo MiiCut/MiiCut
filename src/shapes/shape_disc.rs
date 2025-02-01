@@ -11,7 +11,7 @@ use crate::{
     math::*,
     pools::HS,
     positions::{Position, Value},
-    prefab::center_path,
+    prefab::{center_path, modifiers_pattern},
     traits::*,
     KeysStates, Pointer,
 };
@@ -50,25 +50,13 @@ impl ShapeDisc {
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
     }
-    pub fn get_polygon(&self) -> Polygon<f64> {
-        self.polygon.clone()
-    }
-
-    fn update_polygon(&mut self) {
-        self.segs = calc_segs(self.to_path(Self::TOLERANCE));
-        self.polygon = calc_polygon(&self.segs);
-    }
-
     fn get_circle(&self) -> Circle {
         let center = self.center.pos;
         let radius = self.radius.value;
         Circle::new(center.to_point(), radius)
     }
-
     fn hs_controls_from_pos(&mut self, pointer: &mut Pointer, _keys_states: KeysStates, hs: HS) {
         use HS::*;
-        // center
-        self.center.set_hs_from_pos(hs, pointer);
 
         // circonference
         let within_grab_radius = |pos: Vec2, center: Vec2, radius: f64| -> bool {
@@ -88,6 +76,17 @@ impl ShapeDisc {
         if self.radius.is_hs(Select) {
             pointer.save_pos();
         }
+    }
+
+    pub fn get_magnet_points(&self) -> Vec<Vec2> {
+        vec![self.center.pos]
+    }
+    pub fn get_polygon(&self) -> Polygon<f64> {
+        self.polygon.clone()
+    }
+    fn update_polygon(&mut self) {
+        self.segs = calc_segs(self.to_path(Self::TOLERANCE));
+        self.polygon = calc_polygon(&self.segs);
     }
 }
 impl Display for ShapeDisc {
@@ -169,8 +168,10 @@ impl ObjectsFuncs for ShapeDisc {
         match get {
             IsHS(Select) => self.selected.then(|| self.get_position()),
             IsHS(Highlight) => self.highlighted.then(|| self.get_position()),
-            IsAnyControlHS(Select) => self.radius.is_hs(Select).then(|| self.get_position()),
-            IsAnyControlHS(Highlight) => self.radius.is_hs(Highlight).then(|| self.get_position()),
+            GetFirstControlHS(Select) => self.radius.is_hs(Select).then(|| self.get_position()),
+            GetFirstControlHS(Highlight) => {
+                self.radius.is_hs(Highlight).then(|| self.get_position())
+            }
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
@@ -203,14 +204,17 @@ impl ObjectsFuncs for ShapeDisc {
                 }
                 HS::Highlight => {
                     self.highlighted = self.contains(pointer.pos().to_point());
+                    // pointer.set_pos(self.center.pos);
                 }
             },
             SetControlHSFromPos(hs) => self.hs_controls_from_pos(pointer, keys_states, hs),
         }
     }
+
     fn toggle_selected_prop(&mut self) {
         ()
     }
+
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         let dpos = pointer.dpos();
         self.center.pos = self.center.saved_pos + dpos;
@@ -233,6 +237,7 @@ impl ObjectsFuncs for ShapeDisc {
         };
         false
     }
+
     fn get_position(&self) -> Vec2 {
         self.center.pos
     }
@@ -244,7 +249,7 @@ impl ObjectsFuncs for ShapeDisc {
     ) -> Vec<(BezPath, Pattern)> {
         vec![(
             center_path(self.center.pos, 1., ShapeDisc::GRAB_RADIUS),
-            self.get_pattern_status(self.selected, self.highlighted),
+            modifiers_pattern(self.selected, self.highlighted),
         )]
     }
     fn get_dimensions_paths_and_patterns(

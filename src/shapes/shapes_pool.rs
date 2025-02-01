@@ -1,15 +1,10 @@
-use super::{
-    shape_disc::ShapeDisc,
-    shape_polygon::ShapePolygon,
-    shapes::{BoolOps, MiiShape, ShapeKind},
-};
+use super::shapes::{BoolOps, MiiShape, ShapeKind};
 use crate::{
     clipboard::Action,
     math::*,
     pools::{PoolsFunctions, HS},
-    primitives::primitives::VertexProperty,
     traits::*,
-    IconsShapes, KeysStates, Pointer, Pools,
+    KeysStates, Pointer, Pools,
 };
 use geo::{BooleanOps, Intersects, MultiPolygon, Polygon};
 use kurbo::{BezPath, Vec2};
@@ -28,11 +23,13 @@ impl Action for AddShapeAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing shape creation: {:?}", self.shape.get_id());
         pools.shapes.delete(self.shape.get_id());
+        pools.shapes.create_magnet_points();
     }
 
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing shape creation: {:?}", self.shape.get_id());
         pools.shapes.add(self.shape.clone());
+        pools.shapes.create_magnet_points();
     }
 }
 
@@ -45,6 +42,7 @@ impl Action for DeleteShapeAction {
         self.shapes.iter().for_each(|shape| {
             pools.shapes.add(shape.clone());
         });
+        pools.shapes.create_magnet_points();
     }
 
     fn redo(&self, pools: &mut Pools) {
@@ -52,37 +50,20 @@ impl Action for DeleteShapeAction {
         self.shapes.iter().for_each(|shape| {
             pools.shapes.delete(shape.get_id());
         });
+        pools.shapes.create_magnet_points();
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct ShapesPool {
     shapes: HashMap<BSid, MiiShape>,
+    magnet_points: Vec<Vec2>,
     shapes_selector: ShapeSelector,
     full_segs: Vec<BezPath>,
 }
 impl ShapesPool {
-    pub fn new_shape(
-        icon_shape: IconsShapes,
-        pointer: &mut Pointer,
-        boolean_op: BoolOps,
-    ) -> MiiShape {
-        let shid = BSid::new();
-        let pos1 = pointer.pos();
-        let pos2 = pos1 + Vec2::new(ShapePolygon::MIN_RECT_SIZE, ShapePolygon::MIN_RECT_SIZE);
-        let shape_kind = match icon_shape {
-            IconsShapes::Rectangle => {
-                pointer.set_pos(pos2);
-                pointer.save_pos();
-                ShapePolygon::with_first_primitive(pos1, pos2, VertexProperty::RectangleLike)
-            }
-            IconsShapes::Disc => ShapeDisc::new(pos1, pos1),
-            IconsShapes::Custom => {
-                ShapePolygon::with_first_primitive(pos1, pos1, VertexProperty::Nope)
-            }
-        };
-        MiiShape::new(shid, shape_kind, boolean_op)
-    }
+    const MAGNET_RADIUS: f64 = 10.;
+
     pub fn intersection_set(&self, shid: BSid) -> HashSet<BSid> {
         let mut result = HashSet::new();
         if let Some(shape) = self.shapes.get(&shid) {
@@ -186,12 +167,12 @@ impl ShapesPool {
     pub fn get_full_segs(&mut self) -> Vec<BezPath> {
         self.full_segs.clone()
     }
-    pub fn get_shape_custom_on_select(&self) -> Option<BSid> {
+    pub fn get_polygon_on_select(&mut self) -> Option<BSid> {
         use GetEntityState::*;
         use HS::*;
-        for (shid, shape) in self.shapes.iter() {
-            if let ShapeKind::KindPolygon(shape_custom) = shape.get_kind() {
-                if shape_custom.get_state(IsAnyControlHS(Select)).is_some() {
+        for (shid, shape) in self.shapes.iter_mut() {
+            if let ShapeKind::KindPolygon(shape_custom) = shape.get_kind_mut() {
+                if shape_custom.get_state(GetFirstControlHS(Select)).is_some() {
                     return Some(*shid);
                 }
             }
@@ -210,6 +191,7 @@ impl PoolsFunctions for ShapesPool {
     fn new() -> ShapesPool {
         ShapesPool {
             shapes: HashMap::new(),
+            magnet_points: vec![Vec2::ZERO],
             shapes_selector: ShapeSelector::new(),
             full_segs: Vec::new(),
         }
@@ -257,6 +239,53 @@ impl PoolsFunctions for ShapesPool {
         });
     }
 
+    fn create_magnet_points(&mut self) {
+        self.magnet_points = vec![];
+        for mag_points in self
+            .shapes
+            .values()
+            .map(|mii_shape| match mii_shape.get_kind() {
+                ShapeKind::KindDisc(sh) => sh.get_magnet_points(),
+                ShapeKind::KindPolygon(sh) | ShapeKind::KindRectangle(sh) => sh.get_magnet_points(),
+            })
+        {
+            self.magnet_points.extend(mag_points);
+        }
+        // Always add origin
+        self.magnet_points.push(Vec2::ZERO);
+    }
+    fn magnet_points(&self) -> impl Iterator<Item = &Vec2> {
+        self.magnet_points.iter()
+    }
+    fn magnet_to_point(&self, pointer: &mut Pointer, keys_states: KeysStates) {
+        if !keys_states.alt_pressed {
+            pointer.set_magnetized(false);
+            for point in self.magnet_points.iter() {
+                if (pointer.pos() - *point).hypot() < Self::MAGNET_RADIUS {
+                    pointer.set_pos(*point);
+                    pointer.set_magnetized(true);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn get_state(&mut self, hs: HS) -> Vec<BSid> {
+        use GetEntityState::*;
+        let mut result = vec![];
+        for shape in self.shapes.values_mut() {
+            if shape.get_kind_mut().get_state(IsHS(hs)).is_some() {
+                result.push(shape.get_id());
+            }
+        }
+        result
+    }
+    fn set_state(&mut self, hs: HS, value: bool) {
+        use SetEntityState::*;
+        self.shapes.values_mut().for_each(|shape| {
+            shape.get_kind_mut().set_state(SetHS(hs, value));
+        });
+    }
     fn set_states_from_pos(
         &mut self,
         pointer: &mut Pointer,
@@ -284,7 +313,7 @@ impl PoolsFunctions for ShapesPool {
                 shape
                     .get_kind_mut()
                     .set_state_from_pos(pointer, keys_states, SetHSFromPos(Select));
-                if shape.get_kind().get_state(IsHS(Select)).is_some() {
+                if shape.get_kind_mut().get_state(IsHS(Select)).is_some() {
                     overlapping_shapes.insert(shape.get_id());
                 }
             });
@@ -309,23 +338,8 @@ impl PoolsFunctions for ShapesPool {
             false
         }
     }
-    fn set_state(&mut self, value: bool, hs: HS) {
-        use SetEntityState::*;
-        self.shapes.values_mut().for_each(|shape| {
-            shape.get_kind_mut().set_state(SetHS(hs, value));
-        });
-    }
-    fn get_state(&self, hs: HS) -> Vec<BSid> {
-        use GetEntityState::*;
-        let mut result = vec![];
-        for shape in self.shapes.values() {
-            if shape.get_kind().get_state(IsHS(hs)).is_some() {
-                result.push(shape.get_id());
-            }
-        }
-        result
-    }
-    fn get_state_if_one(&self, hs: HS) -> Option<BSid> {
+
+    fn get_state_if_one(&mut self, hs: HS) -> Option<BSid> {
         let result = self.get_state(hs);
         if result.len() == 1 {
             Some(result[0])
@@ -333,75 +347,18 @@ impl PoolsFunctions for ShapesPool {
             None
         }
     }
-    fn get_state_and_vars(&self, hs: HS) -> Vec<(BSid, ShapeKind)> {
+    fn get_state_and_vars(&mut self, hs: HS) -> Vec<(BSid, ShapeKind)> {
         use GetEntityState::*;
         let mut result = vec![];
-        for shape in self.shapes.values() {
-            if shape.get_kind().get_state(IsHS(hs)).is_some() {
+        for shape in self.shapes.values_mut() {
+            if shape.get_kind_mut().get_state(IsHS(hs)).is_some() {
                 result.push((shape.get_id(), shape.get_kind().get_vars()));
             }
         }
         result
     }
-    fn set_id_state(&mut self, id: BSid, value: bool, hs: HS) {
-        use SetEntityState::*;
-        if let Some(shape) = self.shapes.get_mut(&id) {
-            shape.get_kind_mut().set_state(SetHS(hs, value));
-        }
-    }
-    fn set_modifiers_states_from_pos(
-        &mut self,
-        pointer: &mut Pointer,
-        keys_states: KeysStates,
-        hs: HS,
-    ) -> bool {
-        use GetEntityState::*;
-        use SetEntityStateFromPos::*;
-        use HS::*;
-        match hs {
-            HS::Highlight => {
-                self.shapes.values_mut().for_each(|shape| {
-                    shape.get_kind_mut().set_state_from_pos(
-                        pointer,
-                        keys_states,
-                        SetControlHSFromPos(Highlight),
-                    );
-                });
 
-                let mut highlighted = false;
-                for shape in self.shapes.values() {
-                    if shape
-                        .get_kind()
-                        .get_state(IsAnyControlHS(Highlight))
-                        .is_some()
-                    {
-                        highlighted = true;
-                        break;
-                    }
-                }
-                highlighted
-            }
-            HS::Select => {
-                self.shapes.values_mut().for_each(|shape| {
-                    shape.get_kind_mut().set_state_from_pos(
-                        pointer,
-                        keys_states,
-                        SetControlHSFromPos(Select),
-                    );
-                });
-
-                let mut selected = false;
-                for shape in self.shapes.values() {
-                    if shape.get_kind().get_state(IsAnyControlHS(Select)).is_some() {
-                        selected = true;
-                        break;
-                    }
-                }
-                selected
-            }
-        }
-    }
-    fn set_modifiers_state(&mut self, value: bool, hors: HS) {
+    fn set_controls_state(&mut self, hors: HS, value: bool) {
         use SetEntityState::*;
         use HS::*;
         match hors {
@@ -421,11 +378,43 @@ impl PoolsFunctions for ShapesPool {
             }
         }
     }
-    fn get_first_selected_modifier_vars(&self) -> Option<(BSid, ShapeKind)> {
+    fn set_controls_states_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        hs: HS,
+    ) -> bool {
+        use GetEntityState::*;
+        use SetEntityStateFromPos::*;
+
+        self.shapes.values_mut().for_each(|shape| {
+            shape
+                .get_kind_mut()
+                .set_state_from_pos(pointer, keys_states, SetControlHSFromPos(hs));
+        });
+
+        let mut state = false;
+        for shape in self.shapes.values_mut() {
+            if shape
+                .get_kind_mut()
+                .get_state(GetFirstControlHS(hs))
+                .is_some()
+            {
+                state = true;
+                break;
+            }
+        }
+        state
+    }
+    fn get_first_selected_modifier_vars(&mut self) -> Option<(BSid, ShapeKind)> {
         use GetEntityState::*;
         use HS::*;
-        for shape in self.shapes.values() {
-            if shape.get_kind().get_state(IsAnyControlHS(Select)).is_some() {
+        for shape in self.shapes.values_mut() {
+            if shape
+                .get_kind_mut()
+                .get_state(GetFirstControlHS(Select))
+                .is_some()
+            {
                 return Some((shape.get_id(), shape.get_kind().get_vars()));
             }
         }
@@ -454,7 +443,6 @@ impl PoolsFunctions for ShapesPool {
         }
         false
     }
-
     fn delete_selection(&mut self) -> Option<Vec<MiiShape>> {
         use GetEntityState::*;
         use HS::*;

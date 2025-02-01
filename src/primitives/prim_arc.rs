@@ -4,16 +4,12 @@ use crate::{
     dimensions::{DimKind, Dimension},
     math::*,
     pools::HS,
-    prefab::*,
-    GetEntityState, KeysStates, Pointer, Position, SetEntityState, SetEntityStateFromPos, Status,
-    Value,
+    KeysStates, Pointer, Position, Status, Value,
 };
 use kurbo::{BezPath, Shape, Size, Vec2};
 
-#[derive(Debug, Clone)]
+#[derive(Copy, Debug, Clone)]
 pub struct PrimArc {
-    // center_rel is relative to start,
-    // hence it's norm is the radius
     radius: Value,
     concavity: bool,
     concavity_saved: bool,
@@ -21,6 +17,7 @@ pub struct PrimArc {
 }
 impl PrimArc {
     const MIN_RADIUS: f64 = 10.;
+    const ANGLE_GUARD: f64 = 0.02;
 
     pub fn new() -> Self {
         PrimArc {
@@ -54,7 +51,7 @@ impl PrimitiveControls for PrimArc {
 
     fn toggle_prop(&mut self) {
         log!("toggle");
-        self.concavity = !self.concavity;
+        ()
     }
     fn save_vars(&mut self) {
         self.radius.saved_val = self.radius.value;
@@ -75,57 +72,31 @@ impl PrimitiveControls for PrimArc {
         find_circle_center(start.pos, end.pos, self.radius.value, self.concavity)
     }
 
-    fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2> {
-        use GetEntityState::*;
-        match state {
-            IsHS(hs) => self.state.is_hs(hs).then(|| (start + end) / 2.),
-            IsAnyControlHS(hs) => self
-                .radius
-                .is_hs(hs)
-                .then(|| find_circle_center(start, end, self.radius.value, self.concavity)),
-        }
+    fn get_control_state(&self, start: Vec2, end: Vec2, hs: HS) -> Option<Vec2> {
+        self.state.is_hs(hs).then(|| (start + end) / 2.)
     }
-    fn set_state(&mut self, _start: Vec2, _end: Vec2, state: SetEntityState) {
-        use SetEntityState::*;
-        match state {
-            SetHS(hs, value) => self.state.set_hs(hs, value),
-            SetAllControlsHS(hs, value) => self.radius.set_hs(hs, value),
-        }
+    fn set_all_controls_state(&mut self, hs: HS, state: bool) {
+        self.state.set_hs(hs, state);
     }
-    fn set_state_from_pos(
-        &mut self,
+    fn get_dist_from_control(
+        &self,
         start: Vec2,
         end: Vec2,
-        pointer: &mut Pointer,
-        state: SetEntityStateFromPos,
-    ) {
-        use SetEntityStateFromPos::*;
-        use HS::*;
-        let res_state = || -> bool {
-            is_point_near_arc(
-                &create_arc_from_radius_and_concavity(
-                    start,
-                    end,
-                    self.radius.value,
-                    self.get_concavity(),
-                ),
-                pointer.pos(),
-                Self::GRAB,
-            )
-        };
-        match state {
-            SetHSFromPos(hs) => self.state.set_hs(hs, res_state()),
-            SetControlHSFromPos(hs) => {
-                let center = find_circle_center(start, end, self.radius.value, self.concavity);
-                let state = (pointer.pos() - center).hypot() < Self::GRAB;
-                self.radius.set_hs(hs, state);
-                if self.radius.is_hs(hs) {
-                    pointer.set_pos(center);
-                }
-                if self.radius.is_hs(Select) {
-                    pointer.save_pos();
-                }
-            }
+        pointer: &Pointer,
+    ) -> Option<(f64, Vec2)> {
+        if let Some((dist, pos)) = distance_and_projection_to_arc(
+            &create_arc_from_radius_and_concavity(
+                start,
+                end,
+                self.radius.value,
+                self.get_concavity(),
+            ),
+            pointer.pos(),
+            Self::ANGLE_GUARD,
+        ) {
+            Some((dist, pos))
+        } else {
+            None
         }
     }
 
@@ -163,46 +134,36 @@ impl PrimitiveControls for PrimArc {
             false
         }
     }
-    fn get_all_controls_positions(&self, start: Vec2, end: Vec2) -> Vec<Vec2> {
-        vec![find_circle_center(
-            start,
-            end,
-            self.radius.value,
-            self.concavity,
-        )]
+    fn get_all_controls_positions(&self, _start: Vec2, _end: Vec2) -> Vec<Vec2> {
+        // vec![find_circle_center(
+        //     start,
+        //     end,
+        //     self.radius.value,
+        //     self.concavity,
+        // )]
+        vec![]
     }
 
-    // NOT USED, SEE shape_custom
     fn path_elements(&self, start: Vec2, end: Vec2) -> PrimitiveKindIter {
         let f = create_arc_from_radius_and_concavity(start, end, self.radius.value, self.concavity);
         PrimitiveKindIter::Arc(f.path_elements(Self::TOLERANCE))
     }
-    // NOT USED, SEE shape_custom
-    fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, _das: &Size) -> (BezPath, Pattern) {
-        use HS::*;
-        (
-            self.path_elements(start, end).collect(),
-            self.get_pattern(self.state.is_hs(Select), self.state.is_hs(Highlight)),
-        )
-    }
-
-    fn get_mod_paths_and_patterns(
+    fn get_paths_and_patterns(
         &self,
         start: Vec2,
         end: Vec2,
         _das: &Size,
-    ) -> Vec<(BezPath, Pattern)> {
+        parent_selected: bool,
+        parent_highlighted: bool,
+    ) -> (BezPath, Pattern) {
         use HS::*;
-        let mut paths_patterns: Vec<(BezPath, Pattern)> = vec![];
-        paths_patterns.push((
-            modifiers_path(
-                find_circle_center(start, end, self.radius.value, self.concavity),
-                1.,
-                Self::GRAB,
+        (
+            self.path_elements(start, end).collect(),
+            self.get_pattern(
+                self.state.is_hs(Select) || parent_selected,
+                self.state.is_hs(Highlight) || parent_highlighted,
             ),
-            self.get_mod_pattern(self.radius.is_hs(Select), self.radius.is_hs(Highlight)),
-        ));
-        paths_patterns
+        )
     }
     fn get_dimensions_paths_and_patterns(
         &self,

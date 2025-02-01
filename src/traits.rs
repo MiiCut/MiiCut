@@ -3,13 +3,14 @@ use crate::{
     pools::HS,
     KeysStates, Pointer,
 };
+use geo::Polygon;
 use kurbo::{BezPath, Rect, Size, Vec2};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GetEntityState {
     IsHS(HS),
-    IsAnyControlHS(HS),
+    GetFirstControlHS(HS),
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SetEntityState {
@@ -61,7 +62,6 @@ pub trait ObjectsFuncs: Debug + Clone {
     fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool;
     fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool;
     fn get_position(&self) -> Vec2;
-
     fn get_paths_and_patterns(
         &self,
         das: &Size,
@@ -77,12 +77,4 @@ pub trait ObjectsFuncs: Debug + Clone {
         das: &Size,
         cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern, CanvasText)>;
-    fn get_pattern_status(&self, selected: bool, highlighted: bool) -> Pattern {
-        match (selected, highlighted) {
-            (false, false) => Pattern::Modifiers,
-            (false, true) => Pattern::ModifiersHighlighted,
-            (true, false) => Pattern::ModifiersSelected,
-            (true, true) => Pattern::ModifiersSelected,
-        }
-    }
 }

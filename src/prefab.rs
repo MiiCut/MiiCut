@@ -8,7 +8,7 @@
 
 use kurbo::{BezPath, Circle, PathEl, Shape, Vec2};
 
-use crate::math::MyError;
+use crate::{canvas::Pattern, math::MyError};
 
 pub fn line_helper(pos1: &Vec2, pos2: &Vec2) -> Result<BezPath, MyError> {
     const EXTENSION: f64 = 100.;
@@ -78,7 +78,15 @@ pub fn helper_point_path(pos: Vec2, size: f64) -> BezPath {
 pub fn modifiers_path(pos: Vec2, scale: f64, size: f64) -> BezPath {
     let tol = 0.01;
     let size = size;
-    Circle::new(pos.to_point(), size / 2. / scale).to_path(tol)
+    Circle::new(pos.to_point(), size / scale).to_path(tol)
+}
+pub fn modifiers_pattern(selected: bool, highlighted: bool) -> Pattern {
+    match (selected, highlighted) {
+        (false, false) => Pattern::Modifiers,
+        (false, true) => Pattern::ModifiersHighlighted,
+        (true, false) => Pattern::ModifiersSelected,
+        (true, true) => Pattern::ModifiersSelected,
+    }
 }
 
 pub fn handle_modify_path(pos: Vec2, scale: f64) -> BezPath {

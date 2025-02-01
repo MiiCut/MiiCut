@@ -4,11 +4,11 @@ use crate::{
     dimensions::{DimKind, Dimension},
     math::*,
     pools::HS,
-    GetEntityState, KeysStates, Pointer, Position, SetEntityState, SetEntityStateFromPos, Status,
+    KeysStates, Pointer, Position, Status,
 };
 use kurbo::{BezPath, Line, Shape, Size, Vec2};
 
-#[derive(Debug, Clone)]
+#[derive(Copy, Debug, Clone)]
 pub struct PrimLine {
     state: Status,
 }
@@ -35,34 +35,25 @@ impl PrimitiveControls for PrimLine {
     fn update_primitives_vars(&mut self, start: Position, end: Position) -> Vec2 {
         (start.pos + end.pos) / 2.
     }
-    fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2> {
-        use GetEntityState::*;
-        match state {
-            IsHS(hs) => self.state.is_hs(hs).then(|| (start + end) / 2.),
-            IsAnyControlHS(_) => None,
-        }
+    fn get_control_state(&self, start: Vec2, end: Vec2, hs: HS) -> Option<Vec2> {
+        self.state.is_hs(hs).then(|| (start + end) / 2.)
     }
-    fn set_state(&mut self, _start: Vec2, _end: Vec2, state: SetEntityState) {
-        use SetEntityState::*;
-        match state {
-            SetHS(hs, value) => self.state.set_hs(hs, value),
-            _ => (),
-        }
+    fn set_all_controls_state(&mut self, hs: HS, state: bool) {
+        self.state.set_hs(hs, state);
     }
-    fn set_state_from_pos(
-        &mut self,
+
+    fn get_dist_from_control(
+        &self,
         start: Vec2,
         end: Vec2,
-        pointer: &mut Pointer,
-        state: SetEntityStateFromPos,
-    ) {
-        use SetEntityStateFromPos::*;
-        match state {
-            SetHSFromPos(hs) => self.state.set_hs(
-                hs,
-                distance_to_segment(start, end, pointer.pos(), Self::GRAB) < Self::GRAB,
-            ),
-            _ => (),
+        pointer: &Pointer,
+    ) -> Option<(f64, Vec2)> {
+        if let Some((dist, pos)) =
+            distance_and_projection_to_segment(start, end, pointer.pos(), Self::GRAB)
+        {
+            Some((dist, pos))
+        } else {
+            None
         }
     }
     fn move_control_selected(
@@ -83,20 +74,22 @@ impl PrimitiveControls for PrimLine {
             Line::new(start.to_point(), end.to_point()).path_elements(Self::TOLERANCE),
         )
     }
-    fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, _das: &Size) -> (BezPath, Pattern) {
+    fn get_paths_and_patterns(
+        &self,
+        start: Vec2,
+        end: Vec2,
+        _das: &Size,
+        parent_selected: bool,
+        parent_highlighted: bool,
+    ) -> (BezPath, Pattern) {
         use HS::*;
         (
             self.path_elements(start, end).collect(),
-            self.get_pattern(self.state.is_hs(Select), self.state.is_hs(Highlight)),
+            self.get_pattern(
+                self.state.is_hs(Select) || parent_selected,
+                self.state.is_hs(Highlight) || parent_highlighted,
+            ),
         )
-    }
-    fn get_mod_paths_and_patterns(
-        &self,
-        _start: Vec2,
-        _end: Vec2,
-        _das: &Size,
-    ) -> Vec<(BezPath, Pattern)> {
-        vec![]
     }
     fn get_dimensions_paths_and_patterns(
         &self,

@@ -100,6 +100,13 @@ impl ObjectsFuncs for HelperKind {
             Circle(sh) => sh.good_size(),
         }
     }
+    fn finish_draw(&mut self) -> bool {
+        use HelperKind::*;
+        match self {
+            Line(sh) => sh.finish_draw(),
+            Circle(sh) => sh.finish_draw(),
+        }
+    }
 
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use HelperKind::*;

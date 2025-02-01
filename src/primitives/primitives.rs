@@ -1,164 +1,19 @@
-use crate::positions::{Pointer, Position, Value, ValueBool};
+use crate::pools::HS;
+use crate::positions::{Pointer, Position};
 use crate::primitives::prim_arc::PrimArc;
 use crate::primitives::prim_line::PrimLine;
 use crate::{
     canvas::{CanvasText, Pattern},
-    pools::HS,
-    GetEntityState, KeysStates, SetEntityState, SetEntityStateFromPos,
+    KeysStates,
 };
 use kurbo::{ArcAppendIter, BezPath, CubicBezIter, LinePathIter, PathEl, QuadBezIter, Size, Vec2};
 
-#[derive(Copy, Debug, Clone)]
-pub enum VertexProperty {
-    RectangleLike,
-    Nope,
+#[derive(Debug, Copy, Clone)]
+pub enum ControlPoint {
+    LineCtrl,
+    ArcCtrl,
 }
 #[derive(Copy, Debug, Clone)]
-pub enum VertexModifier {
-    // Fillet radius or Chamfer distance, fillet concavity
-    Chamfer(Value, ValueBool),
-    Fillet(Value, ValueBool),
-    Nope(Value, ValueBool),
-}
-impl VertexModifier {
-    pub fn toogle(&self) -> Self {
-        use VertexModifier::*;
-        match self {
-            Chamfer(radius, concavity) => Fillet(*radius, *concavity),
-            Fillet(radius, concavity) => Nope(*radius, *concavity),
-            Nope(radius, concavity) => Chamfer(*radius, *concavity),
-        }
-    }
-}
-
-#[derive(Copy, Debug, Clone)]
-pub struct Vertex {
-    pos: Position,
-    property: VertexProperty,
-    modifier: VertexModifier,
-}
-impl Vertex {
-    const MIN_OFFSET: f64 = 10.;
-    pub fn new(pos: Vec2, property: VertexProperty) -> Self {
-        Self {
-            pos: Position::new(pos, true),
-            property,
-            modifier: VertexModifier::Nope(Value::new(Self::MIN_OFFSET), ValueBool::new(false)),
-        }
-    }
-    pub fn get_pos(&self) -> &Position {
-        &self.pos
-    }
-    pub fn get_pos_mut(&mut self) -> &mut Position {
-        &mut self.pos
-    }
-    pub fn set_pos(&mut self, pos: Vec2) {
-        self.pos.pos = pos;
-    }
-    pub fn save_pos(&mut self) {
-        self.pos.saved_pos = self.pos.pos;
-    }
-    pub fn restore_pos(&mut self) {
-        self.pos.pos = self.pos.saved_pos;
-    }
-    pub fn save_vars(&mut self) {
-        self.save_pos();
-        self.save_modifier();
-    }
-    pub fn restore_vars(&mut self) {
-        self.restore_pos();
-        self.restore_modifier();
-    }
-
-    pub fn get_property(&self) -> VertexProperty {
-        self.property
-    }
-    pub fn set_property(&mut self, property: VertexProperty) {
-        self.property = property;
-    }
-    pub fn get_modifier(&self) -> VertexModifier {
-        self.modifier
-    }
-    pub fn set_modifier(&mut self, modifier: VertexModifier) {
-        self.modifier = modifier;
-    }
-    pub fn save_modifier(&mut self) {
-        use VertexModifier::*;
-        match &mut self.modifier {
-            Nope(offset, concavity) => {
-                offset.saved_val = offset.value;
-                concavity.saved_val = concavity.value;
-            }
-            Chamfer(offset, concavity) => {
-                offset.saved_val = offset.value;
-                concavity.saved_val = concavity.value;
-            }
-            Fillet(offset, concavity) => {
-                offset.saved_val = offset.value;
-                concavity.saved_val = concavity.value;
-            }
-        }
-    }
-    pub fn restore_modifier(&mut self) {
-        use VertexModifier::*;
-        match &mut self.modifier {
-            Nope(offset, concavity) => {
-                offset.value = offset.saved_val;
-                concavity.value = concavity.saved_val;
-            }
-            Chamfer(offset, concavity) => {
-                offset.value = offset.saved_val;
-                concavity.value = concavity.saved_val;
-            }
-            Fillet(offset, concavity) => {
-                offset.value = offset.saved_val;
-                concavity.value = concavity.saved_val;
-            }
-        }
-    }
-
-    pub fn toogle_modifier(&mut self) {
-        self.modifier = self.modifier.toogle();
-    }
-
-    pub fn get_modifier_offset(&self) -> f64 {
-        use VertexModifier::*;
-        match self.modifier {
-            Nope(offset, _) | Chamfer(offset, _) | Fillet(offset, _) => offset.value,
-        }
-    }
-    pub fn set_modifier_offset(&mut self, offset: f64) {
-        use VertexModifier::*;
-        match self.modifier {
-            Nope(_, concavity) => self.modifier = Nope(Value::new(offset), concavity),
-            Chamfer(_, concavity) => self.modifier = Chamfer(Value::new(offset), concavity),
-            Fillet(_, concavity) => self.modifier = Fillet(Value::new(offset), concavity),
-        }
-    }
-    pub fn get_modifier_offset_saved(&self) -> f64 {
-        use VertexModifier::*;
-        match self.modifier {
-            Nope(offset, _) | Chamfer(offset, _) | Fillet(offset, _) => offset.saved_val,
-        }
-    }
-    pub fn move_pos(&mut self, pointer: &Pointer) -> bool {
-        let dpos = pointer.dpos();
-        self.pos.pos = self.pos.saved_pos + dpos;
-        true
-    }
-
-    pub fn get_pattern(&self) -> Pattern {
-        use HS::*;
-        match (self.pos.is_hs(Select), self.pos.is_hs(Highlight)) {
-            (false, false) => Pattern::Modifiers,
-            (false, true) => Pattern::ModifiersHighlighted,
-            (true, false) => Pattern::ModifiersSelected,
-            (true, true) => Pattern::ModifiersSelected,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub enum PrimitiveCurve {
     CurveLine,
     CurveArc,
@@ -180,11 +35,10 @@ impl PrimitiveCurve {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Copy, Debug, Clone)]
 pub struct Primitive {
     curve: PrimitiveCurve,
-    start: usize,
-    end: usize,
+
     // Primitive curves (not on an enum because of memory retention)
     // when user switches between curves, the previous values are kept
     // Line
@@ -196,20 +50,12 @@ pub struct Primitive {
 impl Primitive {
     const _TOLERANCE: f64 = 0.01;
 
-    pub fn new(curve: PrimitiveCurve, start: usize, end: usize) -> Self {
+    pub fn new(curve: PrimitiveCurve) -> Self {
         Self {
             curve,
-            start,
-            end,
             p_line: PrimLine::new(),
             p_arc: PrimArc::new(),
         }
-    }
-    pub fn get_start(&self) -> i64 {
-        self.start as i64
-    }
-    pub fn get_end(&self) -> i64 {
-        self.end as i64
     }
     pub fn get_curve(&self) -> &PrimitiveCurve {
         &self.curve
@@ -227,34 +73,30 @@ impl Primitive {
         self.curve = self.curve.next_curve();
     }
 
-    // pub fn get_line(&self) -> &PrimLine {
-    //     &self.p_line
-    // }
-    // pub fn get_line_mut(&mut self) -> &mut PrimLine {
-    //     &mut self.p_line
-    // }
-    // pub fn get_arc(&self) -> &PrimArc {
-    //     &self.p_arc
-    // }
-    // pub fn get_arc_mut(&mut self) -> &mut PrimArc {
-    //     &mut self.p_arc
-    // }
+    pub fn get_line(&self) -> &PrimLine {
+        &self.p_line
+    }
+    pub fn get_line_mut(&mut self) -> &mut PrimLine {
+        &mut self.p_line
+    }
+    pub fn get_arc(&self) -> &PrimArc {
+        &self.p_arc
+    }
+    pub fn get_arc_mut(&mut self) -> &mut PrimArc {
+        &mut self.p_arc
+    }
 
     pub fn get_vars(&self) -> Primitive {
         Primitive {
             curve: self.curve.clone(),
-            start: self.start,
-            end: self.end,
             p_line: self.p_line.clone(),
             p_arc: self.p_arc.clone(),
         }
     }
     pub fn set_vars(&mut self, vars: &Primitive) {
         self.curve = vars.curve.clone();
-        self.start = vars.start;
-        self.end = vars.end;
-        // self.p_line = vars.p_line.clone();
-        // self.p_arc = vars.p_arc.clone();
+        self.p_line = vars.p_line.clone();
+        self.p_arc = vars.p_arc.clone();
     }
     pub fn save_vars(&mut self) {
         use PrimitiveCurve::*;
@@ -327,31 +169,30 @@ impl PrimitiveControls for Primitive {
             CurveArc => self.p_arc.update_primitives_vars(start, end),
         }
     }
-    fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2> {
+    fn get_control_state(&self, start: Vec2, end: Vec2, hs: HS) -> Option<Vec2> {
         use PrimitiveCurve::*;
         match self.curve {
-            CurveLine => self.p_line.get_state(start, end, state),
-            CurveArc => self.p_arc.get_state(start, end, state),
+            CurveLine => self.p_line.get_control_state(start, end, hs),
+            CurveArc => self.p_arc.get_control_state(start, end, hs),
         }
     }
-    fn set_state(&mut self, start: Vec2, end: Vec2, state: SetEntityState) {
+    fn set_all_controls_state(&mut self, hs: HS, state: bool) {
         use PrimitiveCurve::*;
         match self.curve {
-            CurveLine => self.p_line.set_state(start, end, state),
-            CurveArc => self.p_arc.set_state(start, end, state),
+            CurveLine => self.p_line.set_all_controls_state(hs, state),
+            CurveArc => self.p_arc.set_all_controls_state(hs, state),
         }
     }
-    fn set_state_from_pos(
-        &mut self,
+    fn get_dist_from_control(
+        &self,
         start: Vec2,
         end: Vec2,
-        pointer: &mut Pointer,
-        state: SetEntityStateFromPos,
-    ) {
+        pointer: &Pointer,
+    ) -> Option<(f64, Vec2)> {
         use PrimitiveCurve::*;
         match self.curve {
-            CurveLine => self.p_line.set_state_from_pos(start, end, pointer, state),
-            CurveArc => self.p_arc.set_state_from_pos(start, end, pointer, state),
+            CurveLine => self.p_line.get_dist_from_control(start, end, pointer),
+            CurveArc => self.p_arc.get_dist_from_control(start, end, pointer),
         }
     }
     fn move_control_selected(
@@ -385,23 +226,30 @@ impl PrimitiveControls for Primitive {
             CurveArc => self.p_arc.path_elements(start, end),
         }
     }
-    fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, das: &Size) -> (BezPath, Pattern) {
-        use PrimitiveCurve::*;
-        match self.curve {
-            CurveLine => self.p_line.get_paths_and_patterns(start, end, das),
-            CurveArc => self.p_arc.get_paths_and_patterns(start, end, das),
-        }
-    }
-    fn get_mod_paths_and_patterns(
+    fn get_paths_and_patterns(
         &self,
         start: Vec2,
         end: Vec2,
         das: &Size,
-    ) -> Vec<(BezPath, Pattern)> {
+        parent_selected: bool,
+        parent_highlighted: bool,
+    ) -> (BezPath, Pattern) {
         use PrimitiveCurve::*;
         match self.curve {
-            CurveLine => vec![self.p_line.get_paths_and_patterns(start, end, das)],
-            CurveArc => self.p_arc.get_mod_paths_and_patterns(start, end, das),
+            CurveLine => self.p_line.get_paths_and_patterns(
+                start,
+                end,
+                das,
+                parent_selected,
+                parent_highlighted,
+            ),
+            CurveArc => self.p_arc.get_paths_and_patterns(
+                start,
+                end,
+                das,
+                parent_selected,
+                parent_highlighted,
+            ),
         }
     }
     fn get_dimensions_paths_and_patterns(
@@ -430,15 +278,14 @@ pub trait PrimitiveControls {
     fn save_vars(&mut self);
     fn restore_vars(&mut self);
     fn update_primitives_vars(&mut self, start: Position, end: Position) -> Vec2;
-    fn get_state(&self, start: Vec2, end: Vec2, state: GetEntityState) -> Option<Vec2>;
-    fn set_state(&mut self, start: Vec2, end: Vec2, state: SetEntityState);
-    fn set_state_from_pos(
-        &mut self,
+    fn get_control_state(&self, start: Vec2, end: Vec2, hs: HS) -> Option<Vec2>;
+    fn set_all_controls_state(&mut self, hs: HS, state: bool);
+    fn get_dist_from_control(
+        &self,
         start: Vec2,
         end: Vec2,
-        pointer: &mut Pointer,
-        state: SetEntityStateFromPos,
-    );
+        pointer: &Pointer,
+    ) -> Option<(f64, Vec2)>;
     fn move_control_selected(
         &mut self,
         start: Vec2,
@@ -457,21 +304,14 @@ pub trait PrimitiveControls {
             (true, true) => Pattern::BasicSelected,
         }
     }
-    fn get_mod_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
-        match (selected, highlighted) {
-            (false, false) => Pattern::Modifiers,
-            (false, true) => Pattern::ModifiersHighlighted,
-            (true, false) => Pattern::ModifiersSelected,
-            (true, true) => Pattern::ModifiersSelected,
-        }
-    }
-    fn get_paths_and_patterns(&self, start: Vec2, end: Vec2, das: &Size) -> (BezPath, Pattern);
-    fn get_mod_paths_and_patterns(
+    fn get_paths_and_patterns(
         &self,
         start: Vec2,
         end: Vec2,
         das: &Size,
-    ) -> Vec<(BezPath, Pattern)>;
+        parent_selected: bool,
+        parent_highlighted: bool,
+    ) -> (BezPath, Pattern);
     fn get_dimensions_paths_and_patterns(
         &self,
         start: Vec2,

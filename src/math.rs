@@ -1,11 +1,9 @@
-#![allow(dead_code)]
 // A macro to provide `println!(..)`-style syntax for `console.log` logging.
 // macro_rules! log {
 //     ( $( $t:tt )* ) => {
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
-
 use crate::shapes::shapes_pool::BSid;
 use approx::*;
 use geo::{LineString, Polygon};
@@ -199,19 +197,6 @@ pub fn is_near_position(pos: Vec2, other_pos: Vec2, grab_handle_precision: f64) 
 //     None
 // }
 
-// Project v1(pt2-pos) vector to the perpendicular of vector v2(pt1-pt2)
-pub fn get_unit_vector_perpendicular(pt1: &Vec2, pt2: &Vec2, pos: &Vec2) -> Option<Vec2> {
-    let v1 = *pos - *pt2;
-    let v2 = *pt2 - *pt1;
-    if v2.hypot2() == 0. {
-        log!("WARNING: Degenerate case, get_unit_vector_perpendicular()");
-        return None;
-    }
-    let pv2 = Vec2::new(-v2.y, v2.x).normalize();
-    let dot_product = v1.dot(pv2) * pv2;
-
-    Some(dot_product)
-}
 // Helper to calculate signed distance to a line
 pub fn signed_distance(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     (p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x)
@@ -918,24 +903,45 @@ pub fn rotate_vector(vector: Vec2, angle: f64) -> Vec2 {
     )
 }
 
-pub fn unit_perpendicular(p1: Vec2, p2: Vec2, clockwise: bool) -> Vec2 {
+// Unit perpendicular of a segment formad by two points
+pub fn unit_perpendicular(v1: Vec2, v2: Vec2, clockwise: bool) -> Option<Vec2> {
     // Vector representing the segment
-    let v = p2 - p1;
-
+    let v = v2 - v1;
     // Compute the perpendicular vector
     let perp = if clockwise {
         Vec2::new(-v.y, v.x) // Clockwise
     } else {
         Vec2::new(v.y, -v.x) // Counterclockwise
     };
-
-    if perp.hypot() == 0.0 {
+    if perp.hypot() < EPSILON {
         log!("WARNING: Degenerate case unit_perpendicular()");
-        return p1;
+        return None;
     }
-
     // Normalize to unit length
-    perp.normalize()
+    Some(perp.normalize())
+}
+// Project v1(pt2-pos) vector to the perpendicular of vector v2(pt1-pt2)
+// pub fn get_unit_vector_perpendicular(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Option<Vec2> {
+//     let v1 = pos - pt2;
+//     let v2 = pt2 - pt1;
+//     if v2.hypot2() == 0. {
+//         log!("WARNING: Degenerate case, get_unit_vector_perpendicular()");
+//         return None;
+//     }
+//     let pv2 = Vec2::new(-v2.y, v2.x).normalize();
+//     let dot_product = v1.dot(pv2) * pv2;
+
+//     Some(dot_product)
+// }
+
+// Project v on v_p =(pt2-pt1)
+pub fn project_on_vec(pt1: Vec2, pt2: Vec2, v: Vec2) -> Vec2 {
+    let v_p = pt2 - pt1;
+    let denom = v_p.dot(v_p);
+    if denom.abs() < f64::EPSILON {
+        return v;
+    }
+    v_p * v.dot(v_p) / denom
 }
 
 pub fn symmetric_point_to_segment(p1: Vec2, p2: Vec2, q: Vec2) -> Vec2 {
@@ -963,23 +969,112 @@ pub fn symmetric_point_to_segment(p1: Vec2, p2: Vec2, q: Vec2) -> Vec2 {
     symmetric
 }
 
-pub fn project_to_segment(p1: Vec2, p2: Vec2, q: Vec2) -> Vec2 {
-    // First segment vector
-    let v1 = p2 - p1;
+/// Returns `Some((distance, projection))` if the orthogonal projection of `q`
+/// onto the infinite line through `p1->p2` lies within the segment [p1, p2].
+/// Otherwise, returns `None`.
+pub fn distance_and_projection_to_segment(
+    p1: Vec2,
+    p2: Vec2,
+    q: Vec2,
+    offset: f64,
+) -> Option<(f64, Vec2)> {
+    let seg = p2 - p1; // segment vector
+    let pq = q - p1; // from p1 to q
 
-    // Second segment vector (q already starts at the origin)
-    let v2 = q;
+    let seg_len_sq = seg.length_squared();
+    if seg_len_sq < f64::EPSILON {
+        // Degenerate case: segment is effectively a point.
+        // Decide how you want to handle it; here, we say there's no valid 'segment'.
+        return None;
+    }
 
-    // Dot product of v2 and v1
-    let dot_product = v2.dot(v1);
+    // Parametric distance (t) along segment from p1:
+    // t=0 => p1, t=1 => p2, <0 => before p1, >1 => beyond p2
+    let t = pq.dot(seg) / seg_len_sq;
 
-    // Magnitude squared of v1
-    let v1_magnitude_squared = v1.length_squared();
+    // If outside [0..1], there's no valid orth projection within the segment
+    if t < 0.0 || t > 1.0 {
+        return None;
+    }
 
-    // Projection formula
-    let projection_length = dot_product / v1_magnitude_squared;
+    // The actual projection point on the segment
+    let proj = p1 + t * seg;
 
-    projection_length * v1
+    if (proj - p1).hypot() < offset || (proj - p2).hypot() < offset {
+        return None;
+    }
+    // Distance from q to its projection
+    let dist = (q - proj).hypot();
+
+    Some((dist, proj))
+}
+
+/// Returns `Some((distance, projected_point))` if the angle is within
+/// the arc’s sweep and *outside* the small "guard" zone around the start and end.
+/// Otherwise returns `None`.
+pub fn distance_and_projection_to_arc(
+    arc: &Arc,
+    pos: Vec2,
+    guard: f64, // small angle in radians to exclude near start & end
+) -> Option<(f64, Vec2)> {
+    let cp = pos - arc.center.to_vec2();
+    let dist_cp = cp.hypot();
+
+    // Normalize angles to [0, 2π).
+    let start = arc.start_angle.rem_euclid(2.0 * PI);
+    let end = (arc.start_angle + arc.sweep_angle).rem_euclid(2.0 * PI);
+
+    // Angle of the point w.r.t. the center, also in [0, 2π).
+    let theta_p = cp.atan2().rem_euclid(2.0 * PI);
+
+    // 1) Check if theta_p is in the arc sweep range
+    let in_arc_range = |angle: f64| {
+        if arc.sweep_angle >= 0.0 {
+            // CCW arc
+            if start <= end {
+                // Normal range: start -> end
+                angle >= start && angle <= end
+            } else {
+                // Arc spans the 2π boundary
+                angle >= start || angle <= end
+            }
+        } else {
+            // CW arc
+            if end <= start {
+                // Normal range: end -> start
+                angle <= start && angle >= end
+            } else {
+                // Arc spans the 2π boundary in CW sense
+                angle <= start || angle >= end
+            }
+        }
+    };
+
+    // 2) Helper to measure the minimal distance on a circle
+    //    (so angle_dist(a, b) is how many radians separate angles a and b).
+    let angle_dist = |a: f64, b: f64| {
+        let d = (a - b).abs();
+        d.min(2.0 * PI - d)
+    };
+
+    // 3) If the angle is in the arc’s sweep
+    if in_arc_range(theta_p) {
+        // but too close to start or end (within `guard` radians),
+        // then we say "no valid projection" => return None.
+        if angle_dist(theta_p, start) <= guard || angle_dist(theta_p, end) <= guard {
+            return None;
+        }
+
+        // Otherwise, proceed with your existing distance/projection logic:
+        let radius = arc.radii.x; // The relevant radius for this arc
+        let dir = cp / dist_cp; // Unit direction from center to pos
+        let proj_pt = arc.center + dir * radius;
+        let dist = (dist_cp - radius).abs();
+
+        Some((dist, proj_pt.to_vec2()))
+    } else {
+        None
+    }
 }
 
 pub fn project_to_segment_with_direction(p1: Vec2, p2: Vec2, q: Vec2) -> (f64, f64) {
@@ -1508,18 +1603,15 @@ pub fn perpendicular_point_with_projection(start: Vec2, end: Vec2, dpos: Vec2, u
 // pub fn create_arc_from_center(start: Vec2, end: Vec2, center: Vec2, sweep_sign: bool) -> Arc {
 //     // Calculate the radius
 //     let radius = (start - center).hypot();
-
 //     // Calculate the start and end angles
 //     let start_angle = (start - center).atan2();
 //     let end_angle = (end - center).atan2();
-
 //     // Calculate the sweep angle based on the concavity
 //     let sweep_angle = if sweep_sign {
 //         (end_angle - start_angle).rem_euclid(2.0 * std::f64::consts::PI)
 //     } else {
 //         (start_angle - end_angle).rem_euclid(2.0 * std::f64::consts::PI) * -1.0
 //     };
-
 //     // Construct the arc
 //     Arc {
 //         center: center.to_point(),
@@ -1803,11 +1895,14 @@ fn find_arc_circle_intersections(
 }
 
 /// Normalize an angle to the range [0, 2π)
-fn normalize_angle(angle: f64) -> f64 {
+fn _normalize_angle(angle: f64) -> f64 {
     angle.rem_euclid(2.0 * std::f64::consts::PI)
 }
 
 pub fn point_from_start(start: Vec2, end: Vec2, rad: f64) -> Vec2 {
+    if rad < EPSILON {
+        return start;
+    }
     let seg = end - start;
     let dist = seg.hypot();
 
@@ -1822,6 +1917,9 @@ pub fn point_from_start(start: Vec2, end: Vec2, rad: f64) -> Vec2 {
 }
 
 pub fn point_from_end(start: Vec2, end: Vec2, rad: f64) -> Vec2 {
+    if rad < EPSILON {
+        return end;
+    }
     let seg = start - end;
     let dist = seg.hypot();
 
@@ -1918,6 +2016,38 @@ pub fn move_b_with_snapping(a: Vec2, b: Vec2, c: Vec2, dpos: Vec2, snap: f64) ->
             b
         }
     }
+}
+
+pub fn snap_end_to_multiple_of(start: Vec2, end: Vec2, dpos: Vec2, snap: f64) -> Vec2 {
+    // 1. Nouvelle extrémité brute
+    let new_end = end + dpos;
+
+    // 2. Vecteur direction à partir de start
+    let direction = new_end - start;
+
+    // 3. Longueur actuelle
+    let current_length = direction.hypot(); // ou direction.length()
+
+    // Vérification pour éviter la division par zéro
+    if current_length.abs() < f64::EPSILON {
+        // Si le vecteur est (quasi) nul, on ne peut pas le "scaler" correctement
+        return new_end;
+    }
+
+    // 4. Calcul de la longueur "snapée"
+    let snapped_length = (current_length / snap).round() * snap;
+
+    // 5. Facteur d'échelle
+    let scale = if snapped_length.abs() < f64::EPSILON {
+        0.0
+    } else {
+        snapped_length / current_length
+    };
+
+    // 6. Nouvelle fin "snapée"
+    let snapped_end = start + direction * scale;
+
+    snapped_end
 }
 
 pub fn get_coordinates_in_base(v1: Vec2, v2: Vec2, p: Vec2) -> (f64, f64) {

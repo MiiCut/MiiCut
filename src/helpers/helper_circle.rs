@@ -57,9 +57,6 @@ impl HelperCircle {
     }
 
     fn hs_controls_from_pos(&mut self, pointer: &mut Pointer, _keys_states: KeysStates, hs: HS) {
-        // center
-        self.center.set_hs_from_pos(hs, pointer);
-
         // circonference
         let within_grab_radius = |pos: Vec2, center: Vec2, radius: f64| -> bool {
             ((pos - center).hypot() - radius).abs() < Self::GRAB_RADIUS
@@ -76,6 +73,7 @@ impl HelperCircle {
             );
         }
         if self.radius.is_hs(HS::Select) {
+            log!("hs_controls_from_pos");
             pointer.save_pos();
         }
     }
@@ -111,10 +109,16 @@ impl ObjectsFuncs for HelperCircle {
     fn good_size(&self) -> bool {
         self.radius.value >= Self::MIN_RADIUS
     }
+    fn finish_draw(&mut self) -> bool {
+        self.radius.set_hs(HS::Select, false);
+        self.radius.set_hs(HS::Highlight, false);
+        true
+    }
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use GetEntityState::*;
         match get {
-            IsHS(hs) | IsAnyControlHS(hs) => self.state.is_hs(hs).then(|| self.get_position()),
+            IsHS(hs) => self.state.is_hs(hs).then(|| self.get_position()),
+            GetFirstControlHS(hs) => self.radius.is_hs(hs).then(|| self.get_position()),
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
@@ -130,20 +134,17 @@ impl ObjectsFuncs for HelperCircle {
     fn set_state_from_pos(
         &mut self,
         pointer: &mut Pointer,
-        _keys_states: KeysStates,
+        keys_states: KeysStates,
         set: SetEntityStateFromPos,
     ) {
         use SetEntityStateFromPos::*;
-        // A closure to check if pointer is within the grab radius
-        let within_grab_radius =
-            |pointer: &Pointer, center: Vec2| (pointer.pos() - center).hypot() < Self::GRAB_RADIUS;
-
         match set {
-            SetHSFromPos(hs) => self
-                .state
-                .set_hs(hs, within_grab_radius(pointer, self.center.pos)),
+            SetHSFromPos(hs) => self.state.set_hs(
+                hs,
+                (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS,
+            ),
             SetControlHSFromPos(hs) => {
-                self.center.set_hs_from_pos(hs, pointer);
+                self.hs_controls_from_pos(pointer, keys_states, hs);
             }
         }
     }
@@ -160,14 +161,19 @@ impl ObjectsFuncs for HelperCircle {
         true
     }
     fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
-        let radius = snap_val(
-            (pointer.pos() - self.center.pos).hypot(),
-            pointer.get_snap().val(),
-        );
-        if radius >= HelperCircle::MIN_RADIUS {
-            self.radius.value = radius;
+        use HS::*;
+        if self.radius.is_hs(Select) {
+            let radius = snap_val(
+                (pointer.pos() - self.center.pos).hypot(),
+                pointer.get_snap().val(),
+            );
+            if radius >= HelperCircle::MIN_RADIUS {
+                self.radius.value = radius;
+            }
+            true
+        } else {
+            false
         }
-        true
     }
     fn get_position(&self) -> Vec2 {
         self.center.pos

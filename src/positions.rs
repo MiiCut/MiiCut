@@ -218,6 +218,9 @@ impl Position {
             }
         }
     }
+    pub fn get_dist_from_pos(&self, pos: Vec2) -> f64 {
+        (pos - self.pos).hypot()
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -227,7 +230,7 @@ pub struct RadiusValue {
     pub saved_up: bool,
 }
 impl RadiusValue {
-    const GRAB_RADIUS: f64 = 5.;
+    const _GRAB_RADIUS: f64 = 5.;
 
     pub fn new(radius: f64, up: bool) -> Self {
         Self {

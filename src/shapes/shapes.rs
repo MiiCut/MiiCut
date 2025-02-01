@@ -5,11 +5,13 @@
 //     }
 // }
 use super::shape_disc::ShapeDisc;
+use super::shape_polygon::HalfEdgeProperty;
 use super::shape_polygon::PolygonIter;
 use super::shape_polygon::ShapePolygon;
 use super::shapes_pool::BSid;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
+use crate::dom::IconsShapes;
 use crate::pools::Pools;
 use crate::pools::PoolsFunctions;
 use crate::traits::*;
@@ -78,6 +80,34 @@ pub enum ShapeKind {
     KindPolygon(ShapePolygon),
 }
 impl ShapeKind {
+    pub fn new_shape(
+        icon_shape: IconsShapes,
+        pointer: &mut Pointer,
+        boolean_op: BoolOps,
+    ) -> MiiShape {
+        use HalfEdgeProperty::*;
+        let shid = BSid::new();
+        let pos1 = pointer.pos();
+        let pos2 = pos1;
+        let shape_kind = match icon_shape {
+            IconsShapes::Rectangle => {
+                pointer.set_pos(pos2);
+                pointer.save_pos();
+                ShapePolygon::with_first_half_edge(pos1, RectangleLike)
+            }
+            IconsShapes::Disc => ShapeDisc::new(pos1, pos1),
+            IconsShapes::Custom => ShapePolygon::with_first_half_edge(pos1, Nope),
+        };
+        MiiShape::new(shid, shape_kind, boolean_op)
+    }
+    pub fn get_magnet_points(&self) -> Vec<Vec2> {
+        use ShapeKind::*;
+        match self {
+            KindRectangle(sh) => sh.get_magnet_points(),
+            KindDisc(sh) => sh.get_magnet_points(),
+            KindPolygon(sh) => sh.get_magnet_points(),
+        }
+    }
     pub fn get_polygon(&self) -> Polygon<f64> {
         use ShapeKind::*;
         match self {
