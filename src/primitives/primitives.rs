@@ -38,7 +38,6 @@ impl PrimitiveCurve {
 #[derive(Copy, Debug, Clone)]
 pub struct Primitive {
     curve: PrimitiveCurve,
-
     // Primitive curves (not on an enum because of memory retention)
     // when user switches between curves, the previous values are kept
     // Line

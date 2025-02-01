@@ -88,6 +88,14 @@ pub fn modifiers_pattern(selected: bool, highlighted: bool) -> Pattern {
         (true, true) => Pattern::ModifiersSelected,
     }
 }
+pub fn get_pattern(selected: bool, highlighted: bool) -> Pattern {
+    match (selected, highlighted) {
+        (false, false) => Pattern::BasicNormal,
+        (false, true) => Pattern::BasicHighlighted,
+        (true, false) => Pattern::BasicSelected,
+        (true, true) => Pattern::BasicSelected,
+    }
+}
 
 pub fn handle_modify_path(pos: Vec2, scale: f64) -> BezPath {
     let tol = 0.01;

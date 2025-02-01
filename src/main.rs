@@ -98,7 +98,6 @@ struct AppVars {
     mouse: Mouse,
     pointer: Pointer,
 }
-
 impl AppVars {
     fn cancel_entity_creation(&mut self) {
         self.on_creation = DrawObjects::Nope;
@@ -231,6 +230,7 @@ impl AppVars {
                         } else {
                             p.prev_curve();
                         }
+                        shape_polygon.update_primitives_vars();
                         break;
                     }
                     // B) Change first vertex selected and break if found
@@ -288,6 +288,7 @@ impl AppVars {
         }
     }
 }
+
 ///////////////
 // Initialization
 fn create_app_vars(window: Window) -> Result<(), JsValue> {
@@ -1112,7 +1113,7 @@ fn on_mouse_enter(av: RefAV, _event: Event) {
 }
 fn on_mouse_leave(av: RefAV, _event: Event) {
     let mut avb = av.borrow_mut();
-    // avb.pointer.set_active(false);
+    avb.pointer.set_active(false);
     render_drawing(&mut avb);
     drop(avb);
 }

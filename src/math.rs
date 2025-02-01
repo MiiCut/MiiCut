@@ -903,7 +903,7 @@ pub fn rotate_vector(vector: Vec2, angle: f64) -> Vec2 {
     )
 }
 
-// Unit perpendicular of a segment formad by two points
+// Unit perpendicular of a segment formed by two points
 pub fn unit_perpendicular(v1: Vec2, v2: Vec2, clockwise: bool) -> Option<Vec2> {
     // Vector representing the segment
     let v = v2 - v1;
@@ -2066,4 +2066,282 @@ pub fn get_coordinates_in_base(v1: Vec2, v2: Vec2, p: Vec2) -> (f64, f64) {
     let b = inv_mat[1][0] * p.x + inv_mat[1][1] * p.y;
 
     (a, b)
+}
+
+pub fn circle_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<(Vec2, f64)> {
+    // 1) Check for collinearity by cross product of (p2-p1) and (p3-p1).
+    //    If the cross is ~0, the points are collinear or extremely close.
+    let v1 = p2 - p1;
+    let v2 = p3 - p1;
+    let cross = v1.cross(v2);
+    // or `v1.x * v2.y - v1.y * v2.x` if you prefer manually
+    if cross.abs() < EPSILON {
+        // You might adjust epsilon based on your numeric tolerance
+        return None;
+    }
+
+    // 2) Midpoints of p1p2 and p2p3
+    let m12 = 0.5 * (p1 + p2);
+    let m23 = 0.5 * (p2 + p3);
+
+    // 3) Perpendicular directions to p1p2 and p2p3
+    //    For vector (x, y), a perpendicular is (−y, x) or (y, −x).
+    //    We'll pick one: (−y, x).
+    let d12 = Vec2::new(-(p2 - p1).y, (p2 - p1).x);
+    let d23 = Vec2::new(-(p3 - p2).y, (p3 - p2).x);
+
+    // We want to solve for intersection:
+    //    line1(t) = m12 + t * d12
+    //    line2(s) = m23 + s * d23
+    // so that line1(t) = line2(s).
+
+    // 4) Solve the 2D linear system:
+    //
+    //    m12 + t·d12 = m23 + s·d23
+    // => t·d12 - s·d23 = (m23 - m12)
+    //
+    // We can use cross products to solve for t and/or s.
+    // Let:
+    //    r1 = d12
+    //    r2 = d23
+    //    rhs = m23 - m12
+    //
+    // Then cross(r1, r2) is the denominator. We'll call it denom.
+    //
+    // If r1 × r2 ≠ 0, we can find:
+    //   t = ( rhs × r2 ) / ( r1 × r2 )
+    //   s = ( rhs × r1 ) / ( r1 × r2 )
+    //
+    // where for Vec2 a, b:
+    //   a × b = a.x * b.y - a.y * b.x
+
+    let rhs = m23 - m12;
+    let denom = d12.cross(d23);
+
+    // This should be non-zero, but let’s guard anyway:
+    if denom.abs() < 1e-12 {
+        // The perpendicular bisectors are nearly parallel -> degenerate case
+        return None;
+    }
+
+    let t = rhs.cross(d23) / denom;
+    let center = m12 + d12 * t; // intersection point
+
+    // 5) Radius is distance from center to any of the three points
+    let radius = (center - p1).hypot(); // same as .length()
+
+    Some((center, radius))
+}
+
+/// Returns true if `angle2` lies on the CCW arc from `angle1` to `angle3` (inclusive).
+fn is_in_ccw_arc(angle1: f64, angle2: f64, angle3: f64) -> bool {
+    let two_pi = 2.0 * std::f64::consts::PI;
+    let sweep = (angle3 - angle1).rem_euclid(two_pi);
+    let rel2 = (angle2 - angle1).rem_euclid(two_pi);
+    rel2 <= sweep
+}
+
+/// Returns an Arc (circle arc) that passes through p1, p2, p3 in that order
+/// (i.e. the arc visits p1 -> p2 -> p3 in the same orientation as the triple).
+/// Returns None if the points are collinear or something degenerate.
+pub fn arc_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<Arc> {
+    // 1) Get the circle through p1, p2, p3
+    let (center, radius) = circle_from_three_points(p1, p2, p3)?;
+
+    // 2) Angles of each point w.r.t. center
+    let a1 = (p1 - center).atan2().rem_euclid(2.0 * PI);
+    let a2 = (p2 - center).atan2().rem_euclid(2.0 * PI);
+    let a3 = (p3 - center).atan2().rem_euclid(2.0 * PI);
+
+    // 3) Orientation: cross product of (p2-p1, p3-p1)
+    let cross = (p2 - p1).cross(p3 - p1);
+
+    // 4) We'll compute a "ccw_sweep" from a1 to a3
+    let ccw_sweep = (a3 - a1).rem_euclid(2.0 * PI);
+
+    // If cross > 0, we *want* the arc to be CCW from p1 to p3,
+    // and also contain p2 in between.
+    // If cross < 0, we want the arc to be CW (which is a negative sweep).
+    //
+    // We'll pick whichever sweep (±) actually includes a2 in the interior.
+
+    let mut sweep = ccw_sweep; // candidate (CCW)
+    if cross < 0.0 {
+        // prefer CW => negative sweep
+        sweep = if ccw_sweep.abs() < 1e-12 {
+            // edge case: a1 ~ a3
+            0.0
+        } else {
+            ccw_sweep - 2.0 * PI // negative
+        };
+    }
+
+    // Check if a2 is indeed on that arc. If not, flip the sweep.
+    let arc_includes_p2 = if sweep >= 0.0 {
+        // This is a CCW arc from a1 to (a1 + sweep)
+        is_in_ccw_arc(a1, a2, a1 + sweep)
+    } else {
+        // This is a CW arc from a1 to a1 + sweep. Let’s adapt the same check:
+        // A negative sweep means the arc moves a1 -> a1 + sweep in decreasing angles.
+        // We can do a quick trick: for a CW arc from a1 to a3, a2 is on it
+        // if a2 is on the CCW arc from a3 back to a1. That can be more confusing.
+        //
+        // Alternatively, convert to a "positive" perspective: a CW arc a1->(a1+sweep)
+        // is the same as a CCW arc (a1+sweep)->a1. We'll do that:
+        let alt_start = (a1 + sweep).rem_euclid(2.0 * PI);
+        is_in_ccw_arc(alt_start, a2, a1)
+    };
+
+    if !arc_includes_p2 {
+        // Flip the sweep so that p2 is inside
+        sweep = if sweep >= 0.0 {
+            sweep - 2.0 * PI
+        } else {
+            sweep + 2.0 * PI
+        };
+    }
+
+    // Construct the Arc
+    Some(Arc {
+        center: Point::new(center.x, center.y),
+        radii: Vec2::new(radius, radius), // circle arc
+        start_angle: a1,
+        sweep_angle: sweep,
+        x_rotation: 0.0, // no rotation for a circle
+    })
+}
+
+/// Return the minor (short) arc on the circle (center, radius) that goes from p1 to p2.
+///
+/// - `p1` and `p2` must lie on the circle (within some tolerance).
+/// - The returned `sweep_angle` will be in (-π, π], so its magnitude is ≤ π (the minor arc).
+/// - If you need the major arc instead, you can invert `.sweep_angle`.
+pub fn arc_from_center_radius_two_points(
+    center: Vec2,
+    radius: f64,
+    p1: Vec2,
+    p2: Vec2,
+) -> Option<Arc> {
+    // 1) Check degenerate case: if p1 == p2, there's no unique arc
+    if (p1 - p2).hypot() < EPSILON {
+        return None;
+    }
+
+    // 2) Convert p1, p2 to angles around `center`, in [0, 2π)
+    let a1 = (p1 - center).atan2().rem_euclid(2.0 * PI);
+    let a2 = (p2 - center).atan2().rem_euclid(2.0 * PI);
+
+    // 3) "Naive" sweep from a1 to a2, in [0, 2π)
+    let mut sweep = (a2 - a1).rem_euclid(2.0 * PI);
+
+    // 4) Force it to be the minor arc => the absolute angle ≤ π
+    //    If sweep > π, we can go the "other way" by subtracting 2π => negative sweep
+    if sweep > PI {
+        sweep -= 2.0 * PI;
+    }
+
+    // Construct and return the kurbo::Arc
+    Some(Arc {
+        center: Point::new(center.x, center.y),
+        radii: Vec2::new(radius, radius),
+        start_angle: a1,
+        sweep_angle: sweep, // Will be in (-π, π]
+        x_rotation: 0.0,
+    })
+}
+
+//--------------------------------------------------------------------------
+// 2) A function to pick the "new circle" of radius R that goes through p1_new & p3,
+//    with p2 as the arc-midpoint. We'll also specify the orientation we want
+//    (CW or CCW) by passing in the old sign of cross((p2 - p1),(p3 - p1)).
+//
+//    Returns (p2_new, new_arc).
+//--------------------------------------------------------------------------
+pub fn new_arc_with_midpoint(
+    p1_new: Vec2,
+    p3: Vec2,
+    radius: f64,
+    old_orientation_sign: f64, // cross product sign from the old arc to pick side
+) -> Option<(Vec2, Arc)> {
+    // 1) Chord length between p1_new and p3
+    let chord = p3 - p1_new;
+    let len = chord.hypot();
+    if len < EPSILON {
+        // p1_new == p3 => degenerate
+        return None;
+    }
+    // If chord length > 2R => no real solution
+    if len > 2.0 * radius {
+        return None;
+    }
+
+    // 2) Midpoint of chord
+    let m = 0.5 * (p1_new + p3);
+
+    // 3) The distance from midpoint to circle center is h = sqrt(R^2 - (L/2)^2)
+    let half_chord = 0.5 * len;
+    let h = (radius * radius - half_chord * half_chord).sqrt();
+
+    // 4) A unit perpendicular to the chord
+    //    For (x, y), a perpendicular can be ( -y, x ) or ( y, -x ).
+    //    We'll pick one and then choose +/- based on old orientation.
+    let chord_dir = chord.normalize();
+    let perp = Vec2::new(-chord_dir.y, chord_dir.x);
+
+    // We'll pick the sign of h so that we match the "old orientation" (CW or CCW).
+    // The sign is basically which side of the chord the center is on.
+    // We'll do a cross product test: cross(chord, old_arc_chord) or something simpler.
+    // An easy way: if old_orientation_sign > 0 => we want a CCW arc => put center
+    // "to the left" of chord => dot(perp, old_arc_perp) > 0 => etc.
+    //
+    // For simplicity, let's do:
+    let center_candidates = [
+        m + perp * h, // "above" the chord
+        m - perp * h, // "below" the chord
+    ];
+
+    // We'll pick one of these centers based on the old orientation sign.
+    // A straightforward approach:
+    let c1 = center_candidates[0];
+    let c2 = center_candidates[1];
+
+    // We'll define the chord direction as p1_new->p3. If old_orientation_sign > 0,
+    // we want the circle center to be on the "left" of that chord direction (which is + cross).
+    // cross(chord, c1 - m) will be positive if c1 is to the left, negative if to the right.
+    // But c1 - m = perp*h => cross(chord, perp) ...
+    let cross_with_c1 = chord.cross(c1 - m); // Should be chord.cross(perp*h) = h * cross(chord, perp)
+    let pick_first_center = (cross_with_c1 >= 0.0 && old_orientation_sign > 0.0)
+        || (cross_with_c1 <= 0.0 && old_orientation_sign < 0.0);
+
+    let center = if pick_first_center { c1 } else { c2 };
+
+    // 5) Now we have a center. The angle from center->p1_new is a1, to p3 is a3.
+    let a1 = (p1_new - center).atan2().rem_euclid(2.0 * PI);
+    let a3 = (p3 - center).atan2().rem_euclid(2.0 * PI);
+
+    // We'll define the arc in the *shorter* direction from a1 to a3, but then
+    // flip sign if we want it CW. Let's do a naive difference in [0, 2π).
+    let mut sweep = (a3 - a1).rem_euclid(2.0 * PI);
+
+    // If old_orientation_sign < 0 => we prefer a negative (CW) sweep
+    if old_orientation_sign < 0.0 {
+        if sweep.abs() > 1e-12 {
+            sweep -= 2.0 * PI; // make it negative
+        }
+    }
+
+    // The new arc from a1 to a3 has midpoint angle a2 = a1 + 0.5*sweep.
+    let a2 = a1 + 0.5 * sweep;
+    let p2_new = center + radius * Vec2::new(a2.cos(), a2.sin());
+
+    // 6) Construct the resulting Arc
+    let new_arc = Arc {
+        center: Point::new(center.x, center.y),
+        radii: Vec2::new(radius, radius),
+        start_angle: a1,
+        sweep_angle: sweep,
+        x_rotation: 0.0,
+    };
+
+    Some((p2_new, new_arc))
 }

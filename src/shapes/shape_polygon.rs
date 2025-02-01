@@ -29,41 +29,49 @@ impl Display for HalfEdgeProperty {
 #[derive(Copy, Debug, Clone)]
 pub enum VertexModifier {
     // Fillet radius or Chamfer distance, fillet concavity
-    Chamfer(Value, ValueBool),
-    Fillet(Value, ValueBool),
-    Nope(Value, ValueBool),
+    Chamfer(Value, ValueBool, bool, bool),
+    Fillet(Value, ValueBool, bool, bool),
+    Nope(Value, ValueBool, bool, bool),
 }
 impl VertexModifier {
     pub fn toogle(&self) -> Self {
         use VertexModifier::*;
         match self {
-            Chamfer(radius, concavity) => Fillet(*radius, *concavity),
-            Fillet(radius, concavity) => Nope(*radius, *concavity),
-            Nope(radius, concavity) => Chamfer(*radius, *concavity),
+            Chamfer(radius, concavity, selected, highlighted) => {
+                Fillet(*radius, *concavity, *selected, *highlighted)
+            }
+            Fillet(radius, concavity, selected, highlighted) => {
+                Nope(*radius, *concavity, *selected, *highlighted)
+            }
+            Nope(radius, concavity, selected, highlighted) => {
+                Chamfer(*radius, *concavity, *selected, *highlighted)
+            }
         }
     }
     pub fn get_offset(&self) -> &f64 {
         use VertexModifier::*;
         match self {
-            Chamfer(offset, _) | Fillet(offset, _) | Nope(offset, _) => &offset.value,
+            Chamfer(offset, ..) | Fillet(offset, ..) | Nope(offset, ..) => &offset.value,
         }
     }
     pub fn get_concavity(&self) -> &bool {
         use VertexModifier::*;
         match self {
-            Chamfer(_, concavity) | Fillet(_, concavity) | Nope(_, concavity) => &concavity.value,
+            Chamfer(_, concavity, ..) | Fillet(_, concavity, ..) | Nope(_, concavity, ..) => {
+                &concavity.value
+            }
         }
     }
     pub fn get_offset_saved(&self) -> &f64 {
         use VertexModifier::*;
         match self {
-            Chamfer(offset, _) | Fillet(offset, _) | Nope(offset, _) => &offset.saved_val,
+            Chamfer(offset, ..) | Fillet(offset, ..) | Nope(offset, ..) => &offset.saved_val,
         }
     }
     pub fn get_concavity_saved(&self) -> &bool {
         use VertexModifier::*;
         match self {
-            Chamfer(_, concavity) | Fillet(_, concavity) | Nope(_, concavity) => {
+            Chamfer(_, concavity, ..) | Fillet(_, concavity, ..) | Nope(_, concavity, ..) => {
                 &concavity.saved_val
             }
         }
@@ -71,33 +79,33 @@ impl VertexModifier {
     pub fn set_offset(&mut self, offset: f64) {
         use VertexModifier::*;
         match self {
-            Chamfer(ref mut off, _) => off.value = offset,
-            Fillet(ref mut off, _) => off.value = offset,
-            Nope(ref mut off, _) => off.value = offset,
+            Chamfer(ref mut off, ..) => off.value = offset,
+            Fillet(ref mut off, ..) => off.value = offset,
+            Nope(ref mut off, ..) => off.value = offset,
         }
     }
     pub fn set_concavity(&mut self, concavity: bool) {
         use VertexModifier::*;
         match self {
-            Chamfer(_, ref mut conc) => conc.value = concavity,
-            Fillet(_, ref mut conc) => conc.value = concavity,
-            Nope(_, ref mut conc) => conc.value = concavity,
+            Chamfer(_, ref mut conc, ..) => conc.value = concavity,
+            Fillet(_, ref mut conc, ..) => conc.value = concavity,
+            Nope(_, ref mut conc, ..) => conc.value = concavity,
         }
     }
     pub fn set_offset_saved(&mut self, offset: f64) {
         use VertexModifier::*;
         match self {
-            Chamfer(ref mut off, _) => off.saved_val = offset,
-            Fillet(ref mut off, _) => off.saved_val = offset,
-            Nope(ref mut off, _) => off.saved_val = offset,
+            Chamfer(ref mut off, ..) => off.saved_val = offset,
+            Fillet(ref mut off, ..) => off.saved_val = offset,
+            Nope(ref mut off, ..) => off.saved_val = offset,
         }
     }
     pub fn set_concavity_saved(&mut self, concavity: bool) {
         use VertexModifier::*;
         match self {
-            Chamfer(_, ref mut conc) => conc.saved_val = concavity,
-            Fillet(_, ref mut conc) => conc.saved_val = concavity,
-            Nope(_, ref mut conc) => conc.saved_val = concavity,
+            Chamfer(_, ref mut conc, ..) => conc.saved_val = concavity,
+            Fillet(_, ref mut conc, ..) => conc.saved_val = concavity,
+            Nope(_, ref mut conc, ..) => conc.saved_val = concavity,
         }
     }
 }
@@ -112,7 +120,12 @@ impl Vertex {
     pub fn new(pos: Vec2) -> Self {
         Self {
             pos: Position::new(pos, true),
-            modifier: VertexModifier::Nope(Value::new(Self::MIN_OFFSET), ValueBool::new(false)),
+            modifier: VertexModifier::Nope(
+                Value::new(Self::MIN_OFFSET),
+                ValueBool::new(false),
+                false,
+                false,
+            ),
         }
     }
     pub fn get_pos(&self) -> &Position {
@@ -147,15 +160,15 @@ impl Vertex {
     pub fn save_modifier(&mut self) {
         use VertexModifier::*;
         match &mut self.modifier {
-            Nope(offset, concavity) => {
+            Nope(offset, concavity, ..) => {
                 offset.saved_val = offset.value;
                 concavity.saved_val = concavity.value;
             }
-            Chamfer(offset, concavity) => {
+            Chamfer(offset, concavity, ..) => {
                 offset.saved_val = offset.value;
                 concavity.saved_val = concavity.value;
             }
-            Fillet(offset, concavity) => {
+            Fillet(offset, concavity, ..) => {
                 offset.saved_val = offset.value;
                 concavity.saved_val = concavity.value;
             }
@@ -164,15 +177,15 @@ impl Vertex {
     pub fn restore_modifier(&mut self) {
         use VertexModifier::*;
         match &mut self.modifier {
-            Nope(offset, concavity) => {
+            Nope(offset, concavity, ..) => {
                 offset.value = offset.saved_val;
                 concavity.value = concavity.saved_val;
             }
-            Chamfer(offset, concavity) => {
+            Chamfer(offset, concavity, ..) => {
                 offset.value = offset.saved_val;
                 concavity.value = concavity.saved_val;
             }
-            Fillet(offset, concavity) => {
+            Fillet(offset, concavity, ..) => {
                 offset.value = offset.saved_val;
                 concavity.value = concavity.saved_val;
             }
@@ -186,22 +199,26 @@ impl Vertex {
     pub fn get_offset(&self) -> f64 {
         use VertexModifier::*;
         match self.modifier {
-            Nope(_, _) => 0.,
-            Chamfer(offset, _) | Fillet(offset, _) => offset.value,
+            Nope(..) => 0.,
+            Chamfer(offset, ..) | Fillet(offset, ..) => offset.value,
         }
     }
     pub fn set_modifier_offset(&mut self, offset: f64) {
         use VertexModifier::*;
         match self.modifier {
-            Nope(_, concavity) => self.modifier = Nope(Value::new(offset), concavity),
-            Chamfer(_, concavity) => self.modifier = Chamfer(Value::new(offset), concavity),
-            Fillet(_, concavity) => self.modifier = Fillet(Value::new(offset), concavity),
+            Nope(_, concavity, s, h) => self.modifier = Nope(Value::new(offset), concavity, s, h),
+            Chamfer(_, concavity, s, h) => {
+                self.modifier = Chamfer(Value::new(offset), concavity, s, h)
+            }
+            Fillet(_, concavity, s, h) => {
+                self.modifier = Fillet(Value::new(offset), concavity, s, h)
+            }
         }
     }
     pub fn get_modifier_offset_saved(&self) -> f64 {
         use VertexModifier::*;
         match self.modifier {
-            Nope(offset, _) | Chamfer(offset, _) | Fillet(offset, _) => offset.saved_val,
+            Nope(offset, ..) | Chamfer(offset, ..) | Fillet(offset, ..) => offset.saved_val,
         }
     }
     pub fn move_pos(&mut self, dpos: Vec2) {
@@ -211,10 +228,10 @@ impl Vertex {
     pub fn get_pattern(&self) -> Pattern {
         use HS::*;
         match (self.pos.is_hs(Select), self.pos.is_hs(Highlight)) {
-            (false, false) => Pattern::Modifiers,
-            (false, true) => Pattern::ModifiersHighlighted,
-            (true, false) => Pattern::ModifiersSelected,
-            (true, true) => Pattern::ModifiersSelected,
+            (false, false) => Pattern::BasicNormal,
+            (false, true) => Pattern::BasicHighlighted,
+            (true, false) => Pattern::BasicSelected,
+            (true, true) => Pattern::BasicSelected,
         }
     }
 }
@@ -422,6 +439,16 @@ impl ShapePolygon {
     pub fn get_polygon(&self) -> Polygon<f64> {
         self.polygon.clone()
     }
+    pub fn update_primitives_vars(&mut self) {
+        for idx_he in 0..self.hes.len() as i64 {
+            let s = self.hes.get(idx_he).get_vertex().get_pos().clone();
+            let s_next = self.hes.get(idx_he + 1).get_vertex().get_pos().clone();
+            self.hes
+                .get_mut(idx_he)
+                .get_primitive_mut()
+                .update_primitives_vars(s.clone(), s_next.clone());
+        }
+    }
     pub fn update_polygon(&mut self) {
         self.segs = calc_segs(self.to_path(Self::TOLERANCE));
         self.polygon = calc_polygon(&self.segs);
@@ -626,9 +653,10 @@ impl ObjectsFuncs for ShapePolygon {
             SetHSFromPos(Highlight) => self.highlighted = self.contains(pointer.pos().to_point()),
             SetHSFromPos(Select) => self.selected = self.contains(pointer.pos().to_point()),
             SetControlHSFromPos(hs) => {
-                // For all vertices, retrieve the nearest from the pointer, if any
+                // For all vertices and vertices modifiers, retrieve the nearest from the pointer, if any
                 let mut nearest_vertex: Option<(i64, f64, Vec2)> = None;
                 for he_idx in 0..self.hes.len() as i64 {
+                    // Vertex
                     let v_pos = self.get_he(he_idx).get_vertex().get_pos();
                     let dist = v_pos.get_dist_from_pos(pointer.pos());
                     if let Some((_, nearerst_dist, _)) = nearest_vertex {
@@ -640,6 +668,25 @@ impl ObjectsFuncs for ShapePolygon {
                             nearest_vertex = Some((he_idx, dist, v_pos.pos));
                         }
                     }
+                    // // Modifier
+                    // match self.get_he(he_idx).get_vertex().get_modifier() {
+                    //     VertexModifier::Chamfer(_, _, selected, _)
+                    //     | VertexModifier::Fillet(_, _, selected, _) => {
+                    //         if selected {
+                    //             let dist = v_pos.get_dist_from_pos(pointer.pos());
+                    //             if let Some((_, nearerst_dist, _)) = nearest_vertex {
+                    //                 if dist < nearerst_dist {
+                    //                     nearest_vertex = Some((he_idx, dist, v_pos.pos));
+                    //                 }
+                    //             } else {
+                    //                 if dist < Self::GRAB {
+                    //                     nearest_vertex = Some((he_idx, dist, v_pos.pos));
+                    //                 }
+                    //             }
+                    //         }
+                    //     }
+                    //     _ => (),
+                    // }
                 }
 
                 // For all primitives, retrieve their nearest control from the pointer, if any
@@ -725,45 +772,14 @@ impl ObjectsFuncs for ShapePolygon {
             .for_each(|vertex| {
                 vertex.move_pos(pointer.dpos());
             });
+        self.update_primitives_vars();
         self.update_polygon();
         true
     }
-    fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
+    fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
         use HalfEdgeProperty::*;
         use HS::*;
-        // Check if we are in creation mode
-        // if let Some(current_pos) = &mut self.current_creation_pos {
-        //     match self.vertices_property {
-        //         VertexProperty::Nope => {
-        //             // Yes, update the last line
-        //             if let Some(last_line) = self.primitives.last_mut() {
-        //                 if let PrimitiveCurve::CurveLine = last_line.get_prim_curve() {
-        //                     let start_pos = last_line.get_start_pos();
-        //                     if !pointer.is_magnetized() {
-        //                         current_pos.pos = current_pos.saved_pos + pointer.dpos();
-        //                         current_pos.pos =
-        //                             snap_pt(current_pos.pos - start_pos, pointer.get_snap().val())
-        //                                 + start_pos;
-        //                     } else {
-        //                         current_pos.pos = current_pos.saved_pos + pointer.dpos();
-        //                     }
-        //                     last_line.set_end_pos(current_pos.pos);
-        //                 }
-        //             }
-        //             self.update_polygon();
-        //             true
-        //         }
-        //         VertexProperty::RectangleLike => {
-        //             let snap = pointer.get_snap().val();
-        //             let dpos = pointer.dpos();
-        //             let magnetized = pointer.is_magnetized();
-        //             // Vertex move
-        //             self.move_vertex(2, dpos, snap, magnetized);
-        //             self.update_polygon();
-        //             return true;
-        //         }
-        //     }
-        // } else {
+
         // Move the first polygon vertex found in case of multiples (normally not the case)
         // Also, since each primitive has start/end vertices, we need to move the end vertex
         // of the previous primitive
@@ -812,7 +828,7 @@ impl ObjectsFuncs for ShapePolygon {
                 for idx_he in 0..self.hes.len() as i64 {
                     let state = self.hes.get(idx_he).get_vertex().pos.is_hs(Select);
                     if state {
-                        let s_prec = self.hes.get(idx_he - 1).get_vertex().get_pos().clone();
+                        let s_prev = self.hes.get(idx_he - 1).get_vertex().get_pos().clone();
                         let s = self.hes.get(idx_he).get_vertex().get_pos().clone();
                         let s_next = self.hes.get(idx_he + 1).get_vertex().get_pos().clone();
                         let v = self.hes.get_mut(idx_he).get_vertex_mut();
@@ -821,7 +837,7 @@ impl ObjectsFuncs for ShapePolygon {
                             v.set_pos(pointer.pos());
                         } else {
                             v.set_pos(move_b_with_snapping(
-                                s_prec.pos,
+                                s_prev.pos,
                                 v.get_pos().saved_pos,
                                 s_next.pos,
                                 dpos,
@@ -830,6 +846,10 @@ impl ObjectsFuncs for ShapePolygon {
                         }
                         // Update primitives variables
                         self.hes
+                            .get_mut(idx_he - 1)
+                            .get_primitive_mut()
+                            .update_primitives_vars(s_prev.clone(), s.clone());
+                        self.hes
                             .get_mut(idx_he)
                             .get_primitive_mut()
                             .update_primitives_vars(s.clone(), s_next.clone());
@@ -837,7 +857,6 @@ impl ObjectsFuncs for ShapePolygon {
                         return true;
                     }
                 }
-                false
             }
             RectangleLike => {
                 // Move the first vertex found and move adjacent vertices
@@ -894,8 +913,17 @@ impl ObjectsFuncs for ShapePolygon {
                         return true;
                     }
                 }
+            }
+        }
+
+        // Move the first control found on the primitive
+        for idx_he in 0..self.hes.len() as i64 {
+            let v = self.hes.get(idx_he).get_vertex().get_pos().clone();
+            let v_next = self.hes.get(idx_he + 1).get_vertex().get_pos().clone();
+            let p = self.hes.get_mut(idx_he).get_primitive_mut();
+            if p.move_control_selected(v.pos, v_next.pos, pointer, keys_states) {
                 self.update_polygon();
-                false
+                return true;
             }
         }
 
@@ -945,7 +973,6 @@ impl ObjectsFuncs for ShapePolygon {
         //     let p = self.primitives.get(idx);
         //     let s = self.vertices.get(p.get_start());
         //     let e = self.vertices.get(p.get_end());
-
         //     if p.move_control_selected(pointer, keys_states) {
         //         self.update_polygon();
         //         moved = true;
@@ -953,8 +980,8 @@ impl ObjectsFuncs for ShapePolygon {
         //     }
         // }
         // moved
+        false
     }
-
     fn get_position(&self) -> Vec2 {
         self.get_centroid()
     }
@@ -967,7 +994,6 @@ impl ObjectsFuncs for ShapePolygon {
         _das: &Size,
         canvas_infos: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern)> {
-        use PrimitiveCurve::*;
         use HS::*;
         let scale = canvas_infos.1;
         let mut paths_patterns: Vec<(BezPath, Pattern)> = vec![];
@@ -981,112 +1007,12 @@ impl ObjectsFuncs for ShapePolygon {
             ));
         }
 
-        // Polygon controls (only for lines and arcs)
-        for he_idx in 0..self.hes.len() as i64 {
-            let p = self.hes.get(he_idx).get_primitive();
-            let s = self.hes.get(he_idx).get_vertex().get_pos().pos;
-            let s_next = self.hes.get(he_idx + 1).get_vertex().get_pos().pos;
-            let selected = p.get_control_state(s, s_next, Select).is_some();
-            let highlighted = p.get_control_state(s, s_next, Highlight).is_some();
-            // let s_real = point_from_start(s, e, *s.get_modifier().get_offset());
-            // let e_real = point_from_end(s, e, *e.get_modifier().get_offset());
-            let controls = match p.get_curve() {
-                CurveLine => p.get_line().get_all_controls_positions(s, s_next),
-                CurveArc => p.get_arc().get_all_controls_positions(s, s_next),
-            };
-            for control in controls {
-                paths_patterns.push((
-                    modifiers_path(control, scale, Self::GRAB),
-                    modifiers_pattern(selected, highlighted),
-                ));
-            }
-        }
-
         // Polygon center
         let center = self.get_centroid();
         paths_patterns.push((
             center_path(center, scale, Self::GRAB),
             modifiers_pattern(self.selected, self.highlighted),
         ));
-        // Filet centers paths/patterns
-        // for idx in 0..self.primitives.len() as i64 {
-        //     let p_prev = self.primitives.get(idx - 1);
-        //     let p = self.primitives.get(idx);
-        //     let p_next = self.primitives.get(idx + 1);
-        //     let s = self.vertices.get(p.get_start());
-        //     let s_prev = self.vertices.get(p_prev.get_start());
-        //     let s_next = self.vertices.get(p_next.get_start());
-        //     let s_mod = s.get_modifier();-
-        //     let prim_start_pattern = p.get_pattern(
-        //         s.get_pos().is_hs(Select) || self.selected,
-        //         s.get_pos().is_hs(Highlight) || self.highlighted,
-        //     );
-        //     match p.get_curve() {
-        //         PrimitiveCurve::CurveLine => {
-        //             let selected = p
-        //                 .get_state(s.get_pos().pos, s_next.get_pos().pos, IsHS(Select))
-        //                 .is_some()
-        //                 || self.selected;
-        //             let highlighted = p
-        //                 .get_state(s.get_pos().pos, s_next.get_pos().pos, IsHS(Highlight))
-        //                 .is_some()
-        //                 || self.highlighted;
-        //             let s_real = point_from_start(
-        //                 s.get_pos().pos,
-        //                 s_next.get_pos().pos,
-        //                 *s.get_modifier().get_offset(),
-        //             );
-        //             let s_next_real = point_from_end(
-        //                 s.get_pos().pos,
-        //                 s_next.get_pos().pos,
-        //                 *s_next.get_modifier().get_offset(),
-        //             );
-        //             let prev_end_real = point_from_end(
-        //                 s_prev.get_pos().pos,
-        //                 s.get_pos().pos,
-        //                 *s.get_modifier().get_offset(),
-        //             );
-        //             match s_mod {
-        //                 Nope(..) => (),
-        //                 Chamfer(..) => (),
-        //                 Fillet(offset, mut concavity) => {
-        //                     let angle =
-        //                         (PI - angle_from(
-        //                             s.get_pos().pos - prev_end_real,
-        //                             s_real - s.get_pos().pos,
-        //                         )) * 0.5;
-        //                     let mut radius = -offset.value * angle.tan();
-        //                     if radius > 0. {
-        //                         concavity.value = !concavity.value;
-        //                         radius = -radius;
-        //                     }
-        //                     let center = create_arc_from_radius_and_concavity(
-        //                         prev_end_real,
-        //                         s_real,
-        //                         radius,
-        //                         concavity,
-        //                     )
-        //                     .center
-        //                     .to_vec2();
-        //                     paths_patterns.push((
-        //                         center_path(center, 1., Self::GRAB_RADIUS),
-        //                         prim_start_pattern,
-        //                     ));
-        //                     let ee = if let Nope(..) = e_mod {
-        //                         s_next.get_pos().pos
-        //                     } else {
-        //                         e_real
-        //                     };
-        //                     paths_patterns.push((
-        //                         self.line_to(s_real, ee),
-        //                         p.get_pattern(selected, highlighted),
-        //                     ));
-        //                 }
-        //             }
-        //         }
-        //         _ => (),
-        //     };
-        // }
         paths_patterns
     }
     fn get_dimensions_paths_and_patterns(
@@ -1116,9 +1042,10 @@ impl ObjectsFuncs for ShapePolygon {
         use PrimitiveCurve::*;
         use VertexModifier::*;
         let mut paths_patterns = vec![];
+
         let len = self.hes.len();
         for idx in 0..len as i64 {
-            let p = self.hes.get(idx).get_primitive();
+            let p: &Primitive = self.hes.get(idx).get_primitive();
             let v_prev = self.hes.get(idx - 1).get_vertex();
             let v = self.hes.get(idx).get_vertex();
             let v_next = self.hes.get(idx + 1).get_vertex();
@@ -1132,6 +1059,7 @@ impl ObjectsFuncs for ShapePolygon {
                     let prev_end_real =
                         point_from_end(v_prev.get_pos().pos, v.get_pos().pos, v.get_offset());
 
+                    // Vertices modifiers
                     match v.get_modifier() {
                         Nope(..) => (),
                         Chamfer(..) => {
@@ -1141,7 +1069,7 @@ impl ObjectsFuncs for ShapePolygon {
                                 v.get_pattern(),
                             ));
                         }
-                        Fillet(_, mut concavity) => {
+                        Fillet(_, mut concavity, _s, _h) => {
                             let angle =
                                 (PI - angle_from(
                                     v.get_pos().pos - prev_end_real,
@@ -1163,6 +1091,7 @@ impl ObjectsFuncs for ShapePolygon {
                         }
                     }
 
+                    // Polygon edges
                     paths_patterns.push(p.get_line().get_paths_and_patterns(
                         start_real,
                         end_real,
@@ -1172,11 +1101,6 @@ impl ObjectsFuncs for ShapePolygon {
                     ));
                 }
                 CurveArc => {
-                    log!(
-                        "v = {:?} v_next {:?}",
-                        v.get_pos().pos,
-                        v_next.get_pos().pos
-                    );
                     paths_patterns.push(p.get_arc().get_paths_and_patterns(
                         v.get_pos().pos,
                         v_next.get_pos().pos,

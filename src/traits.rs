@@ -3,7 +3,6 @@ use crate::{
     pools::HS,
     KeysStates, Pointer,
 };
-use geo::Polygon;
 use kurbo::{BezPath, Rect, Size, Vec2};
 use std::fmt::Debug;
 
