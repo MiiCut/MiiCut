@@ -91,14 +91,6 @@ impl Dimension {
     pub fn get_text_val(&self) -> String {
         format!("{:.2}", self.get_length())
     }
-    fn get_text_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
-        match (selected, highlighted) {
-            (false, false) => Pattern::DimensionTextNormal,
-            (false, true) => Pattern::DimensionTextHighlighted,
-            (true, false) => Pattern::DimensionTextSelected,
-            (true, true) => Pattern::DimensionTextSelected,
-        }
-    }
     pub fn get_text(&self) -> CanvasText {
         CanvasText::new(
             self.get_text_val(),
@@ -119,6 +111,14 @@ impl Dimension {
             DimKind::Horizontal => self.get_horizontal_path(),
             DimKind::Vertical => self.get_vertical_path(),
             DimKind::Angle => self.get_angle_path(),
+        }
+    }
+    fn get_text_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
+        match (selected, highlighted) {
+            (false, false) => Pattern::DimensionTextNormal,
+            (false, true) => Pattern::DimensionTextHighlighted,
+            (true, false) => Pattern::DimensionTextSelected,
+            (true, true) => Pattern::DimensionTextSelected,
         }
     }
     fn get_horizontal_path(&self) -> (BezPath, Pattern, CanvasText) {

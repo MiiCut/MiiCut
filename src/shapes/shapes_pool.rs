@@ -74,8 +74,8 @@ impl ShapesPool {
                 }
                 if shape
                     .get_kind()
-                    .get_polygon()
-                    .intersects(&v.get_kind().get_polygon())
+                    .get_geo_polygon()
+                    .intersects(&v.get_kind().get_geo_polygon())
                 {
                     result.insert(*k);
                 }
@@ -139,7 +139,7 @@ impl ShapesPool {
         // Convert shapes to polygons with their boolean operations
         let polygons: Vec<(Polygon, BoolOps)> = shapes
             .iter()
-            .map(|shape| (shape.get_kind().get_polygon(), shape.get_boolean_op()))
+            .map(|shape| (shape.get_kind().get_geo_polygon(), shape.get_boolean_op()))
             .collect();
 
         // let performance = window().unwrap().performance().unwrap();
@@ -330,8 +330,8 @@ impl PoolsFunctions for ShapesPool {
                 // Find and select the next shape
                 if let Some(shape) = self.shapes.get_mut(&next_shid) {
                     shape.get_kind_mut().set_state(SetHS(Select, true));
-                    pointer.set_pos(shape.get_kind().get_position());
-                    pointer.save_pos();
+                    // pointer.set_pos(shape.get_kind().get_position());
+                    // pointer.save_pos();
                     return true;
                 }
             }

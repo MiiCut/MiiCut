@@ -5,7 +5,6 @@
 //     }
 // }
 use super::shape_disc::ShapeDisc;
-use super::shape_polygon::HalfEdgeProperty;
 use super::shape_polygon::PolygonIter;
 use super::shape_polygon::ShapePolygon;
 use super::shapes_pool::BSid;
@@ -14,6 +13,7 @@ use crate::canvas::Pattern;
 use crate::dom::IconsShapes;
 use crate::pools::Pools;
 use crate::pools::PoolsFunctions;
+use crate::positions::HalfEdgeProperty;
 use crate::traits::*;
 use crate::Action;
 use crate::KeysStates;
@@ -24,6 +24,7 @@ use kurbo::CirclePathIter;
 use kurbo::PathEl;
 use kurbo::Point;
 use kurbo::Rect;
+use kurbo::Shape;
 use kurbo::Size;
 use kurbo::{BezPath, Vec2};
 use std::fmt::Debug;
@@ -96,7 +97,7 @@ impl ShapeKind {
                 ShapePolygon::with_first_half_edge(pos1, RectangleLike)
             }
             IconsShapes::Disc => ShapeDisc::new(pos1, pos1),
-            IconsShapes::Custom => ShapePolygon::with_first_half_edge(pos1, Nope),
+            IconsShapes::Custom => ShapePolygon::with_first_half_edge(pos1, General),
         };
         MiiShape::new(shid, shape_kind, boolean_op)
     }
@@ -108,7 +109,7 @@ impl ShapeKind {
             KindPolygon(sh) => sh.get_magnet_points(),
         }
     }
-    pub fn get_polygon(&self) -> Polygon<f64> {
+    pub fn get_geo_polygon(&self) -> Polygon<f64> {
         use ShapeKind::*;
         match self {
             KindRectangle(sh) => sh.get_polygon(),
@@ -257,16 +258,16 @@ impl ObjectsFuncs for ShapeKind {
             KindPolygon(sh) => sh.get_paths_and_patterns(das, cinfo),
         }
     }
-    fn get_mod_paths_and_patterns(
+    fn get_controls_paths_and_patterns(
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern)> {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
-            KindDisc(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
-            KindPolygon(sh) => sh.get_mod_paths_and_patterns(das, cinfo),
+            KindRectangle(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
+            KindDisc(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
+            KindPolygon(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
         }
     }
     fn get_dimensions_paths_and_patterns(
@@ -282,7 +283,7 @@ impl ObjectsFuncs for ShapeKind {
         }
     }
 }
-impl kurbo::Shape for ShapeKind {
+impl Shape for ShapeKind {
     type PathElementsIter<'iter> = ShapeIter;
 
     fn path_elements(&self, tolerance: f64) -> ShapeIter {

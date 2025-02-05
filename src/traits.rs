@@ -66,7 +66,7 @@ pub trait ObjectsFuncs: Debug + Clone {
         das: &Size,
         cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern)>;
-    fn get_mod_paths_and_patterns(
+    fn get_controls_paths_and_patterns(
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),

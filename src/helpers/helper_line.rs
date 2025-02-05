@@ -29,17 +29,20 @@ use std::fmt::Display;
 pub struct HelperLine {
     center: Position,
     angle: Value,
+    angle_status: Status,
 
     state: Status,
 }
 impl HelperLine {
     pub fn new(position: Vec2, pos2: Vec2) -> HelperKind {
-        let position = Position::new(position, true);
-        let mut angle = Value::new((pos2 - position.pos).atan2());
-        angle.set_hs(HS::Select, true);
+        let position = Position::new(position);
+        let angle = Value::new((pos2 - position.pos).atan2());
+        let mut angle_status = Status::default();
+        angle_status.set_hs(HS::Select, true);
         HelperKind::Line(HelperLine {
             center: position,
             angle,
+            angle_status,
             state: Status::default(),
         })
     }
@@ -54,7 +57,7 @@ impl HelperLine {
             pointer.pos(),
             Self::GRAB_RADIUS,
         );
-        self.angle.set_hs(hs, state);
+        self.angle_status.set_hs(hs, state);
     }
 }
 impl Display for HelperLine {
@@ -90,8 +93,8 @@ impl ObjectsFuncs for HelperLine {
     }
 
     fn finish_draw(&mut self) -> bool {
-        self.angle.set_hs(HS::Select, false);
-        self.angle.set_hs(HS::Highlight, false);
+        self.angle_status.set_hs(HS::Select, false);
+        self.angle_status.set_hs(HS::Highlight, false);
         true
     }
 
@@ -99,14 +102,14 @@ impl ObjectsFuncs for HelperLine {
         use GetEntityState::*;
         match get {
             IsHS(hs) => self.state.is_hs(hs).then(|| self.get_position()),
-            GetFirstControlHS(hs) => self.angle.is_hs(hs).then(|| self.center.pos),
+            GetFirstControlHS(hs) => self.angle_status.is_hs(hs).then(|| self.center.pos),
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
         use SetEntityState::*;
         match set {
             SetHS(hs, value) => self.state.set_hs(hs, value),
-            SetAllControlsHS(hs, value) => self.angle.set_hs(hs, value),
+            SetAllControlsHS(hs, value) => self.angle_status.set_hs(hs, value),
         }
     }
 
@@ -144,7 +147,7 @@ impl ObjectsFuncs for HelperLine {
         true
     }
     fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
-        if self.angle.is_hs(HS::Select) {
+        if self.angle_status.is_hs(HS::Select) {
             let angle = (pointer.pos() - self.center.pos).atan2();
             self.angle.value = snap_val(angle / PI * 180., pointer.get_snap().val()) / 180. * PI;
             return true;
@@ -155,15 +158,15 @@ impl ObjectsFuncs for HelperLine {
         self.center.pos
     }
 
-    fn get_mod_paths_and_patterns(
+    fn get_controls_paths_and_patterns(
         &self,
         _das: &Size,
         cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern)> {
         // Determine the appropriate pattern
-        let pattern_line = if self.angle.is_hs(HS::Select) {
+        let pattern_line = if self.angle_status.is_hs(HS::Select) {
             Pattern::HelperSelectedCircle
-        } else if self.angle.is_hs(HS::Highlight) {
+        } else if self.angle_status.is_hs(HS::Highlight) {
             Pattern::HelperHighlightedCircle
         } else {
             Pattern::HelperNormalCircle

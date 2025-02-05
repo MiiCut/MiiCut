@@ -468,7 +468,6 @@ impl Canvases {
 
         ctx.rotate(text.config.angle)
             .expect("Failed to rotate canvas");
-        ctx.set_font("14px Orbitron");
         ctx.set_font(&format!("{}px Orbitron", text.config.font_size));
         ctx.set_global_alpha(text.config.opacity);
         let (stroke_style, stroke_width, _) = self.styles.get_styles(text.config.pattern);
@@ -496,7 +495,6 @@ impl Canvases {
         let ctx = self.get_context(&canvas_kind);
         let scale = self.get_drawing_scale();
         let offset = self.get_drawing_offset();
-        ctx.set_font("14px Orbitron");
         let (path, pattern) = paths;
 
         let (stroke_style, stroke_width, filled) = self.styles.get_styles(pattern);
@@ -608,8 +606,6 @@ impl Canvases {
         let (fill_color, stroke_color) = self.styles.get_colors(Pattern::Rules);
         ctx.set_stroke_style_str(stroke_color);
         ctx.set_fill_style_str(fill_color);
-
-        ctx.set_font("14px Orbitron");
         ctx.begin_path();
 
         ctx.move_to(0., pos_canvas.y);

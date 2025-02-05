@@ -1933,55 +1933,113 @@ pub fn point_from_end(start: Vec2, end: Vec2, rad: f64) -> Vec2 {
     end + dir * rad
 }
 
-pub fn bisector_dir(a: Vec2, b: Vec2, c: Vec2) -> Vec2 {
-    // 1. Vectors from b
-    let v1 = a - b; // BA
-    let v2 = c - b; // BC
+/// Computes the normalized bisector direction and the half-angle (in radians) between
+/// the vectors from point `b` to points `a` and `c`.
+///
+/// Returns:
+/// - `Some((bisector_dir, angle))` where:
+///    - `bisector_dir` is a unit vector along the bisector of the angle at `b`.
+///    - `angle` is half of the angle between vectors `a - b` and `c - b`.
+/// - `None` if any degenerate case is encountered (e.g., one of the vectors is near zero,
+///    or the angle is degenerate).
+pub fn bisector_dir_and_angle(a: Vec2, b: Vec2, c: Vec2) -> Option<(Vec2, f64)> {
+    // Compute the vectors from vertex `b` to points `a` and `c`.
+    let v1 = a - b;
+    let v2 = c - b;
 
-    // Handle degenerate: if either vector is near zero, angle is not well-defined
-    if v1.hypot() < f64::EPSILON || v2.hypot() < f64::EPSILON {
-        return b;
+    // Return early if either vector is too small (degenerate case).
+    if v1.hypot() < EPSILON || v2.hypot() < EPSILON {
+        return None;
     }
 
-    // 2. Normalize
-    let n1 = v1.normalize();
-    let n2 = v2.normalize();
+    // Calculate the bisector direction by summing the normalized vectors.
+    let bisector_dir = v1.normalize() + v2.normalize();
 
-    // 3. Sum the normalized directions => angle bisector direction
-    let bisector_dir = n1 + n2;
-
-    // Degenerate case: if n1 ~ -n2 => A,B,C are ~180°, the "internal bisector" is ill-defined
+    // If the resulting bisector vector is nearly zero,
+    // then the vectors are nearly opposite (180° apart), so the bisector is ill-defined.
     if bisector_dir.hypot() < f64::EPSILON {
-        return b;
+        return None;
     }
 
-    bisector_dir.normalize()
+    // Compute half the angle between v1 and v2.
+    let half_angle = angle_from(v1, v2) * 0.5;
+
+    // Check for degenerate half-angle conditions:
+    // - If the half-angle is nearly ±π/2, the configuration is problematic.
+    // - If the angle is nearly 0 or π, it is also degenerate.
+    if (half_angle - PI / 2.).abs() < EPSILON || (half_angle + PI / 2.).abs() < EPSILON {
+        return None;
+    }
+    if half_angle.abs() < EPSILON || (half_angle - PI).abs() < EPSILON {
+        return None;
+    }
+
+    // Return the normalized bisector direction and the half-angle.
+    Some((bisector_dir.normalize(), half_angle))
 }
 
-// Angle at b
-pub fn project_onto_bisector(a: Vec2, b: Vec2, c: Vec2, p: Vec2) -> (Vec2, f64) {
-    // Compute bisector
-    let bisec = bisector_dir(a, b, c);
+/// Projects a point `p` onto the bisector of the angle at point `b` formed by points `a`, `b`, and `c`.
+///
+/// # Parameters
+/// - `a`: First point defining the angle (forming segment BA).
+/// - `b`: Vertex of the angle (common point for segments BA and BC).
+/// - `c`: Second point defining the angle (forming segment BC).
+/// - `p`: The point to project onto the bisector.
+///
+/// # Returns
+/// An `Option` containing a tuple:
+/// - The first element is the projected point on the bisector.
+/// - The second element is the sign of the projection scalar `t` (which indicates the direction along the bisector).
+///
+/// If the bisector direction is not defined (for example, if the points are degenerate),
+/// the function returns `None`.
+pub fn project_onto_bisector(a: Vec2, b: Vec2, c: Vec2, p: Vec2) -> Option<(Vec2, f64)> {
+    // Compute the bisector direction using the helper function `bisector_dir`.
+    // This function returns an Option containing a unit vector pointing along the bisector.
+    bisector_dir_and_angle(a, b, c).and_then(|(bisec, _)| {
+        // Project the point `p` onto the bisector direction.
+        // The dot product of `p` with the unit bisector gives the scalar projection `t`.
+        let t = p.dot(bisec);
 
-    // Compute projected point
-    let t = p.dot(bisec);
-    let p_proj = bisec * t;
+        // Multiply the unit bisector by the scalar projection to obtain the projected point.
+        let p_proj = bisec * t;
 
-    (p_proj, t.signum())
+        // Return the projected point along with the sign of the projection.
+        // The sign indicates on which side of the bisector (relative to `b`) the point lies.
+        Some((p_proj, t.signum()))
+    })
 }
 
-pub fn point_on_bisector(a: Vec2, b: Vec2, c: Vec2) -> (Vec2, f64) {
-    // Angle
+pub fn point_on_bisector(a: Vec2, b: Vec2, c: Vec2) -> Option<(Vec2, f64)> {
+    // Calculate half the angle at point b between vectors (a - b) and (c - b).
+    // The function angle_from(a - b, c - b) computes the full angle between these vectors.
     let mut angle = angle_from(a - b, c - b) * 0.5;
+
+    // Check for a degenerate case: if the half-angle is nearly ±90° (PI/2),
+    // then the bisector is either vertical or not well-defined.
+    // EPSILON is a small constant used to account for floating point inaccuracies.
     if (angle - PI / 2.).abs() < EPSILON || (angle + PI / 2.).abs() < EPSILON {
-        return (b, 0.);
+        return None;
     }
+
+    // Capture the sign of the angle.
+    // This sign indicates on which side of the line the bisector is oriented.
     let sign = angle.signum();
+
+    // Convert the angle to its absolute value to use in subsequent trigonometric calculations.
     angle = angle.abs();
 
+    // Compute the distance ("radius") along the bisector from point b.
+    // The radius is determined by the tangent of the half-angle multiplied by the distance from a to b.
+    // This comes from a geometric relation within the triangle.
     let radius = (a - b).hypot() * angle.tan();
-    let point = bisector_dir(a, b, c) * radius / angle.abs().sin();
-    (point + b, -sign)
+
+    // Calculate the bisector direction using the helper function `bisector_dir`.
+    // If a valid bisector direction is found, scale it by (radius / sin(angle))
+    // to determine the proper length, and then translate it by adding point b to position
+    // it in the plane. The function returns a tuple containing the computed point and -sign.
+    bisector_dir_and_angle(a, b, c)
+        .and_then(|(point, _)| Some((point * (radius / angle.abs().sin()) + b, -sign)))
 }
 
 fn snap_length(length: f64, snap: f64) -> f64 {

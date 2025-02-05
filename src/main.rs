@@ -7,6 +7,7 @@ macro_rules! log {
 }
 pub mod canvas;
 pub mod clipboard;
+pub mod curves;
 pub mod dimensions;
 pub mod dom;
 pub mod helpers;
@@ -14,7 +15,6 @@ pub mod math;
 pub mod pools;
 pub mod positions;
 pub mod prefab;
-pub mod primitives;
 pub mod shapes;
 pub mod traits;
 use crate::dom::*;
@@ -25,6 +25,7 @@ use canvas::TextAlign;
 use canvas::TextPos;
 use canvas::{CanvasKind, Canvases, Pattern};
 use clipboard::*;
+use curves::curves::CurveControls;
 use helpers::helpers_pool::AddHelperAction;
 use helpers::helpers_pool::DeleteHelperAction;
 use helpers::helpers_pool::HelpersPool;
@@ -34,7 +35,6 @@ use pools::HS;
 use pools::{DrawObjects, Pools};
 use positions::*;
 use prefab::*;
-use primitives::primitives::PrimitiveControls;
 use shapes::shapes::ShapeKind;
 use shapes::shapes::{BoolOps, ToogleBoolOpsShapesAction};
 use shapes::shapes_pool::BSid;
@@ -209,7 +209,7 @@ impl AppVars {
                 })
                 .map(|shape_polygon| {
                     shape_polygon.toggle_selected_prop();
-                    shape_polygon.update_polygon();
+                    shape_polygon.update_half_edges_vars_from_vertices();
                 });
             self.pools.shapes.recalc_full_segs();
         }
@@ -220,27 +220,25 @@ impl AppVars {
         if let Some(shape) = self.pools.shapes.get_mut(shid) {
             if let ShapeKind::KindPolygon(shape_polygon) = shape.get_kind_mut() {
                 for idx in 0..shape_polygon.get_hes_len() as i64 {
-                    // A) Change first primitive selected and break if found
-                    let s_pos = shape_polygon.get_he(idx).get_vertex().get_pos().pos;
-                    let e_pos = shape_polygon.get_he(idx + 1).get_vertex().get_pos().pos;
-                    let p = shape_polygon.get_he_mut(idx).get_primitive_mut();
-                    if p.get_control_state(s_pos, e_pos, Select).is_some() {
+                    let he = shape_polygon.get_he_mut(idx);
+                    // A. Change first primitive selected and break if found
+                    let p = he.get_edge_mut();
+                    if p.get_state(Select).is_some() {
                         if shift_pressed {
-                            p.next_curve();
+                            *p = p.next();
                         } else {
-                            p.prev_curve();
+                            *p = p.prev();
                         }
-                        shape_polygon.update_primitives_vars();
+                        shape_polygon.update_half_edges_vars_from_vertices();
                         break;
                     }
-                    // B) Change first vertex selected and break if found
-                    let v = shape_polygon.get_he_mut(idx).get_vertex_mut();
-                    if v.get_pos().is_hs(HS::Select) {
-                        v.toogle_modifier();
+                    // B. Change first vertex selected and break if found
+                    if he.get_vertex().get_state(Select).is_some() {
+                        he.toogle_vertex_curve();
                         break;
                     }
                 }
-                shape_polygon.update_polygon();
+                shape_polygon.update_half_edges_vars_from_vertices();
                 self.pools.shapes.recalc_full_segs();
             }
         }
@@ -684,7 +682,9 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 pointer.set_pos(mouse_pos_down);
                 pointer.save_pos();
                 avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if !pointer.is_magnetized() {
+                if pointer.is_magnetized() {
+                    pointer.save_pos();
+                } else {
                     avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
                 }
 
@@ -728,7 +728,9 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 pointer.set_pos(mouse_pos_up);
                 pointer.save_pos();
                 avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if !pointer.is_magnetized() {
+                if pointer.is_magnetized() {
+                    pointer.save_pos();
+                } else {
                     avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
                 }
 
@@ -777,7 +779,9 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     pointer.set_pos(mouse_pos_down);
                     pointer.save_pos();
                     avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                    if !pointer.is_magnetized() {
+                    if pointer.is_magnetized() {
+                        pointer.save_pos();
+                    } else {
                         avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
                     }
 
@@ -904,7 +908,9 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 pointer.set_pos(snap_pt(mouse_pos_down, pointer.get_snap().val()));
                 pointer.save_pos();
                 avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if !pointer.is_magnetized() {
+                if pointer.is_magnetized() {
+                    pointer.save_pos();
+                } else {
                     avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
                 }
 
@@ -950,7 +956,9 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 pointer.set_pos(mouse_pos_up);
                 pointer.save_pos();
                 avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if !pointer.is_magnetized() {
+                if pointer.is_magnetized() {
+                    pointer.save_pos();
+                } else {
                     avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
                 }
             }
@@ -994,7 +1002,7 @@ fn update_informations(avb: &mut RefMut<'_, AppVars>) {
         &CanvasText::new(
             format!("( {:.1} , {:.1} )", pos.x, pos.y),
             TextPos::PosCustom(Vec2::new(c_size.width - 10., c_size.height - 10.)),
-            CanvasTextConfig::new(Pattern::Rules, 0., TextAlign::Right, 16, 0.4),
+            CanvasTextConfig::new(Pattern::Rules, 0., TextAlign::Right, 20, 0.4),
         ),
     );
     avb.canvases.direct_text(
@@ -1006,7 +1014,7 @@ fn update_informations(avb: &mut RefMut<'_, AppVars>) {
                 avb.pointer.get_snap().val()
             ),
             TextPos::Pos1(c_size.height),
-            CanvasTextConfig::new(Pattern::Rules, 0., TextAlign::Left, 16, 0.4),
+            CanvasTextConfig::new(Pattern::Rules, 0., TextAlign::Left, 20, 0.4),
         ),
     );
 }
@@ -1425,7 +1433,7 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
 
     // SHAPES: Draw the modifiers points
     for shape in avb.pools.shapes.values() {
-        for path in shape.get_kind().get_mod_paths_and_patterns(das, cinfo) {
+        for path in shape.get_kind().get_controls_paths_and_patterns(das, cinfo) {
             avb.canvases.draw_path(&CanvasKind::Draw, path, vec![]);
         }
     }
@@ -1468,7 +1476,10 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     }
     // HELPERS: Draw the modifiers points
     for helper in avb.pools.helpers.values() {
-        for path in helper.get_kind().get_mod_paths_and_patterns(das, cinfo) {
+        for path in helper
+            .get_kind()
+            .get_controls_paths_and_patterns(das, cinfo)
+        {
             avb.canvases.draw_path(&CanvasKind::Draw, path, vec![]);
         }
     }
@@ -1551,7 +1562,7 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                     .draw_path(&CanvasKind::Draw, (path.clone(), *pattern), vec![]);
             });
         // With modifiers
-        for path in shape.get_kind().get_mod_paths_and_patterns(das, cinfo) {
+        for path in shape.get_kind().get_controls_paths_and_patterns(das, cinfo) {
             avb.canvases.draw_path(&CanvasKind::Draw, path, vec![]);
         }
         // With dimensions
@@ -1573,7 +1584,10 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                         .draw_path(&CanvasKind::Draw, (path.clone(), *pattern), vec![]);
                 });
             // With modifiers
-            for path in helper.get_kind().get_mod_paths_and_patterns(das, cinfo) {
+            for path in helper
+                .get_kind()
+                .get_controls_paths_and_patterns(das, cinfo)
+            {
                 avb.canvases.draw_path(&CanvasKind::Draw, path, vec![]);
             }
             // With dimensions

@@ -10,7 +10,7 @@ use crate::{
     dimensions::{DimKind, Dimension},
     math::*,
     pools::HS,
-    positions::{Position, Value},
+    positions::{Position, Status, Value},
     prefab::{center_path, modifiers_pattern},
     traits::*,
     KeysStates, Pointer,
@@ -25,9 +25,9 @@ use super::shapes::ShapeKind;
 pub struct ShapeDisc {
     center: Position,
     radius: Value,
+    radius_state: Status,
 
-    highlighted: bool,
-    selected: bool,
+    state: Status,
 
     segs: BezPath,
     polygon: Polygon<f64>,
@@ -37,15 +37,15 @@ impl ShapeDisc {
 
     pub fn new(center: Vec2, pos2: Vec2) -> ShapeKind {
         use HS::*;
-        let center = Position::new(center, false);
-        let mut radius = Value::new((pos2 - center.pos).hypot());
-        radius.set_hs(Select, true);
-
+        let center = Position::new(center);
+        let radius = Value::new((pos2 - center.pos).hypot());
+        let mut radius_state = Status::default();
+        radius_state.set_hs(Select, true);
         ShapeKind::KindDisc(ShapeDisc {
             center,
             radius,
-            highlighted: false,
-            selected: false,
+            radius_state,
+            state: Status::default(),
             segs: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
@@ -62,18 +62,18 @@ impl ShapeDisc {
         let within_grab_radius = |pos: Vec2, center: Vec2, radius: f64| -> bool {
             ((pos - center).hypot() - radius).abs() < Self::GRAB_RADIUS
         };
-        self.radius.set_hs(
+        self.radius_state.set_hs(
             hs,
             within_grab_radius(pointer.pos(), self.center.pos, self.radius.value),
         );
 
         // Pointer update
-        if self.radius.is_hs(hs) {
+        if self.radius_state.is_hs(hs) {
             pointer.set_pos(
                 self.center.pos + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
             );
         }
-        if self.radius.is_hs(Select) {
+        if self.radius_state.is_hs(Select) {
             pointer.save_pos();
         }
     }
@@ -84,7 +84,7 @@ impl ShapeDisc {
     pub fn get_polygon(&self) -> Polygon<f64> {
         self.polygon.clone()
     }
-    fn update_polygon(&mut self) {
+    fn update_geo_polygon(&mut self) {
         self.segs = calc_segs(self.to_path(Self::TOLERANCE));
         self.polygon = calc_polygon(&self.segs);
     }
@@ -137,14 +137,14 @@ impl ObjectsFuncs for ShapeDisc {
     fn restore_vars(&mut self) {
         self.center.pos = self.center.saved_pos;
         self.radius.value = self.radius.saved_val;
-        self.update_polygon();
+        self.update_geo_polygon();
     }
     fn get_vars(&self) -> ShapeKind {
         ShapeKind::KindDisc(ShapeDisc {
             center: self.center.clone(),
             radius: self.radius.clone(),
-            highlighted: false,
-            selected: false,
+            radius_state: Status::default(),
+            state: Status::default(),
             segs: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
@@ -154,7 +154,7 @@ impl ObjectsFuncs for ShapeDisc {
             self.center = shape_disc.center;
             self.radius = shape_disc.radius;
         }
-        self.update_polygon();
+        self.update_geo_polygon();
     }
     fn good_size(&self) -> bool {
         self.radius.value >= ShapeDisc::MIN_RADIUS
@@ -164,26 +164,16 @@ impl ObjectsFuncs for ShapeDisc {
     }
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use GetEntityState::*;
-        use HS::*;
         match get {
-            IsHS(Select) => self.selected.then(|| self.get_position()),
-            IsHS(Highlight) => self.highlighted.then(|| self.get_position()),
-            GetFirstControlHS(Select) => self.radius.is_hs(Select).then(|| self.get_position()),
-            GetFirstControlHS(Highlight) => {
-                self.radius.is_hs(Highlight).then(|| self.get_position())
-            }
+            IsHS(hs) => self.state.is_hs(hs).then(|| self.get_position()),
+            GetFirstControlHS(hs) => self.radius_state.is_hs(hs).then(|| self.get_position()),
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
         use SetEntityState::*;
-        use HS::*;
         match set {
-            SetHS(Select, value) => self.selected = value,
-            SetHS(Highlight, value) => self.highlighted = value,
-            SetAllControlsHS(hs, value) => {
-                self.center.set_hs(hs, value);
-                self.radius.set_hs(hs, value);
-            }
+            SetHS(hs, value) => self.state.set_hs(hs, value),
+            SetAllControlsHS(hs, value) => self.radius_state.set_hs(hs, value),
         }
     }
     fn set_state_from_pos(
@@ -194,19 +184,9 @@ impl ObjectsFuncs for ShapeDisc {
     ) {
         use SetEntityStateFromPos::*;
         match set {
-            SetHSFromPos(hs) => match hs {
-                HS::Select => {
-                    self.selected = self.contains(pointer.pos().to_point());
-                    if self.selected {
-                        pointer.set_pos(self.center.pos);
-                        pointer.save_pos();
-                    }
-                }
-                HS::Highlight => {
-                    self.highlighted = self.contains(pointer.pos().to_point());
-                    // pointer.set_pos(self.center.pos);
-                }
-            },
+            SetHSFromPos(hs) => self
+                .state
+                .set_hs(hs, self.contains(pointer.pos().to_point())),
             SetControlHSFromPos(hs) => self.hs_controls_from_pos(pointer, keys_states, hs),
         }
     }
@@ -218,7 +198,7 @@ impl ObjectsFuncs for ShapeDisc {
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         let dpos = pointer.dpos();
         self.center.pos = self.center.saved_pos + dpos;
-        self.update_polygon();
+        self.update_geo_polygon();
         true
     }
     fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
@@ -232,7 +212,7 @@ impl ObjectsFuncs for ShapeDisc {
         };
         if radius >= ShapeDisc::MIN_RADIUS {
             self.radius.value = radius;
-            self.update_polygon();
+            self.update_geo_polygon();
             return true;
         };
         false
@@ -242,14 +222,15 @@ impl ObjectsFuncs for ShapeDisc {
         self.center.pos
     }
 
-    fn get_mod_paths_and_patterns(
+    fn get_controls_paths_and_patterns(
         &self,
         _: &Size,
         _: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern)> {
+        use HS::*;
         vec![(
             center_path(self.center.pos, 1., ShapeDisc::GRAB_RADIUS),
-            modifiers_pattern(self.selected, self.highlighted),
+            modifiers_pattern(self.state.is_hs(Select), self.state.is_hs(Highlight)),
         )]
     }
     fn get_dimensions_paths_and_patterns(
@@ -267,14 +248,14 @@ impl ObjectsFuncs for ShapeDisc {
     }
     fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         use HS::*;
-        let pattern = if self.selected {
+        let pattern = if self.state.is_hs(Select) {
             Pattern::BasicSelected
-        } else if self.highlighted {
+        } else if self.state.is_hs(Highlight) {
             Pattern::BasicHighlighted
         } else {
-            if self.radius.is_hs(Select) {
+            if self.radius_state.is_hs(Select) {
                 Pattern::BasicLightSelected
-            } else if self.radius.is_hs(Highlight) {
+            } else if self.radius_state.is_hs(Highlight) {
                 Pattern::BasicLightHighlighted
             } else {
                 Pattern::BasicNormal
