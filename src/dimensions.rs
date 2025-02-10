@@ -254,7 +254,7 @@ impl Dimension {
         };
         let start = self.start;
         let end = self.end;
-        if let Some(unit_perp) = unit_perpendicular(start, end, false) {
+        if let Some((unit_perp, _)) = unit_perpendicular(start, end, false) {
             let unit_rot45 = rotate_vector(end - start, PI / 4.).normalize();
             let text = CanvasText::new(
                 format!("{:.1}", value),

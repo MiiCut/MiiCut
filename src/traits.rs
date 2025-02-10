@@ -47,8 +47,6 @@ pub trait ObjectsFuncs: Debug + Clone {
     fn restore_vars(&mut self);
     fn get_vars(&self) -> Self::Kindvars;
     fn set_vars(&mut self, vars: &Self::Kindvars);
-    fn good_size(&self) -> bool;
-    fn finish_draw(&mut self) -> bool;
     fn get_state(&self, get: GetEntityState) -> Option<Vec2>;
     fn set_state(&mut self, set: SetEntityState);
     fn set_state_from_pos(

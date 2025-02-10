@@ -1,10 +1,10 @@
 use crate::{
     helpers::{
-        helpers::{Helper, MoveHelpersAction},
+        helpers::MoveHelpersAction,
         helpers_pool::{AddHelperAction, HelpersPool},
     },
     shapes::{
-        shapes::{MiiShape, MoveShapesAction},
+        shapes::MoveShapesAction,
         shapes_pool::{AddShapeAction, ShapesPool},
     },
     traits::*,
@@ -65,57 +65,57 @@ pub enum HS {
     Select,
 }
 
-#[derive(Clone, Debug)]
-pub enum DrawObjects {
-    Shape(MiiShape),
-    Helper(Helper),
-    Nope,
-}
-#[allow(dead_code)]
-impl DrawObjects {
-    pub fn get_shape_into(&self) -> Option<MiiShape> {
-        match self {
-            DrawObjects::Shape(s) => Some(s.clone()),
-            _ => None,
-        }
-    }
-    pub fn get_shape(&self) -> Option<&MiiShape> {
-        match self {
-            DrawObjects::Shape(s) => Some(s),
-            _ => None,
-        }
-    }
-    pub fn get_shape_mut(&mut self) -> Option<&mut MiiShape> {
-        match self {
-            DrawObjects::Shape(s) => Some(s),
-            _ => None,
-        }
-    }
-    pub fn get_helper(&self) -> Option<&Helper> {
-        match self {
-            DrawObjects::Helper(h) => Some(h),
-            _ => None,
-        }
-    }
-    pub fn get_helper_mut(&mut self) -> Option<&mut Helper> {
-        match self {
-            DrawObjects::Helper(h) => Some(h),
-            _ => None,
-        }
-    }
-    pub fn get_helper_into(&self) -> Option<Helper> {
-        match self {
-            DrawObjects::Helper(h) => Some(h.clone()),
-            _ => None,
-        }
-    }
-    pub fn set_shape(&mut self, shape: MiiShape) {
-        *self = DrawObjects::Shape(shape);
-    }
-    pub fn set_helper(&mut self, helper: Helper) {
-        *self = DrawObjects::Helper(helper);
-    }
-}
+// #[derive(Clone, Debug)]
+// pub enum DrawObjects {
+//     Shape(MiiShape),
+//     Helper(Helper),
+//     Nope,
+// }
+// #[allow(dead_code)]
+// impl DrawObjects {
+//     pub fn get_shape_into(&self) -> Option<MiiShape> {
+//         match self {
+//             DrawObjects::Shape(s) => Some(s.clone()),
+//             _ => None,
+//         }
+//     }
+//     pub fn get_shape(&self) -> Option<&MiiShape> {
+//         match self {
+//             DrawObjects::Shape(s) => Some(s),
+//             _ => None,
+//         }
+//     }
+//     pub fn get_shape_mut(&mut self) -> Option<&mut MiiShape> {
+//         match self {
+//             DrawObjects::Shape(s) => Some(s),
+//             _ => None,
+//         }
+//     }
+//     pub fn get_helper(&self) -> Option<&Helper> {
+//         match self {
+//             DrawObjects::Helper(h) => Some(h),
+//             _ => None,
+//         }
+//     }
+//     pub fn get_helper_mut(&mut self) -> Option<&mut Helper> {
+//         match self {
+//             DrawObjects::Helper(h) => Some(h),
+//             _ => None,
+//         }
+//     }
+//     pub fn get_helper_into(&self) -> Option<Helper> {
+//         match self {
+//             DrawObjects::Helper(h) => Some(h.clone()),
+//             _ => None,
+//         }
+//     }
+//     pub fn set_shape(&mut self, shape: MiiShape) {
+//         *self = DrawObjects::Shape(shape);
+//     }
+//     pub fn set_helper(&mut self, helper: Helper) {
+//         *self = DrawObjects::Helper(helper);
+//     }
+// }
 
 #[derive(Clone, Debug)]
 pub struct Pools {
@@ -277,8 +277,7 @@ pub trait PoolsFunctions {
 
     fn save_vars(&mut self);
 
-    fn create_magnet_points(&mut self);
-    fn magnet_points(&self) -> impl Iterator<Item = &Vec2>;
+    // fn magnet_points(&self) -> Vec<Vec2>;
     fn magnet_to_point(&self, pointer: &mut Pointer, keys_states: KeysStates);
 
     fn get_state(&mut self, hors: HS) -> Vec<Self::Id>;

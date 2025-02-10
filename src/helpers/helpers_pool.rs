@@ -1,13 +1,9 @@
-use super::{
-    helper_circle::HelperCircle,
-    helper_line::HelperLine,
-    helpers::{Helper, HelperKind, HelperKindvars},
-};
+use super::helpers::{Helper, HelperKind, HelperKindvars};
 use crate::{
     math::*,
     pools::{Pools, PoolsFunctions},
     traits::*,
-    Action, IconsConstruction, KeysStates, Pointer, HS,
+    Action, KeysStates, Pointer, HS,
 };
 use kurbo::Vec2;
 use std::{
@@ -61,73 +57,7 @@ pub struct HelpersPool {
 impl HelpersPool {
     const MAGNET_RADIUS: f64 = 10.;
 
-    pub fn new_helper(icon_helper: IconsConstruction, pos1: Vec2, pos2: Vec2) -> Helper {
-        let dhid = DHid::new();
-        let helper_kind = match icon_helper {
-            IconsConstruction::Line => HelperLine::new(pos1, pos2),
-            IconsConstruction::Circle => HelperCircle::new(pos1, pos2),
-        };
-        Helper::new(dhid, helper_kind)
-    }
-}
-
-impl PoolsFunctions for HelpersPool {
-    type Id = DHid;
-    type Pool = HelpersPool;
-    type Object = Helper;
-    type ObjectKindvars = HelperKindvars;
-
-    fn new() -> HelpersPool {
-        HelpersPool {
-            helpers: HashMap::new(),
-            magnet_points: vec![Vec2::ZERO],
-        }
-    }
-    // Methods
-    fn duplicate(&mut self, shapes: Vec<Helper>) -> Vec<Helper> {
-        use SetEntityState::*;
-        use HS::*;
-        let mut new_helpers = vec![];
-        for mut helper in shapes.into_iter() {
-            helper.set_new_id(DHid::new());
-            helper.get_kind_mut().set_state(SetHS(Select, true));
-            self.add(helper.clone());
-            new_helpers.push(helper);
-        }
-        new_helpers
-    }
-    fn add(&mut self, helper: Helper) {
-        self.helpers.insert(helper.get_id(), helper);
-    }
-    fn delete(&mut self, dhid: DHid) -> Option<Helper> {
-        self.helpers.remove(&dhid)
-    }
-    fn get(&self, target_dhid: DHid) -> Option<&Helper> {
-        self.helpers.get(&target_dhid)
-    }
-    fn get_mut(&mut self, target_dhid: DHid) -> Option<&mut Helper> {
-        self.helpers.get_mut(&target_dhid)
-    }
-    fn iter(&self) -> impl Iterator<Item = (&DHid, &Helper)> {
-        self.helpers.iter()
-    }
-    fn iter_mut(&mut self) -> impl Iterator<Item = (&DHid, &mut Helper)> {
-        self.helpers.iter_mut()
-    }
-    fn values(&self) -> impl Iterator<Item = &Helper> {
-        self.helpers.values()
-    }
-    fn values_mut(&mut self) -> impl Iterator<Item = &mut Helper> {
-        self.helpers.values_mut()
-    }
-
-    fn save_vars(&mut self) {
-        self.helpers.values_mut().for_each(|helper| {
-            helper.get_kind_mut().save_vars();
-        });
-    }
-
-    fn create_magnet_points(&mut self) {
+    pub fn create_magnet_points(&mut self) {
         self.magnet_points = vec![];
         // Find the intersection of all lines
         let mut lines = vec![];
@@ -193,9 +123,67 @@ impl PoolsFunctions for HelpersPool {
         // Always add origin
         self.magnet_points.push(Vec2::ZERO);
     }
-    fn magnet_points(&self) -> impl Iterator<Item = &Vec2> {
-        self.magnet_points.iter()
+    pub fn magnet_points(&self) -> Vec<Vec2> {
+        self.magnet_points.clone()
     }
+}
+
+impl PoolsFunctions for HelpersPool {
+    type Id = DHid;
+    type Pool = HelpersPool;
+    type Object = Helper;
+    type ObjectKindvars = HelperKindvars;
+
+    fn new() -> HelpersPool {
+        HelpersPool {
+            helpers: HashMap::new(),
+            magnet_points: vec![Vec2::ZERO],
+        }
+    }
+    // Methods
+    fn duplicate(&mut self, shapes: Vec<Helper>) -> Vec<Helper> {
+        use SetEntityState::*;
+        use HS::*;
+        let mut new_helpers = vec![];
+        for mut helper in shapes.into_iter() {
+            helper.set_new_id(DHid::new());
+            helper.get_kind_mut().set_state(SetHS(Select, true));
+            self.add(helper.clone());
+            new_helpers.push(helper);
+        }
+        new_helpers
+    }
+    fn add(&mut self, helper: Helper) {
+        self.helpers.insert(helper.get_id(), helper);
+    }
+    fn delete(&mut self, dhid: DHid) -> Option<Helper> {
+        self.helpers.remove(&dhid)
+    }
+    fn get(&self, target_dhid: DHid) -> Option<&Helper> {
+        self.helpers.get(&target_dhid)
+    }
+    fn get_mut(&mut self, target_dhid: DHid) -> Option<&mut Helper> {
+        self.helpers.get_mut(&target_dhid)
+    }
+    fn iter(&self) -> impl Iterator<Item = (&DHid, &Helper)> {
+        self.helpers.iter()
+    }
+    fn iter_mut(&mut self) -> impl Iterator<Item = (&DHid, &mut Helper)> {
+        self.helpers.iter_mut()
+    }
+    fn values(&self) -> impl Iterator<Item = &Helper> {
+        self.helpers.values()
+    }
+    fn values_mut(&mut self) -> impl Iterator<Item = &mut Helper> {
+        self.helpers.values_mut()
+    }
+
+    fn save_vars(&mut self) {
+        self.helpers.values_mut().for_each(|helper| {
+            helper.get_kind_mut().save_vars();
+        });
+    }
+
     fn magnet_to_point(&self, pointer: &mut Pointer, keys_states: KeysStates) {
         if !keys_states.alt_pressed {
             pointer.set_magnetized(false);

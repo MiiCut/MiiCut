@@ -1,13 +1,10 @@
 use crate::{
-    canvas::{CanvasText, Pattern},
     curves::{
-        curve_arc::CurveArc,
-        curve_line::CurveLine,
-        curves::{Curve, CurveControls},
+        curves::CurveControls, from_dihedron::CurveFromDihedron, from_segment::CurveFromSegment,
     },
     pools::HS,
 };
-use kurbo::{BezPath, Size, Vec2};
+use kurbo::Vec2;
 use std::fmt::Display;
 
 #[derive(Copy, Debug, Clone)]
@@ -27,55 +24,59 @@ impl Display for HalfEdgeProperty {
 
 #[derive(Copy, Debug, Clone)]
 pub enum HalfEdgeElement {
-    Vertex,
-    Modifier,
-    Curve,
+    Apex,
+    Dihedron,
+    Edge,
 }
 #[derive(Copy, Debug, Clone)]
 pub struct HalfEdge {
-    vertex: Vertex,
-    vertex_curve: VertexCurve,
-    edge: Curve,
+    // vertex: Vertex,
+    dihedron_curve: CurveFromDihedron,
+    edge_curve: CurveFromSegment,
 }
 impl HalfEdge {
-    pub fn new(vertex: Vertex, curve: Curve) -> Self {
+    pub fn new(
+        // vertex: Vertex,
+        dihedron_curve: CurveFromDihedron,
+        edge_curve: CurveFromSegment,
+    ) -> Self {
         Self {
-            vertex,
-            vertex_curve: VertexCurve::default(),
-            edge: curve,
+            // vertex,
+            dihedron_curve,
+            edge_curve,
         }
     }
-    pub fn get_vertex(&self) -> &Vertex {
-        &self.vertex
+    // pub fn get_apex(&self) -> &Position {
+    //     &self.vertex
+    // }
+    // pub fn get_vertex_mut(&mut self) -> &mut Position {
+    //     &mut self.vertex
+    // }
+    pub fn get_wedge(&self) -> &CurveFromDihedron {
+        &self.dihedron_curve
     }
-    pub fn get_vertex_mut(&mut self) -> &mut Vertex {
-        &mut self.vertex
+    pub fn get_wedge_mut(&mut self) -> &mut CurveFromDihedron {
+        &mut self.dihedron_curve
     }
-    pub fn get_vertex_curve(&self) -> &VertexCurve {
-        &self.vertex_curve
+    pub fn get_edge(&self) -> &CurveFromSegment {
+        &self.edge_curve
     }
-    pub fn get_vertex_curve_mut(&mut self) -> &mut VertexCurve {
-        &mut self.vertex_curve
-    }
-    pub fn get_edge(&self) -> &Curve {
-        &self.edge
-    }
-    pub fn get_edge_mut(&mut self) -> &mut Curve {
-        &mut self.edge
+    pub fn get_edge_mut(&mut self) -> &mut CurveFromSegment {
+        &mut self.edge_curve
     }
 
-    pub fn toogle_vertex_curve(&mut self) {
-        self.vertex_curve.toogle();
+    pub fn toogle_wedge_curve(&mut self) {
+        self.dihedron_curve.toogle();
     }
     pub fn save_vars(&mut self) {
-        self.vertex.save_vars();
-        self.edge.save_vars();
-        self.vertex_curve.save_vars();
+        // self.vertex.save_vars();
+        self.edge_curve.save_vars();
+        self.dihedron_curve.save_vars();
     }
     pub fn restore_vars(&mut self) {
-        self.vertex.restore_vars();
-        self.edge.restore_vars();
-        self.vertex_curve.restore_vars();
+        // self.vertex.restore_vars();
+        self.edge_curve.restore_vars();
+        self.dihedron_curve.restore_vars();
     }
 }
 
@@ -86,225 +87,90 @@ pub enum VertexCurveKind {
     #[default]
     Dummy,
 }
-#[derive(Copy, Debug, Clone, PartialEq, Default)]
-pub struct VertexCurve {
-    kind: VertexCurveKind,
-    kind_saved: VertexCurveKind,
 
-    dummy: Position,
-    chamfer: CurveLine,
-    fillet: CurveArc,
-    fillet_concavity: ValueBool,
-    fillet_concavity_saved: ValueBool,
+// #[derive(Copy, Debug, Clone, PartialEq)]
+// pub struct Vertex {
+//     pos: Position,
+//     state: Status,
+// }
+// impl Vertex {
+//     const GRAB_RADIUS: f64 = 5.;
 
-    chamfer_status: Status,
-    fillet_status: Status,
-}
-impl VertexCurve {
-    const GRAB_RADIUS: f64 = 5.;
-    pub fn get_kind(&self) -> VertexCurveKind {
-        self.kind
-    }
-    pub fn get_start(&self) -> Position {
-        use VertexCurveKind::*;
-        match self.kind {
-            Dummy => self.dummy,
-            Chamfer => self.chamfer.get_start(),
-            Fillet => self.fillet.get_start(),
-        }
-    }
-    pub fn get_end(&self) -> Position {
-        use VertexCurveKind::*;
-        match self.kind {
-            Dummy => self.dummy,
-            Chamfer => self.chamfer.get_end(),
-            Fillet => self.fillet.get_end(),
-        }
-    }
-    pub fn toogle(&mut self) {
-        use VertexCurveKind::*;
-        match self.kind {
-            Dummy => self.kind = Chamfer,
-            Chamfer => self.kind = Fillet,
-            Fillet => self.kind = Dummy,
-        }
-    }
-    pub fn save_vars(&mut self) {
-        self.kind_saved = self.kind;
-        self.chamfer.save_vars();
-        self.fillet.save_vars();
-        self.fillet_concavity_saved = self.fillet_concavity;
-    }
-    pub fn restore_vars(&mut self) {
-        self.kind = self.kind_saved;
-        self.chamfer.restore_vars();
-        self.fillet.restore_vars();
-        self.fillet_concavity = self.fillet_concavity_saved;
-    }
-    pub fn get_state(&self, hs: HS) -> Option<Vec2> {
-        use VertexCurveKind::*;
-        match self.kind {
-            Fillet => self.fillet.get_state(hs),
-            Chamfer => self.chamfer.get_state(hs),
-            Dummy => None,
-        }
-    }
-    pub fn set_state(&mut self, hs: HS, value: bool) {
-        use VertexCurveKind::*;
-        match self.kind {
-            Fillet => self.fillet.set_state(hs, value),
-            Chamfer => self.chamfer.set_state(hs, value),
-            Dummy => (),
-        }
-    }
-    pub fn set_hs_from_pos(&mut self, hs: HS, pointer: &mut Pointer) {
-        use VertexCurveKind::*;
-        let o_dist = self.get_dist_from_pos(pointer.pos());
-        match self.kind {
-            Dummy => (),
-            Chamfer | Fillet => {
-                if let Some(dist) = o_dist {
-                    if dist < Self::GRAB_RADIUS {
-                        self.set_state(hs, true);
-                    } else {
-                        self.set_state(hs, false);
-                    }
-                } else {
-                    self.set_state(hs, false);
-                }
-            }
-        }
-    }
-    pub fn get_dist_from_pos(&self, pos: Vec2) -> Option<f64> {
-        use VertexCurveKind::*;
-        match self.kind {
-            Dummy => None,
-            Chamfer => self.chamfer.get_dist_from_pos(pos).map(|(dist, _)| dist),
-            Fillet => self.fillet.get_dist_from_pos(pos).map(|(dist, _)| dist),
-        }
-    }
+//     pub fn new(pos: Vec2) -> Self {
+//         Self {
+//             pos: Position::new(pos),
+//             state: Status::default(),
+//         }
+//     }
+//     pub fn get_pos(&self) -> &Position {
+//         &self.pos
+//     }
+//     pub fn get_pos_mut(&mut self) -> &mut Position {
+//         &mut self.pos
+//     }
+//     pub fn set_pos(&mut self, pos: Vec2) {
+//         self.pos.pos = pos;
+//     }
+//     pub fn get_state(&self, hs: HS) -> Option<Vec2> {
+//         self.state.is_hs(hs).then(|| self.pos.pos)
+//     }
+//     pub fn set_state(&mut self, hs: HS, value: bool) {
+//         match hs {
+//             HS::Highlight => self.state.highlighted = value,
+//             HS::Select => self.state.selected = value,
+//         }
+//     }
+//     pub fn set_state_from_pos(&mut self, hs: HS, pointer: &mut Pointer) {
+//         let state = (pointer.pos() - self.pos.pos).hypot() < Self::GRAB_RADIUS;
+//         match hs {
+//             HS::Highlight => {
+//                 self.state.highlighted = state;
+//                 if self.state.highlighted {
+//                     pointer.set_pos(self.pos.pos);
+//                 }
+//             }
+//             HS::Select => {
+//                 self.state.selected = state;
+//                 if self.state.selected {
+//                     pointer.set_pos(self.pos.pos);
+//                     pointer.save_pos();
+//                 }
+//             }
+//         }
+//     }
+//     pub fn get_dist_from_pos(&self, pos: Vec2) -> f64 {
+//         (pos - self.pos.pos).hypot()
+//     }
+//     pub fn save_pos(&mut self) {
+//         self.pos.saved_pos = self.pos.pos;
+//     }
+//     pub fn restore_pos(&mut self) {
+//         self.pos.pos = self.pos.saved_pos;
+//     }
+//     pub fn save_vars(&mut self) {
+//         self.save_pos();
+//     }
+//     pub fn restore_vars(&mut self) {
+//         self.restore_pos();
+//     }
 
-    pub fn update_vars(&mut self, p_prev: Position, p: Position, p_next: Position) {
-        self.chamfer.set_from_dihedron(p_prev, p, p_next);
-        if let VertexCurveKind::Fillet = self.kind {
-            self.fillet.set_from_dihedron(p_prev, p, p_next);
-        }
-        self.dummy = p;
-    }
-    pub fn get_paths_and_patterns(
-        &self,
-        das: &Size,
-        parent_selected: bool,
-        parent_highlighted: bool,
-    ) -> (BezPath, Pattern) {
-        use VertexCurveKind::*;
-        match self.kind {
-            Chamfer => {
-                self.chamfer
-                    .get_paths_and_patterns(das, parent_selected, parent_highlighted)
-            }
-            Fillet => self
-                .fillet
-                .get_paths_and_patterns(das, parent_selected, parent_highlighted),
-            Dummy => (BezPath::new(), Pattern::BasicNormal),
-        }
-    }
-    pub fn get_dimensions_paths_and_patterns(
-        &self,
-        das: &Size,
-    ) -> Vec<(BezPath, Pattern, CanvasText)> {
-        use VertexCurveKind::*;
-        match self.kind {
-            Chamfer => self.chamfer.get_dimensions_paths_and_patterns(das),
-            Fillet => self.fillet.get_dimensions_paths_and_patterns(das),
-            Dummy => vec![],
-        }
-    }
-}
+//     pub fn move_pos(&mut self, dpos: Vec2) {
+//         self.pos.pos = self.pos.saved_pos + dpos;
+//     }
 
-#[derive(Copy, Debug, Clone, PartialEq)]
-pub struct Vertex {
-    pos: Position,
-    state: Status,
-}
-impl Vertex {
-    const GRAB_RADIUS: f64 = 5.;
-
-    pub fn new(pos: Vec2) -> Self {
-        Self {
-            pos: Position::new(pos),
-            state: Status::default(),
-        }
-    }
-    pub fn get_pos(&self) -> &Position {
-        &self.pos
-    }
-    pub fn get_pos_mut(&mut self) -> &mut Position {
-        &mut self.pos
-    }
-    pub fn set_pos(&mut self, pos: Vec2) {
-        self.pos.pos = pos;
-    }
-    pub fn get_state(&self, hs: HS) -> Option<Vec2> {
-        self.state.is_hs(hs).then(|| self.pos.pos)
-    }
-    pub fn set_state(&mut self, hs: HS, value: bool) {
-        match hs {
-            HS::Highlight => self.state.highlighted = value,
-            HS::Select => self.state.selected = value,
-        }
-    }
-    pub fn set_state_from_pos(&mut self, hs: HS, pointer: &mut Pointer) {
-        let state = (pointer.pos() - self.pos.pos).hypot() < Self::GRAB_RADIUS;
-        match hs {
-            HS::Highlight => {
-                self.state.highlighted = state;
-                if self.state.highlighted {
-                    pointer.set_pos(self.pos.pos);
-                }
-            }
-            HS::Select => {
-                self.state.selected = state;
-                if self.state.selected {
-                    pointer.set_pos(self.pos.pos);
-                    pointer.save_pos();
-                }
-            }
-        }
-    }
-    pub fn get_dist_from_pos(&self, pos: Vec2) -> f64 {
-        (pos - self.pos.pos).hypot()
-    }
-    pub fn save_pos(&mut self) {
-        self.pos.saved_pos = self.pos.pos;
-    }
-    pub fn restore_pos(&mut self) {
-        self.pos.pos = self.pos.saved_pos;
-    }
-    pub fn save_vars(&mut self) {
-        self.save_pos();
-    }
-    pub fn restore_vars(&mut self) {
-        self.restore_pos();
-    }
-
-    pub fn move_pos(&mut self, dpos: Vec2) {
-        self.pos.pos = self.pos.saved_pos + dpos;
-    }
-
-    pub fn get_pattern(&self) -> Pattern {
-        use HS::*;
-        match (
-            self.get_state(Select).is_some(),
-            self.get_state(Highlight).is_some(),
-        ) {
-            (false, false) => Pattern::BasicNormal,
-            (false, true) => Pattern::BasicHighlighted,
-            (true, false) => Pattern::BasicSelected,
-            (true, true) => Pattern::BasicSelected,
-        }
-    }
-}
+//     pub fn get_pattern(&self) -> Pattern {
+//         use HS::*;
+//         match (
+//             self.get_state(Select).is_some(),
+//             self.get_state(Highlight).is_some(),
+//         ) {
+//             (false, false) => Pattern::BasicNormal,
+//             (false, true) => Pattern::BasicHighlighted,
+//             (true, false) => Pattern::BasicSelected,
+//             (true, true) => Pattern::BasicSelected,
+//         }
+//     }
+// }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Pointer {
@@ -435,6 +301,9 @@ impl Position {
             last_pos: pos,
             pos,
         }
+    }
+    pub fn move_pos(&mut self, dpos: Vec2) {
+        self.pos = self.saved_pos + dpos;
     }
 }
 

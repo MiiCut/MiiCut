@@ -6,26 +6,8 @@
 //     }
 // }
 
+use crate::canvas::Pattern;
 use kurbo::{BezPath, Circle, PathEl, Shape, Vec2};
-
-use crate::{canvas::Pattern, math::MyError};
-
-pub fn line_helper(pos1: &Vec2, pos2: &Vec2) -> Result<BezPath, MyError> {
-    const EXTENSION: f64 = 100.;
-    // Extend the line beyond the handles
-    let ln = (*pos1 - *pos2).hypot();
-    if ln == 0. {
-        return Err(MyError::Impossible);
-    };
-    let ext_x = (pos2.x - pos1.x) / ln;
-    let ext_y = (pos2.y - pos1.y) / ln;
-    let pos1_ext = Vec2::new(pos1.x - EXTENSION * ext_x, pos1.y - EXTENSION * ext_y);
-    let pos2_ext = Vec2::new(pos2.x + EXTENSION * ext_x, pos2.y + EXTENSION * ext_y);
-    Ok(BezPath::from_vec(vec![
-        PathEl::MoveTo(pos1_ext.to_point()),
-        PathEl::LineTo(pos2_ext.to_point()),
-    ]))
-}
 
 pub fn arrow_right(pos: &Vec2, size: f64) -> BezPath {
     use PathEl::*;
@@ -38,7 +20,6 @@ pub fn arrow_right(pos: &Vec2, size: f64) -> BezPath {
     ];
     BezPath::from_vec(v)
 }
-
 pub fn arrow_down(pos: &Vec2, size: f64) -> BezPath {
     use PathEl::*;
     let v: Vec<PathEl> = vec![
@@ -50,7 +31,6 @@ pub fn arrow_down(pos: &Vec2, size: f64) -> BezPath {
     ];
     BezPath::from_vec(v)
 }
-
 pub fn center_path(pos: Vec2, _scale: f64, size: f64) -> BezPath {
     use PathEl::*;
     let v: Vec<PathEl> = vec![
@@ -61,7 +41,6 @@ pub fn center_path(pos: Vec2, _scale: f64, size: f64) -> BezPath {
     ];
     BezPath::from_vec(v)
 }
-
 pub fn helper_point_path(pos: Vec2, size: f64) -> BezPath {
     let tol = 0.01;
     use PathEl::*;
@@ -80,6 +59,13 @@ pub fn modifiers_path(pos: Vec2, scale: f64, size: f64) -> BezPath {
     let size = size;
     Circle::new(pos.to_point(), size / scale).to_path(tol)
 }
+pub fn line_path(pos1: Vec2, pos2: Vec2) -> BezPath {
+    BezPath::from_vec(vec![
+        PathEl::MoveTo(pos1.to_point()),
+        PathEl::LineTo(pos2.to_point()),
+    ])
+}
+
 pub fn modifiers_pattern(selected: bool, highlighted: bool) -> Pattern {
     match (selected, highlighted) {
         (false, false) => Pattern::Modifiers,

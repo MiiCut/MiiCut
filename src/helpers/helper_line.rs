@@ -34,17 +34,16 @@ pub struct HelperLine {
     state: Status,
 }
 impl HelperLine {
-    pub fn new(position: Vec2, pos2: Vec2) -> HelperKind {
-        let position = Position::new(position);
-        let angle = Value::new((pos2 - position.pos).atan2());
-        let mut angle_status = Status::default();
-        angle_status.set_hs(HS::Select, true);
-        HelperKind::Line(HelperLine {
-            center: position,
-            angle,
-            angle_status,
+    pub fn new(pos1: Vec2, pos2: Vec2) -> Option<HelperKind> {
+        if (pos1 - pos2).hypot() < EPSILON {
+            return None;
+        }
+        Some(HelperKind::Line(HelperLine {
+            center: Position::new(pos1),
+            angle: Value::new((pos2 - pos1).atan2()),
+            angle_status: Status::default(),
             state: Status::default(),
-        })
+        }))
     }
     pub fn get_angle(&self) -> f64 {
         self.angle.value
@@ -87,15 +86,6 @@ impl ObjectsFuncs for HelperLine {
             self.center = position.clone();
             self.angle = angle.clone();
         }
-    }
-    fn good_size(&self) -> bool {
-        true
-    }
-
-    fn finish_draw(&mut self) -> bool {
-        self.angle_status.set_hs(HS::Select, false);
-        self.angle_status.set_hs(HS::Highlight, false);
-        true
     }
 
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {

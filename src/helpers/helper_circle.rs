@@ -36,18 +36,16 @@ pub struct HelperCircle {
 impl HelperCircle {
     const MIN_RADIUS: f64 = 10.;
 
-    pub fn new(center: Vec2, _pos2: Vec2) -> HelperKind {
-        let center = Position::new(center);
-        let radius = Value::new(0.);
-        let mut radius_status = Status::default();
-        radius_status.set_hs(HS::Select, true);
-
-        HelperKind::Circle(HelperCircle {
-            center,
-            radius,
-            radius_status,
+    pub fn new(center: Vec2, pos2: Vec2) -> Option<HelperKind> {
+        if (center - pos2).hypot() < EPSILON {
+            return None;
+        }
+        Some(HelperKind::Circle(HelperCircle {
+            center: Position::new(center),
+            radius: Value::new((pos2 - center).hypot()),
+            radius_status: Status::default(),
             state: Status::default(),
-        })
+        }))
     }
     pub fn get_radius(&self) -> f64 {
         self.radius.value
@@ -109,14 +107,7 @@ impl ObjectsFuncs for HelperCircle {
             self.radius = radius.clone();
         }
     }
-    fn good_size(&self) -> bool {
-        self.radius.value >= Self::MIN_RADIUS
-    }
-    fn finish_draw(&mut self) -> bool {
-        self.radius_status.set_hs(HS::Select, false);
-        self.radius_status.set_hs(HS::Highlight, false);
-        true
-    }
+
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use GetEntityState::*;
         match get {

@@ -7,7 +7,7 @@ use crate::{
     KeysStates, Pointer, Pools,
 };
 use geo::{BooleanOps, Intersects, MultiPolygon, Polygon};
-use kurbo::{BezPath, Vec2};
+use kurbo::BezPath;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt::Display,
@@ -23,13 +23,11 @@ impl Action for AddShapeAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing shape creation: {:?}", self.shape.get_id());
         pools.shapes.delete(self.shape.get_id());
-        pools.shapes.create_magnet_points();
     }
 
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing shape creation: {:?}", self.shape.get_id());
         pools.shapes.add(self.shape.clone());
-        pools.shapes.create_magnet_points();
     }
 }
 
@@ -42,7 +40,6 @@ impl Action for DeleteShapeAction {
         self.shapes.iter().for_each(|shape| {
             pools.shapes.add(shape.clone());
         });
-        pools.shapes.create_magnet_points();
     }
 
     fn redo(&self, pools: &mut Pools) {
@@ -50,20 +47,16 @@ impl Action for DeleteShapeAction {
         self.shapes.iter().for_each(|shape| {
             pools.shapes.delete(shape.get_id());
         });
-        pools.shapes.create_magnet_points();
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct ShapesPool {
     shapes: HashMap<BSid, MiiShape>,
-    magnet_points: Vec<Vec2>,
     shapes_selector: ShapeSelector,
     full_segs: Vec<BezPath>,
 }
 impl ShapesPool {
-    const MAGNET_RADIUS: f64 = 10.;
-
     pub fn intersection_set(&self, shid: BSid) -> HashSet<BSid> {
         let mut result = HashSet::new();
         if let Some(shape) = self.shapes.get(&shid) {
@@ -191,7 +184,6 @@ impl PoolsFunctions for ShapesPool {
     fn new() -> ShapesPool {
         ShapesPool {
             shapes: HashMap::new(),
-            magnet_points: vec![Vec2::ZERO],
             shapes_selector: ShapeSelector::new(),
             full_segs: Vec::new(),
         }
@@ -239,32 +231,18 @@ impl PoolsFunctions for ShapesPool {
         });
     }
 
-    fn create_magnet_points(&mut self) {
-        self.magnet_points = vec![];
-        for mag_points in self
-            .shapes
-            .values()
-            .map(|mii_shape| match mii_shape.get_kind() {
-                ShapeKind::KindDisc(sh) => sh.get_magnet_points(),
-                ShapeKind::KindPolygon(sh) | ShapeKind::KindRectangle(sh) => sh.get_magnet_points(),
-            })
-        {
-            self.magnet_points.extend(mag_points);
-        }
-        // Always add origin
-        self.magnet_points.push(Vec2::ZERO);
-    }
-    fn magnet_points(&self) -> impl Iterator<Item = &Vec2> {
-        self.magnet_points.iter()
-    }
     fn magnet_to_point(&self, pointer: &mut Pointer, keys_states: KeysStates) {
-        if !keys_states.alt_pressed {
-            pointer.set_magnetized(false);
-            for point in self.magnet_points.iter() {
-                if (pointer.pos() - *point).hypot() < Self::MAGNET_RADIUS {
-                    pointer.set_pos(*point);
-                    pointer.set_magnetized(true);
-                    break;
+        for shape in self.shapes.values() {
+            match shape.get_kind() {
+                ShapeKind::KindDisc(sh) => {
+                    if sh.magnet_to_point(pointer, keys_states) {
+                        break;
+                    }
+                }
+                ShapeKind::KindPolygon(sh) | ShapeKind::KindRectangle(sh) => {
+                    if sh.magnet_to_point(pointer, keys_states) {
+                        break;
+                    }
                 }
             }
         }

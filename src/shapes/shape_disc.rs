@@ -35,20 +35,23 @@ pub struct ShapeDisc {
 impl ShapeDisc {
     const MIN_RADIUS: f64 = 2.;
 
-    pub fn new(center: Vec2, pos2: Vec2) -> ShapeKind {
-        use HS::*;
+    pub fn new(center: Vec2, pos2: Vec2) -> Option<ShapeKind> {
         let center = Position::new(center);
         let radius = Value::new((pos2 - center.pos).hypot());
-        let mut radius_state = Status::default();
-        radius_state.set_hs(Select, true);
-        ShapeKind::KindDisc(ShapeDisc {
+        if radius.value < EPSILON {
+            return None;
+        }
+        let radius_state = Status::default();
+        let mut shape_disc = ShapeDisc {
             center,
             radius,
             radius_state,
             state: Status::default(),
             segs: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
-        })
+        };
+        shape_disc.update_geo_polygon();
+        Some(ShapeKind::KindDisc(shape_disc))
     }
     fn get_circle(&self) -> Circle {
         let center = self.center.pos;
@@ -78,13 +81,21 @@ impl ShapeDisc {
         }
     }
 
-    pub fn get_magnet_points(&self) -> Vec<Vec2> {
-        vec![self.center.pos]
+    pub fn magnet_to_point(&self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
+        log!("disc magnet_to_point");
+        if !keys_states.alt_pressed {
+            if (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS {
+                pointer.set_pos(self.center.pos);
+                pointer.set_magnetized(true);
+                return true;
+            }
+        }
+        false
     }
     pub fn get_polygon(&self) -> Polygon<f64> {
         self.polygon.clone()
     }
-    fn update_geo_polygon(&mut self) {
+    pub fn update_geo_polygon(&mut self) {
         self.segs = calc_segs(self.to_path(Self::TOLERANCE));
         self.polygon = calc_polygon(&self.segs);
     }
@@ -156,12 +167,7 @@ impl ObjectsFuncs for ShapeDisc {
         }
         self.update_geo_polygon();
     }
-    fn good_size(&self) -> bool {
-        self.radius.value >= ShapeDisc::MIN_RADIUS
-    }
-    fn finish_draw(&mut self) -> bool {
-        self.radius.value >= ShapeDisc::MIN_RADIUS
-    }
+
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use GetEntityState::*;
         match get {

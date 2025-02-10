@@ -7,13 +7,12 @@
 use super::shape_disc::ShapeDisc;
 use super::shape_polygon::PolygonIter;
 use super::shape_polygon::ShapePolygon;
+use super::shape_polygon::VecRing;
 use super::shapes_pool::BSid;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
-use crate::dom::IconsShapes;
 use crate::pools::Pools;
 use crate::pools::PoolsFunctions;
-use crate::positions::HalfEdgeProperty;
 use crate::traits::*;
 use crate::Action;
 use crate::KeysStates;
@@ -81,34 +80,22 @@ pub enum ShapeKind {
     KindPolygon(ShapePolygon),
 }
 impl ShapeKind {
-    pub fn new_shape(
-        icon_shape: IconsShapes,
-        pointer: &mut Pointer,
-        boolean_op: BoolOps,
-    ) -> MiiShape {
-        use HalfEdgeProperty::*;
+    pub fn new_disc(center: Vec2, end: Vec2, boolean_op: BoolOps) -> Option<MiiShape> {
         let shid = BSid::new();
-        let pos1 = pointer.pos();
-        let pos2 = pos1;
-        let shape_kind = match icon_shape {
-            IconsShapes::Rectangle => {
-                pointer.set_pos(pos2);
-                pointer.save_pos();
-                ShapePolygon::with_first_half_edge(pos1, RectangleLike)
-            }
-            IconsShapes::Disc => ShapeDisc::new(pos1, pos1),
-            IconsShapes::Custom => ShapePolygon::with_first_half_edge(pos1, General),
-        };
-        MiiShape::new(shid, shape_kind, boolean_op)
+        let shape_kind = ShapeDisc::new(center, end)?;
+        Some(MiiShape::new(shid, shape_kind, boolean_op))
     }
-    pub fn get_magnet_points(&self) -> Vec<Vec2> {
-        use ShapeKind::*;
-        match self {
-            KindRectangle(sh) => sh.get_magnet_points(),
-            KindDisc(sh) => sh.get_magnet_points(),
-            KindPolygon(sh) => sh.get_magnet_points(),
-        }
+    pub fn new_rectangle(tl: Vec2, br: Vec2, boolean_op: BoolOps) -> Option<MiiShape> {
+        let shid = BSid::new();
+        let shape_kind = ShapePolygon::new_rectangle(tl, br)?;
+        Some(MiiShape::new(shid, shape_kind, boolean_op))
     }
+    pub fn new_polygon(positions: VecRing<Vec2>, boolean_op: BoolOps) -> Option<MiiShape> {
+        let shid = BSid::new();
+        let shape_kind = ShapePolygon::new_polygon(positions)?;
+        Some(MiiShape::new(shid, shape_kind, boolean_op))
+    }
+
     pub fn get_geo_polygon(&self) -> Polygon<f64> {
         use ShapeKind::*;
         match self {
@@ -163,22 +150,6 @@ impl ObjectsFuncs for ShapeKind {
             KindRectangle(sh) => sh.set_vars(vars),
             KindDisc(sh) => sh.set_vars(vars),
             KindPolygon(sh) => sh.set_vars(vars),
-        }
-    }
-    fn good_size(&self) -> bool {
-        use ShapeKind::*;
-        match self {
-            KindRectangle(sh) => sh.good_size(),
-            KindDisc(sh) => sh.good_size(),
-            KindPolygon(sh) => sh.good_size(),
-        }
-    }
-    fn finish_draw(&mut self) -> bool {
-        use ShapeKind::*;
-        match self {
-            KindRectangle(sh) => sh.finish_draw(),
-            KindDisc(sh) => sh.finish_draw(),
-            KindPolygon(sh) => sh.finish_draw(),
         }
     }
 

@@ -52,6 +52,18 @@ pub enum HelperKind {
     Line(HelperLine),
     Circle(HelperCircle),
 }
+impl HelperKind {
+    pub fn new_line(pos1: Vec2, pos2: Vec2) -> Option<Helper> {
+        let dhid: DHid = DHid::new();
+        let helper_kind = HelperLine::new(pos1, pos2)?;
+        Some(Helper::new(dhid, helper_kind))
+    }
+    pub fn new_circle(center: Vec2, pos2: Vec2) -> Option<Helper> {
+        let dhid: DHid = DHid::new();
+        let helper_kind = HelperCircle::new(center, pos2)?;
+        Some(Helper::new(dhid, helper_kind))
+    }
+}
 impl Display for HelperKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -91,20 +103,6 @@ impl ObjectsFuncs for HelperKind {
         match self {
             Line(sh) => sh.set_vars(vars),
             Circle(sh) => sh.set_vars(vars),
-        }
-    }
-    fn good_size(&self) -> bool {
-        use HelperKind::*;
-        match &self {
-            Line(sh) => sh.good_size(),
-            Circle(sh) => sh.good_size(),
-        }
-    }
-    fn finish_draw(&mut self) -> bool {
-        use HelperKind::*;
-        match self {
-            Line(sh) => sh.finish_draw(),
-            Circle(sh) => sh.finish_draw(),
         }
     }
 

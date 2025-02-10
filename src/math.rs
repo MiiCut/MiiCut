@@ -1,3 +1,4 @@
+use crate::shapes::shape_polygon::VecRing;
 // A macro to provide `println!(..)`-style syntax for `console.log` logging.
 // macro_rules! log {
 //     ( $( $t:tt )* ) => {
@@ -904,9 +905,9 @@ pub fn rotate_vector(vector: Vec2, angle: f64) -> Vec2 {
 }
 
 // Unit perpendicular of a segment formed by two points
-pub fn unit_perpendicular(v1: Vec2, v2: Vec2, clockwise: bool) -> Option<Vec2> {
+pub fn unit_perpendicular(pt1: Vec2, pt2: Vec2, clockwise: bool) -> Option<(Vec2, Vec2)> {
     // Vector representing the segment
-    let v = v2 - v1;
+    let v = pt2 - pt1;
     // Compute the perpendicular vector
     let perp = if clockwise {
         Vec2::new(-v.y, v.x) // Clockwise
@@ -918,8 +919,9 @@ pub fn unit_perpendicular(v1: Vec2, v2: Vec2, clockwise: bool) -> Option<Vec2> {
         return None;
     }
     // Normalize to unit length
-    Some(perp.normalize())
+    Some((perp.normalize(), (pt1 + pt2) / 2.0))
 }
+
 // Project v1(pt2-pos) vector to the perpendicular of vector v2(pt1-pt2)
 // pub fn get_unit_vector_perpendicular(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Option<Vec2> {
 //     let v1 = pos - pt2;
@@ -1942,13 +1944,13 @@ pub fn point_from_end(start: Vec2, end: Vec2, rad: f64) -> Vec2 {
 ///    - `angle` is half of the angle between vectors `a - b` and `c - b`.
 /// - `None` if any degenerate case is encountered (e.g., one of the vectors is near zero,
 ///    or the angle is degenerate).
-pub fn bisector_dir_and_angle(a: Vec2, b: Vec2, c: Vec2) -> Option<(Vec2, f64)> {
+pub fn bisector_dir_and_angle(a: Vec2, apex: Vec2, c: Vec2) -> Option<(Vec2, f64)> {
     // Compute the vectors from vertex `b` to points `a` and `c`.
-    let v1 = a - b;
-    let v2 = c - b;
+    let v1 = a - apex;
+    let v2 = c - apex;
 
     // Return early if either vector is too small (degenerate case).
-    if v1.hypot() < EPSILON || v2.hypot() < EPSILON {
+    if v1.hypot() < EPSILON || v2.hypot() < EPSILON || (a - c).hypot() < EPSILON {
         return None;
     }
 
@@ -1962,7 +1964,7 @@ pub fn bisector_dir_and_angle(a: Vec2, b: Vec2, c: Vec2) -> Option<(Vec2, f64)> 
     }
 
     // Compute half the angle between v1 and v2.
-    let half_angle = angle_from(v1, v2) * 0.5;
+    let half_angle = angle_from(v2, v1) * 0.5;
 
     // Check for degenerate half-angle conditions:
     // - If the half-angle is nearly ±π/2, the configuration is problematic.
@@ -2046,9 +2048,9 @@ fn snap_length(length: f64, snap: f64) -> f64 {
     (length / snap).round() * snap
 }
 
-pub fn move_b_with_snapping(a: Vec2, b: Vec2, c: Vec2, dpos: Vec2, snap: f64) -> Vec2 {
+pub fn move_apex_with_snapping(a: Vec2, apex: Vec2, c: Vec2, dpos: Vec2, snap: f64) -> Vec2 {
     // Apply the small displacement to B
-    let new_b = b + dpos;
+    let new_b = apex + dpos;
 
     // Compute snapped lengths for AB and BC
     let ab = (new_b - a).hypot();
@@ -2071,7 +2073,7 @@ pub fn move_b_with_snapping(a: Vec2, b: Vec2, c: Vec2, dpos: Vec2, snap: f64) ->
         }
         _ => {
             log!("WARNING: No intersection found in move_b_with_snapping()");
-            b
+            apex
         }
     }
 }
@@ -2191,49 +2193,44 @@ pub fn circle_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<(Vec2, f
     Some((center, radius))
 }
 
-/// Returns true if `angle2` lies on the CCW arc from `angle1` to `angle3` (inclusive).
+// /// Returns true if `angle2` lies on the CCW arc from `angle1` to `angle3` (inclusive).
 fn is_in_ccw_arc(angle1: f64, angle2: f64, angle3: f64) -> bool {
-    let two_pi = 2.0 * std::f64::consts::PI;
-    let sweep = (angle3 - angle1).rem_euclid(two_pi);
-    let rel2 = (angle2 - angle1).rem_euclid(two_pi);
+    let sweep = (angle3 - angle1).rem_euclid(2.0 * PI);
+    let rel2 = (angle2 - angle1).rem_euclid(2.0 * PI);
     rel2 <= sweep
 }
 
-/// Returns an Arc (circle arc) that passes through p1, p2, p3 in that order
-/// (i.e. the arc visits p1 -> p2 -> p3 in the same orientation as the triple).
-/// Returns None if the points are collinear or something degenerate.
+/// Given three points, returns an arc (on the circle defined by the three points)
+/// that passes by the point p2 (i.e. its interior contains the angle of p2).
+/// The arc’s parameterization always starts at the angle of p1, but the sweep
+/// is chosen so that p2 lies somewhere along the arc (even if that means the arc
+/// is actually drawn in the reverse direction).
 pub fn arc_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<Arc> {
     // 1) Get the circle through p1, p2, p3
     let (center, radius) = circle_from_three_points(p1, p2, p3)?;
-
     // 2) Angles of each point w.r.t. center
     let a1 = (p1 - center).atan2().rem_euclid(2.0 * PI);
     let a2 = (p2 - center).atan2().rem_euclid(2.0 * PI);
     let a3 = (p3 - center).atan2().rem_euclid(2.0 * PI);
-
     // 3) Orientation: cross product of (p2-p1, p3-p1)
     let cross = (p2 - p1).cross(p3 - p1);
-
     // 4) We'll compute a "ccw_sweep" from a1 to a3
     let ccw_sweep = (a3 - a1).rem_euclid(2.0 * PI);
-
     // If cross > 0, we *want* the arc to be CCW from p1 to p3,
     // and also contain p2 in between.
     // If cross < 0, we want the arc to be CW (which is a negative sweep).
     //
     // We'll pick whichever sweep (±) actually includes a2 in the interior.
-
     let mut sweep = ccw_sweep; // candidate (CCW)
     if cross < 0.0 {
         // prefer CW => negative sweep
-        sweep = if ccw_sweep.abs() < 1e-12 {
+        sweep = if ccw_sweep.abs() < EPSILON {
             // edge case: a1 ~ a3
             0.0
         } else {
             ccw_sweep - 2.0 * PI // negative
         };
     }
-
     // Check if a2 is indeed on that arc. If not, flip the sweep.
     let arc_includes_p2 = if sweep >= 0.0 {
         // This is a CCW arc from a1 to (a1 + sweep)
@@ -2249,7 +2246,6 @@ pub fn arc_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<Arc> {
         let alt_start = (a1 + sweep).rem_euclid(2.0 * PI);
         is_in_ccw_arc(alt_start, a2, a1)
     };
-
     if !arc_includes_p2 {
         // Flip the sweep so that p2 is inside
         sweep = if sweep >= 0.0 {
@@ -2258,7 +2254,6 @@ pub fn arc_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<Arc> {
             sweep + 2.0 * PI
         };
     }
-
     // Construct the Arc
     Some(Arc {
         center: Point::new(center.x, center.y),
@@ -2268,6 +2263,67 @@ pub fn arc_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<Arc> {
         x_rotation: 0.0, // no rotation for a circle
     })
 }
+/// Returns an Arc (circle arc) that passes through p1, p2, p3 in that order
+/// (i.e. the arc visits p1 -> p2 -> p3 in the same orientation as the triple).
+/// Returns None if the points are collinear or something degenerate.
+// pub fn arc_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<Arc> {
+//     // 1) Get the circle through p1, p2, p3
+//     let (center, radius) = circle_from_three_points(p1, p2, p3)?;
+//     // 2) Angles of each point w.r.t. center
+//     let a1 = (p1 - center).atan2().rem_euclid(2.0 * PI);
+//     let a2 = (p2 - center).atan2().rem_euclid(2.0 * PI);
+//     let a3 = (p3 - center).atan2().rem_euclid(2.0 * PI);
+//     // 3) Orientation: cross product of (p2-p1, p3-p1)
+//     let cross = (p2 - p1).cross(p3 - p1);
+//     // 4) We'll compute a "ccw_sweep" from a1 to a3
+//     let ccw_sweep = (a3 - a1).rem_euclid(2.0 * PI);
+//     // If cross > 0, we *want* the arc to be CCW from p1 to p3,
+//     // and also contain p2 in between.
+//     // If cross < 0, we want the arc to be CW (which is a negative sweep).
+//     //
+//     // We'll pick whichever sweep (±) actually includes a2 in the interior.
+//     let mut sweep = ccw_sweep; // candidate (CCW)
+//     if cross < 0.0 {
+//         // prefer CW => negative sweep
+//         sweep = if ccw_sweep.abs() < EPSILON {
+//             // edge case: a1 ~ a3
+//             0.0
+//         } else {
+//             ccw_sweep - 2.0 * PI // negative
+//         };
+//     }
+//     // Check if a2 is indeed on that arc. If not, flip the sweep.
+//     let arc_includes_p2 = if sweep >= 0.0 {
+//         // This is a CCW arc from a1 to (a1 + sweep)
+//         is_in_ccw_arc(a1, a2, a1 + sweep)
+//     } else {
+//         // This is a CW arc from a1 to a1 + sweep. Let’s adapt the same check:
+//         // A negative sweep means the arc moves a1 -> a1 + sweep in decreasing angles.
+//         // We can do a quick trick: for a CW arc from a1 to a3, a2 is on it
+//         // if a2 is on the CCW arc from a3 back to a1. That can be more confusing.
+//         //
+//         // Alternatively, convert to a "positive" perspective: a CW arc a1->(a1+sweep)
+//         // is the same as a CCW arc (a1+sweep)->a1. We'll do that:
+//         let alt_start = (a1 + sweep).rem_euclid(2.0 * PI);
+//         is_in_ccw_arc(alt_start, a2, a1)
+//     };
+//     if !arc_includes_p2 {
+//         // Flip the sweep so that p2 is inside
+//         sweep = if sweep >= 0.0 {
+//             sweep - 2.0 * PI
+//         } else {
+//             sweep + 2.0 * PI
+//         };
+//     }
+//     // Construct the Arc
+//     Some(Arc {
+//         center: Point::new(center.x, center.y),
+//         radii: Vec2::new(radius, radius), // circle arc
+//         start_angle: a1,
+//         sweep_angle: sweep,
+//         x_rotation: 0.0, // no rotation for a circle
+//     })
+// }
 
 /// Return the minor (short) arc on the circle (center, radius) that goes from p1 to p2.
 ///
@@ -2402,4 +2458,15 @@ pub fn new_arc_with_midpoint(
     };
 
     Some((p2_new, new_arc))
+}
+
+pub fn area_from_points(pts: &VecRing<Vec2>) -> f64 {
+    let len = pts.len();
+    let mut area = 0.0;
+    for idx in 0..len as i64 {
+        let vi = pts.get(idx);
+        let vj = pts.get((idx + 1) % len as i64);
+        area += vi.x * vj.y - vj.x * vi.y;
+    }
+    area * 0.5
 }
