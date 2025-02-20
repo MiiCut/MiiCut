@@ -1,20 +1,16 @@
 use super::shapes::ShapeKind;
 use crate::{
     canvas::{CanvasText, Pattern},
-    curves::{
-        curves::CurveControls,
-        from_dihedron::{CurveFromDihedron, Dihedron},
-        from_segment::{CurveFromSegment, Segment},
-    },
+    curves::{curves::CurveControls, curves_edge::Edge, curves_wedge::CurveWedge},
     math::*,
     pools::HS,
-    positions::{HalfEdge, HalfEdgeElement, HalfEdgeProperty, Status},
+    positions::{HalfEdge, Minimum, Status},
     prefab::*,
     GetEntityState, KeysStates, ObjectsFuncs, Pointer, SetEntityState, SetEntityStateFromPos,
 };
 use geo::{LineString, Polygon};
 use kurbo::{BezPath, PathEl, Point, Rect, Shape, Size, Vec2};
-use std::fmt::Display;
+use std::{fmt::Display, vec};
 
 #[derive(Debug, Clone)]
 pub struct VecRing<T> {
@@ -58,7 +54,6 @@ impl<T> VecRing<T> {
 #[derive(Debug, Clone)]
 pub struct ShapePolygon {
     hes: VecRing<HalfEdge>,
-    he_property: HalfEdgeProperty,
     state: Status,
     segs: BezPath,
     polygon: Polygon<f64>,
@@ -70,27 +65,14 @@ impl ShapePolygon {
 
     fn vec_to_he(vec: VecRing<Vec2>) -> Option<VecRing<HalfEdge>> {
         // First value is a dummy that we replace in the for loop
-        let dum_dihedron = CurveFromDihedron::new(Dihedron::from_three_points(
-            Vec2::new(0., -1.),
-            Vec2::new(0., 0.),
-            Vec2::new(1., 0.),
-        )?)?;
-        let dum_edge =
-            CurveFromSegment::new(Segment::new(Vec2::new(-1., -1.), Vec2::new(0., 0.))?)?;
-        let mut hes = VecRing::from_element(HalfEdge::new(
-            // Vertex::new(Vec2::ZERO),
-            dum_dihedron,
-            dum_edge,
-        ));
+        let dum_edge = Edge::new(Vec2::new(-1., -1.), Vec2::new(0., 0.));
+        let dum_wedge = CurveWedge::new(Vec2::ZERO);
+        let mut hes = VecRing::from_element(HalfEdge::new(dum_wedge, dum_edge));
 
         for i in 0..vec.len() as i64 {
-            let p_prev = *vec.get(i - 1);
-            let p = *vec.get(i);
-            let p_next = *vec.get(i + 1);
-            let dih = CurveFromDihedron::new(Dihedron::from_three_points(p_prev, p, p_next)?)?;
-            let seg = CurveFromSegment::new(Segment::new(p, p_next)?)?;
-            // let v = Vertex::new(p);
-            let he = HalfEdge::new(dih, seg);
+            let apex = *vec.get(i);
+            let apex_next = *vec.get(i + 1);
+            let he = HalfEdge::new(CurveWedge::new(apex), Edge::new(apex, apex_next));
             if i == 0 {
                 hes.replace_first(he);
             } else {
@@ -98,35 +80,6 @@ impl ShapePolygon {
             }
         }
         Some(hes)
-    }
-    pub fn new_rectangle(start: Vec2, end: Vec2) -> Option<ShapeKind> {
-        use ShapeKind::*;
-        log!("new_rectangle");
-        let tl = Vec2::new(start.x, start.y);
-        let tr = Vec2::new(end.x, start.y);
-        let br = Vec2::new(end.x, end.y);
-        let bl = Vec2::new(start.x, end.y);
-        let mut points = VecRing::from_element(tl);
-        points.push(tr);
-        points.push(br);
-        points.push(bl);
-
-        // Alwas counter clockwize to have a positive area
-        if area_from_points(&points) < 0. {
-            points.vec.reverse();
-        }
-        let hes = ShapePolygon::vec_to_he(points)?;
-
-        let mut shape_rectangle = ShapePolygon {
-            hes,
-            he_property: HalfEdgeProperty::RectangleLike,
-            state: Status::default(),
-            segs: BezPath::new(),
-            polygon: Polygon::new(LineString::new(vec![]), vec![]),
-        };
-        log!("area: {}", shape_rectangle.area());
-        shape_rectangle.update_geo_polygon();
-        Some(KindRectangle(shape_rectangle))
     }
     pub fn new_polygon(mut points: VecRing<Vec2>) -> Option<ShapeKind> {
         use ShapeKind::*;
@@ -138,7 +91,6 @@ impl ShapePolygon {
         let hes = ShapePolygon::vec_to_he(points)?;
         let mut shape_polygon = ShapePolygon {
             hes,
-            he_property: HalfEdgeProperty::General,
             state: Status::default(),
             segs: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
@@ -156,30 +108,75 @@ impl ShapePolygon {
     pub fn get_he_mut(&mut self, idx: i64) -> &mut HalfEdge {
         self.hes.get_mut(idx)
     }
-    pub fn magnet_to_point(&self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
-        use HS::*;
-        if !keys_states.alt_pressed {
-            // Check for the curves
-            for he in self.hes.iter() {
-                let curve = he.get_edge();
-                if curve.get_state(Select).is_none() {
-                    if let Some((dist, pos)) = curve.get_dist_from_pos(pointer.pos()) {
-                        if dist < Self::GRAB_RADIUS {
-                            pointer.set_pos(pos);
-                            pointer.set_magnetized(true);
-                            return true;
-                        }
-                    }
+
+    fn near_apex(&self, pointer: &mut Pointer) -> Option<(f64, i64, Vec2)> {
+        let mut minimum = Minimum::new();
+        for idx_he in 0..self.hes.len() as i64 {
+            let apex = self.hes.get(idx_he).get_wedge().get_apex().pos;
+            let dist = (apex - pointer.pos()).hypot();
+            if dist < Self::GRAB_RADIUS {
+                minimum.update(dist, idx_he, apex);
+            }
+        }
+        minimum.get_min()
+    }
+    fn near_edge(&self, pointer: &mut Pointer) -> Option<(f64, i64, Vec2)> {
+        let mut minimum = Minimum::new();
+        for idx_he in 0..self.hes.len() as i64 {
+            let dist = self
+                .hes
+                .get(idx_he)
+                .get_edge()
+                .get_dist_from_pos(pointer.pos());
+            if let Some((dist, pos)) = dist {
+                if dist < Self::GRAB_RADIUS {
+                    minimum.update(dist, idx_he, pos);
                 }
             }
-            // Check for vertices
-            for he in self.hes.iter() {
-                let v = he.get_wedge().get_apex().pos;
-                if (pointer.pos() - v).hypot() < Self::GRAB_RADIUS {
-                    pointer.set_pos(v);
-                    pointer.set_magnetized(true);
-                    return true;
+        }
+        minimum.get_min()
+    }
+    fn near_wedge(&self, pointer: &mut Pointer) -> Option<(f64, i64, Vec2)> {
+        let mut minimum = Minimum::new();
+        for idx_he in 0..self.hes.len() as i64 {
+            let edge_prev = self.hes.get(idx_he - 1).get_edge();
+            let edge_next = self.hes.get(idx_he).get_edge();
+            let dist = self.hes.get(idx_he).get_wedge().get_dist_from_pos(
+                edge_prev,
+                edge_next,
+                pointer.pos(),
+            );
+            if let Some((dist, pos)) = dist {
+                if dist < Self::GRAB_RADIUS {
+                    minimum.update(dist, idx_he, pos);
                 }
+            }
+        }
+        minimum.get_min()
+    }
+
+    pub fn magnet_to_point(&self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
+        if !keys_states.alt_pressed {
+            // Check for the edges
+            if let Some((.., pos)) = self.near_edge(pointer) {
+                log!("Magnet to edge");
+                pointer.set_pos(pos);
+                pointer.set_magnetized(true);
+                return true;
+            }
+            // Check for the wedges
+            if let Some((.., pos)) = self.near_wedge(pointer) {
+                log!("Magnet to wedge");
+                pointer.set_pos(pos);
+                pointer.set_magnetized(true);
+                return true;
+            }
+            // Check for apices
+            if let Some((.., pos)) = self.near_apex(pointer) {
+                log!("Magnet to apex");
+                pointer.set_pos(pos);
+                pointer.set_magnetized(true);
+                return true;
             }
             // Check also for polygon center
             let centroid = self.get_centroid();
@@ -194,60 +191,39 @@ impl ShapePolygon {
     pub fn get_polygon(&self) -> Polygon<f64> {
         self.polygon.clone()
     }
-    pub fn update_adjacent_wedges(&mut self, idx_he: i64) {
-        log!("update_adjacent_wedges");
-        let apex_prev_prev = self.hes.get(idx_he - 2).get_wedge().get_apex().pos;
-        let apex_prev = self.hes.get(idx_he - 1).get_wedge().get_apex().pos;
-        let apex = self.hes.get(idx_he).get_wedge().get_apex().pos;
-        let apex_next = self.hes.get(idx_he + 1).get_wedge().get_apex().pos;
-        let apex_next_next = self.hes.get(idx_he + 2).get_wedge().get_apex().pos;
 
-        self.hes
-            .get_mut(idx_he - 1)
-            .get_wedge_mut()
-            .update_from_apices(apex_prev_prev, apex);
-
-        self.hes
-            .get_mut(idx_he + 1)
-            .get_wedge_mut()
-            .update_from_apices(apex, apex_next_next);
-
-        // let edge_start = self.hes.get(idx_he - 1).get_wedge().get_end();
-        // let edge_end = self.hes.get(idx_he).get_wedge().get_start();
-        // Segment::new(edge_start, edge_end).and_then(|seg| {
-        //     self.hes
-        //         .get_mut(idx_he - 1)
-        //         .get_edge_mut()
-        //         .update_from_segment(&seg)
-        // });
-
-        // let edge_start = self.hes.get(idx_he).get_wedge().get_end();
-        // let edge_end = self.hes.get(idx_he + 1).get_wedge().get_start();
-        // Segment::new(edge_start, edge_end).and_then(|seg| {
-        //     self.hes
-        //         .get_mut(idx_he)
-        //         .get_edge_mut()
-        //         .update_from_segment(&seg)
-        // });
-        // self.update_geo_polygon();
-    }
-    pub fn update_he_edges(&mut self) {
-        for idx_he in 0..self.hes.len() as i64 {
-            let edge_start = self.hes.get(idx_he).get_wedge().get_end();
-            let edge_end = self.hes.get(idx_he + 1).get_wedge().get_start();
-            Segment::new(edge_start, edge_end).and_then(|seg| {
-                self.hes
-                    .get_mut(idx_he)
-                    .get_edge_mut()
-                    .update_from_segment(&seg)
-            });
-        }
-        self.update_geo_polygon();
-    }
-
-    fn update_geo_polygon(&mut self) {
+    pub fn update_geo_polygon(&mut self) {
         self.segs = calc_segs(self.to_path(Self::TOLERANCE));
         self.polygon = calc_polygon(&self.segs);
+    }
+    pub fn change_polygon_wedge_or_edge(&mut self, keys_states: &KeysStates) {
+        use HS::*;
+        for idx_he in 0..self.get_hes_len() as i64 {
+            let he = self.get_he_mut(idx_he);
+            // A. Change first primitive selected and break if found
+            let edge = he.get_edge_mut();
+            if edge.get_state(Select).is_some() {
+                if keys_states.shift_pressed {
+                    edge.next();
+                } else {
+                    edge.prev();
+                }
+                break;
+            }
+            // B. Change first apex selected and break if found
+            if he.get_wedge().get_apex_state(Select).is_some()
+                || he.get_wedge().get_state(Select).is_some()
+            {
+                if keys_states.shift_pressed {
+                    he.next_wedge_curve();
+                } else {
+                    he.prev_wedge_curve();
+                }
+                break;
+            }
+        }
+        log!("change_polygon_wedge_or_edge");
+        self.update_geo_polygon();
     }
     fn get_centroid(&self) -> Vec2 {
         let mut sum = Vec2::ZERO;
@@ -348,7 +324,6 @@ impl ObjectsFuncs for ShapePolygon {
     fn get_vars(&self) -> ShapeKind {
         ShapeKind::KindPolygon(ShapePolygon {
             hes: self.hes.clone(),
-            he_property: self.he_property,
             state: Status::default(),
             segs: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
@@ -357,8 +332,6 @@ impl ObjectsFuncs for ShapePolygon {
     fn set_vars(&mut self, shape_kind: &ShapeKind) {
         if let ShapeKind::KindPolygon(shape_polygon) = shape_kind {
             self.hes = shape_polygon.hes.clone();
-            self.he_property = shape_polygon.he_property;
-            self.update_he_edges();
         }
     }
 
@@ -395,32 +368,7 @@ impl ObjectsFuncs for ShapePolygon {
         _keys_states: KeysStates,
         set: SetEntityStateFromPos,
     ) {
-        use HalfEdgeElement::*;
         use SetEntityStateFromPos::*;
-
-        // A candidate element that we might want to select.
-        #[derive(Debug)]
-        struct Elem {
-            he_elem: HalfEdgeElement,
-            idx: usize,
-            dist: f64, // we'll convert Option<f64> to a f64 by filtering out invalid cases
-        }
-        impl Elem {
-            const GRAB_RADIUS: f64 = ShapePolygon::GRAB_RADIUS;
-
-            fn new(he_elem: HalfEdgeElement, idx: usize, dist: Option<f64>) -> Option<Self> {
-                // Only create a candidate if a distance exists and is within our threshold.
-                dist.filter(|&d| d < Self::grab_threshold()).map(|d| Self {
-                    he_elem,
-                    idx,
-                    dist: d,
-                })
-            }
-            fn grab_threshold() -> f64 {
-                Self::GRAB_RADIUS
-            }
-        }
-
         match set {
             SetHSFromPos(hs) => {
                 self.state
@@ -430,224 +378,130 @@ impl ObjectsFuncs for ShapePolygon {
                 // Clear all selections
                 self.hes.iter_mut().for_each(|he| {
                     he.get_wedge_mut().set_state(hs, false);
+                    he.get_wedge_mut().set_apex_state(hs, false);
                     he.get_edge_mut().set_state(hs, false);
                 });
-
-                // Build an iterator of candidate elements for all half-edges.
-                let candidate = self
-                    .hes
-                    .iter()
-                    .enumerate()
-                    .flat_map(|(he_idx, he)| {
-                        // Create candidates for each element type.
-                        let mut elems = Vec::with_capacity(3);
-
-                        // Apex candidate.
-                        if let Some(elem) = Elem::new(
-                            Apex,
-                            he_idx,
-                            Some((he.get_wedge().get_apex().pos - pointer.pos()).hypot()),
-                        ) {
-                            elems.push(elem);
-                        }
-
-                        // Wedge candidate.
-                        if let Some(elem) = Elem::new(
-                            Dihedron,
-                            he_idx,
-                            he.get_wedge()
-                                .get_dist_from_pos(pointer.pos())
-                                .and_then(|(dist, _)| Some(dist)),
-                        ) {
-                            elems.push(elem);
-                        }
-
-                        // Edge candidate.
-                        if let Some(elem) = Elem::new(
-                            Edge,
-                            he_idx,
-                            he.get_edge()
-                                .get_dist_from_pos(pointer.pos())
-                                .map(|(dist, _)| dist),
-                        ) {
-                            elems.push(elem);
-                        }
-
-                        elems.into_iter()
-                    })
-                    // Select the candidate with the smallest distance.
-                    .min_by(|a, b| {
-                        a.dist
-                            .partial_cmp(&b.dist)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
-
-                if let Some(nearest) = candidate {
-                    match nearest.he_elem {
-                        Apex => {
-                            self.hes
-                                .get_mut(nearest.idx as i64)
-                                .get_wedge_mut()
-                                .set_apex_state(hs, true);
-                        }
-                        Dihedron => {
-                            self.hes
-                                .get_mut(nearest.idx as i64)
-                                .get_wedge_mut()
-                                .set_state(hs, true);
-                        }
-                        Edge => {
-                            self.hes
-                                .get_mut(nearest.idx as i64)
-                                .get_edge_mut()
-                                .set_state(hs, true);
-                        }
-                    }
-                }
+                // 1. Check for the edges
+                log!("hs to edge");
+                if let Some((_, idx, _)) = self.near_edge(pointer) {
+                    self.hes
+                        .get_mut(idx as i64)
+                        .get_edge_mut()
+                        .set_state(hs, true);
+                    return;
+                };
+                // 2. Check for the wedges
+                log!("hs to wedge");
+                if let Some((_, idx, _)) = self.near_wedge(pointer) {
+                    self.hes
+                        .get_mut(idx as i64)
+                        .get_wedge_mut()
+                        .set_state(hs, true);
+                    return;
+                };
+                // 3. Check for the apices
+                log!("hs to apex");
+                if let Some((_, idx, _)) = self.near_apex(pointer) {
+                    self.hes
+                        .get_mut(idx as i64)
+                        .get_wedge_mut()
+                        .set_apex_state(hs, true);
+                    return;
+                };
             }
         }
     }
 
-    fn toggle_selected_prop(&mut self) {
-        for idx_he in 0..self.hes.len() as i64 {
-            let wedge = self.hes.get_mut(idx_he).get_wedge_mut();
-            if wedge.get_state(HS::Select).is_some() {
-                wedge.toggle_prop();
-                self.update_adjacent_wedges(idx_he);
-                return;
-            }
-        }
-    }
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
-        self.hes
-            .iter_mut()
-            .for_each(|he| he.get_wedge_mut().get_apex_mut().move_pos(pointer.dpos()));
-        self.update_he_edges();
+        for idx_he in 0..self.hes.len() as i64 {
+            // Move the wedge apex
+            self.hes
+                .get_mut(idx_he)
+                .get_wedge_mut()
+                .move_apex(pointer.dpos());
+            let apex = self.hes.get(idx_he).get_wedge().get_apex().pos;
+            // Update the adjacent edges
+            self.hes
+                .get_mut(idx_he - 1)
+                .get_edge_mut()
+                .try_set_end(apex);
+            self.hes.get_mut(idx_he).get_edge_mut().try_set_start(apex);
+        }
+        self.update_geo_polygon();
         true
     }
     fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
-        use HalfEdgeProperty::*;
         use HS::*;
         let snap = pointer.get_snap().val();
-        let dpos = pointer.dpos();
 
-        // Move apices
-        match self.he_property {
-            General => {
-                log!("Move apex");
-                // Check apices, move the first selected found and return
-                for idx_he in 0..self.hes.len() as i64 {
+        // Check apices, move the first selected found and return
+        for idx_he in 0..self.hes.len() as i64 {
+            if self
+                .hes
+                .get(idx_he)
+                .get_wedge()
+                .get_apex_state(Select)
+                .is_some()
+            {
+                let apex_prev = self.hes.get(idx_he - 1).get_wedge().get_apex().pos;
+                let apex_next = self.hes.get(idx_he + 1).get_wedge().get_apex().pos;
+                let saved_apex = self.hes.get(idx_he).get_wedge().get_apex().saved_pos;
+
+                // Try move the wedge apex (None if snapping not found)
+                let o_apex = if pointer.is_magnetized() {
+                    Some(pointer.pos())
+                } else {
+                    move_apex_with_snapping(apex_prev, saved_apex, apex_next, pointer.dpos(), snap)
+                };
+
+                if let Some(apex) = o_apex {
+                    // We set the new apex position only if leads to valid edges
                     if self
                         .hes
-                        .get(idx_he)
-                        .get_wedge()
-                        .get_apex_state(Select)
-                        .is_some()
+                        .get_mut(idx_he - 1)
+                        .get_edge_mut()
+                        .try_set_end(apex)
                     {
-                        let p_prev = *self.hes.get(idx_he - 1).get_wedge().get_apex();
-                        let p_next = *self.hes.get(idx_he + 1).get_wedge().get_apex();
-                        let apex = self.hes.get_mut(idx_he).get_wedge_mut().get_apex_mut();
-                        // Move the vertex
-                        if pointer.is_magnetized() {
-                            apex.pos = pointer.pos();
+                        if self.hes.get_mut(idx_he).get_edge_mut().try_set_start(apex) {
+                            // All good, update wedge apex
+                            self.hes.get_mut(idx_he).get_wedge_mut().set_apex(apex);
+                            self.update_geo_polygon();
+                            return true;
                         } else {
-                            apex.pos = move_apex_with_snapping(
-                                p_prev.pos,
-                                apex.saved_pos,
-                                p_next.pos,
-                                dpos,
-                                snap,
-                            );
+                            // Cancel the edge_prev update
+                            self.hes
+                                .get_mut(idx_he - 1)
+                                .get_edge_mut()
+                                .try_set_end(saved_apex);
                         }
-                        self.hes
-                            .get_mut(idx_he)
-                            .get_wedge_mut()
-                            .update_from_apices(p_prev.pos, p_next.pos);
-                        self.update_adjacent_wedges(idx_he);
-                        self.update_he_edges();
-                        return true;
                     }
                 }
-            }
-            RectangleLike => {
-                // Check vertices, move the first selected vertex found, move adjacent vertices and return
-                for he_idx in 0..self.hes.len() as i64 {
-                    let wedge = *self.hes.get(he_idx).get_wedge();
-                    if wedge.get_apex_state(Select).is_some() {
-                        let prev_a = *self.hes.get(he_idx - 1).get_wedge().get_apex();
-                        let next_a = *self.hes.get(he_idx + 1).get_wedge().get_apex();
-                        // Projection of dpos on the previous edge
-                        let mut dpos_proj_prev =
-                            project_on_vec(prev_a.saved_pos, wedge.get_apex().saved_pos, dpos);
-                        let mut dpos_proj_next =
-                            project_on_vec(next_a.saved_pos, wedge.get_apex().saved_pos, dpos);
-
-                        if !pointer.is_magnetized() {
-                            let prev_rel = wedge.get_apex().saved_pos - prev_a.saved_pos;
-                            dpos_proj_prev = snap_pt(prev_rel + dpos_proj_prev, snap) - prev_rel;
-
-                            let next_rel = wedge.get_apex().saved_pos - next_a.saved_pos;
-                            dpos_proj_next = snap_pt(next_rel + dpos_proj_next, snap) - next_rel;
-                        }
-
-                        if (wedge.get_apex().pos + dpos_proj_prev - prev_a.pos).hypot()
-                            < Self::MIN_RECT_SIZE
-                            || (wedge.get_apex().pos + dpos_proj_next - next_a.pos).hypot()
-                                < Self::MIN_RECT_SIZE
-                        {
-                            log!("Too small");
-                            return false;
-                        }
-                        // Move the vertices
-                        self.hes
-                            .get_mut(he_idx - 1)
-                            .get_wedge_mut()
-                            .get_apex_mut()
-                            .move_pos(dpos_proj_next);
-                        self.hes
-                            .get_mut(he_idx + 1)
-                            .get_wedge_mut()
-                            .get_apex_mut()
-                            .move_pos(dpos_proj_prev);
-                        self.hes
-                            .get_mut(he_idx)
-                            .get_wedge_mut()
-                            .get_apex_mut()
-                            .move_pos(dpos_proj_prev + dpos_proj_next);
-                        self.update_he_edges();
-                        return true;
-                    }
-                }
+                return false;
             }
         }
 
-        // Move dihedron: move the first control selected found and return
-        log!("Move wedge control");
+        // Move control on wedge: move the first control selected found and return
         for idx_he in 0..self.hes.len() as i64 {
-            let apex = *self.hes.get(idx_he).get_wedge().get_apex();
-            let next_apex = *self.hes.get(idx_he + 1).get_wedge().get_apex();
+            let edge_prev = *self.hes.get(idx_he - 1).get_edge();
+            let edge_next = *self.hes.get(idx_he).get_edge();
             let wedge = self.hes.get_mut(idx_he).get_wedge_mut();
-            if wedge.move_control_selected(apex.pos, next_apex.pos, pointer, keys_states) {
-                self.update_he_edges();
+            if wedge.move_control_selected(&edge_prev, &edge_next, pointer, keys_states) {
                 self.update_geo_polygon();
                 return true;
             }
         }
 
         // Move edges: move the first control selected found and return
-        log!("Move edge control");
         for idx_he in 0..self.hes.len() as i64 {
-            let apex = *self.hes.get(idx_he).get_wedge().get_apex();
-            let next_apex = *self.hes.get(idx_he + 1).get_wedge().get_apex();
             let edge = self.hes.get_mut(idx_he).get_edge_mut();
-            if edge.move_control_selected(apex.pos, next_apex.pos, pointer, keys_states) {
+            if edge.move_control_selected(pointer, keys_states) {
                 self.update_geo_polygon();
                 return true;
             }
         }
-
         false
     }
+
     fn get_position(&self) -> Vec2 {
         self.get_centroid()
     }
@@ -664,6 +518,8 @@ impl ObjectsFuncs for ShapePolygon {
         // Polygon vertices
         for he in self.hes.iter() {
             let wedge = he.get_wedge();
+
+            // APICES
             paths_patterns.push((
                 modifiers_path(wedge.get_apex().pos, scale, Self::GRAB),
                 modifiers_pattern(
@@ -673,11 +529,17 @@ impl ObjectsFuncs for ShapePolygon {
             ));
 
             // DEBUG
-            let tp = he.get_edge().get_third_pt();
-            paths_patterns.push((
-                modifiers_path(tp, scale, Self::GRAB),
-                modifiers_pattern(false, false),
-            ));
+            if let Some(third_pt) = he
+                .get_edge()
+                .get_seg_info()
+                .and_then(|seg| Some(seg.third_pt()))
+            {
+                // log!("third_pt: {:?}", third_pt);
+                paths_patterns.push((
+                    modifiers_path(third_pt, scale, Self::GRAB),
+                    modifiers_pattern(false, false),
+                ));
+            }
         }
 
         // Polygon center
@@ -687,28 +549,62 @@ impl ObjectsFuncs for ShapePolygon {
         ));
         paths_patterns
     }
-    fn get_paths_and_patterns(&self, das: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
+
+    fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         use HS::*;
+        let mut wedges_infos = VecRing::from_element(None);
+        for idx_he in 0..self.hes.len() as i64 {
+            let edge_prev = *self.hes.get(idx_he - 1).get_edge();
+            let edge_next = *self.hes.get(idx_he).get_edge();
+            let wedge_fillet = self
+                .hes
+                .get(idx_he)
+                .get_wedge()
+                .get_fillet(&edge_prev, &edge_next);
+            if idx_he == 0 {
+                wedges_infos.replace_first(wedge_fillet);
+            } else {
+                wedges_infos.push(wedge_fillet);
+            }
+        }
+
         let mut paths_patterns = vec![];
+        for idx_he in 0..wedges_infos.len() as i64 {
+            // WEDGES
+            if let Some((center, start, end)) = wedges_infos.get(idx_he).clone() {
+                paths_patterns.push(self.hes.get(idx_he).get_wedge().get_paths_and_patterns(
+                    center,
+                    start,
+                    end,
+                    self.state.is_hs(Select),
+                    self.state.is_hs(Highlight),
+                ));
 
-        for idx in 0..self.hes.len() as i64 {
-            let he = self.hes.get(idx);
-            // Polygon dihedron
-            paths_patterns.push(he.get_wedge().get_paths_and_patterns(
-                das,
-                self.state.is_hs(Select),
-                self.state.is_hs(Highlight),
-            ));
-
-            // Polygon edges
-            paths_patterns.push(he.get_edge().get_paths_and_patterns(
-                das,
-                self.state.is_hs(Select),
-                self.state.is_hs(Highlight),
-            ));
+                if let Some((_, start_next, end_next)) = wedges_infos.get(idx_he + 1).clone() {
+                    // log!(
+                    //     "start: ({:.2},{:.2}), end: ({:.2},{:.2}), start_next: ({:.2},{:.2}), end_next: ({:.2},{:.2})",
+                    //     start.x,
+                    //     start.y,
+                    //     end.x,
+                    //     end.y,
+                    //     start_next.x,
+                    //     start_next.y,
+                    //     end_next.x,
+                    //     end_next.y
+                    // );
+                    // EDGES
+                    paths_patterns.push(self.hes.get(idx_he).get_edge().get_paths_and_patterns(
+                        end,
+                        start_next,
+                        self.state.is_hs(Select),
+                        self.state.is_hs(Highlight),
+                    ));
+                }
+            }
         }
         paths_patterns
     }
+
     fn get_dimensions_paths_and_patterns(
         &self,
         size: &Size,
@@ -716,15 +612,17 @@ impl ObjectsFuncs for ShapePolygon {
     ) -> Vec<(BezPath, Pattern, CanvasText)> {
         use HS::*;
         let mut res = vec![];
-        for he in self.hes.iter() {
-            let p = he.get_edge();
-            let selected = p.get_state(Select).is_some() || self.state.is_hs(Select);
-            let highlighted = p.get_state(Highlight).is_some() || self.state.is_hs(Highlight);
-            if selected || highlighted {
-                let dim = p.get_dimensions_paths_and_patterns(size);
-                res.extend(dim);
-            }
-        }
+        // for he_idx in 0..self.hes.len() as i64 {
+        //     let edge = self.hes.get(he_idx).get_edge();
+        //     let start_apex = self.hes.get(he_idx).get_wedge().get_apex().pos;
+        //     let end_apex = self.hes.get(he_idx + 1).get_wedge().get_apex().pos;
+        //     let selected = edge.get_state(Select).is_some() || self.state.is_hs(Select);
+        //     let highlighted = edge.get_state(Highlight).is_some() || self.state.is_hs(Highlight);
+        //     if selected || highlighted {
+        //         let dim = edge.get_dimensions_paths_and_patterns(start_apex, end_apex, size);
+        //         res.extend(dim);
+        //     }
+        // }
         res
     }
 }

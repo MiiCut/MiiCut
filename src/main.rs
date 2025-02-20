@@ -25,7 +25,6 @@ use canvas::TextAlign;
 use canvas::TextPos;
 use canvas::{CanvasKind, Canvases, Pattern};
 use clipboard::*;
-use curves::curves::CurveControls;
 use helpers::helpers::HelperKind;
 use helpers::helpers_pool::AddHelperAction;
 use helpers::helpers_pool::DeleteHelperAction;
@@ -151,16 +150,13 @@ impl AppVars {
             self.undo_redo.push(Box::new(DeleteShapeAction {
                 shapes: shapes_deleted,
             }));
-            self.pools.shapes.recalc_full_segs();
         }
         if let Some(helpers_deleted) = self.pools.helpers.delete_selection() {
             // Push the DeleteShapesAction to the undo/redo system
             self.undo_redo.push(Box::new(DeleteHelperAction {
                 helpers: helpers_deleted,
             }));
-            self.pools.shapes.recalc_full_segs();
         }
-        self.pools.shapes.recalc_full_segs();
     }
     fn next_snap(&mut self) {
         let snap = &self.pointer.get_snap();
@@ -187,59 +183,14 @@ impl AppVars {
                 if let Some(shape) = self.pools.shapes.get_mut(shid) {
                     shape.toggle_boolean_op();
                 }
-                self.pools.shapes.recalc_full_segs();
             }
         }
     }
-    fn toogle_primitive_prop(&mut self) {
-        let o_shid = self
-            .pools
-            .shapes
-            .get_first_selected_modifier_vars()
-            .and_then(|(shid, _)| Some(shid));
-        if let Some(shid) = o_shid {
-            self.pools
-                .shapes
-                .get_mut(shid)
-                .and_then(|shape| {
-                    if let ShapeKind::KindPolygon(shape_polygon) = shape.get_kind_mut() {
-                        Some(shape_polygon)
-                    } else {
-                        None
-                    }
-                })
-                .map(|shape_polygon| {
-                    shape_polygon.toggle_selected_prop();
-                    shape_polygon.update_he_edges();
-                });
-            self.pools.shapes.recalc_full_segs();
-        }
-    }
-    fn change_polygon_vertex_or_edge(&mut self, shid: BSid) {
-        use HS::*;
-        let shift_pressed = self.keys_states.shift_pressed;
+
+    fn change_polygon_wedge_or_edge(&mut self, shid: BSid) {
         if let Some(shape) = self.pools.shapes.get_mut(shid) {
             if let ShapeKind::KindPolygon(shape_polygon) = shape.get_kind_mut() {
-                for idx in 0..shape_polygon.get_hes_len() as i64 {
-                    let he = shape_polygon.get_he_mut(idx);
-                    // A. Change first primitive selected and break if found
-                    let p = he.get_edge_mut();
-                    if p.get_state(Select).is_some() {
-                        if shift_pressed {
-                            p.next();
-                        } else {
-                            p.prev();
-                        }
-                        break;
-                    }
-                    // B. Change first vertex selected and break if found
-                    if he.get_wedge().get_apex_state(Select).is_some() {
-                        he.toogle_wedge_curve();
-                        break;
-                    }
-                }
-                shape_polygon.update_he_edges();
-                self.pools.shapes.recalc_full_segs();
+                shape_polygon.change_polygon_wedge_or_edge(&self.keys_states);
             }
         }
     }
@@ -250,8 +201,6 @@ impl AppVars {
         undo_redo.undo(&mut self.pools);
         // Put `undo_redo` back into `avb`
         self.undo_redo = undo_redo;
-        // Recalculate the full segments
-        self.pools.shapes.recalc_full_segs();
     }
     fn redo(&mut self) {
         // Temporarily take ownership of `undo_redo`
@@ -260,8 +209,6 @@ impl AppVars {
         undo_redo.redo(&mut self.pools);
         // Put `undo_redo` back into `avb`
         self.undo_redo = undo_redo;
-        // Recalculate the full segments
-        self.pools.shapes.recalc_full_segs();
     }
 
     fn go_to_arrow_tool(&mut self) {
@@ -346,7 +293,6 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     use Icons::*;
     use IconsShapes::*;
     user_icons.insert(Arrow);
-    user_icons.insert(IShapes(Rectangle));
     user_icons.insert(IShapes(Disc));
     user_icons.insert(IShapes(Polygon));
     user_icons.insert(IHelpers(IconsConstruction::Line));
@@ -742,8 +688,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                 if let Some(move_action) = avb.pools.get_move_action() {
                     avb.undo_redo.push(move_action);
                 }
-                // User has finished moving the objects, recalculate the full segments
-                avb.pools.shapes.recalc_full_segs();
+                // User has finished moving the objects, create the new magnet points
                 avb.pools.helpers.create_magnet_points();
             }
             LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
@@ -798,20 +743,6 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                             IconsShapes::Polygon => {
                                 points.push(pointer.pos());
                             }
-                            IconsShapes::Rectangle => {
-                                let start = points.get(0);
-                                let end = pointer.pos();
-                                if let Some(shape) =
-                                    ShapeKind::new_rectangle(*start, end, BoolOps::Union)
-                                {
-                                    log!("Rectangle created");
-                                    avb.pools.shapes.add(shape.clone());
-                                    avb.pools.shapes.recalc_full_segs();
-                                    // Push the AddShapeAction to the undo/redo system
-                                    avb.undo_redo.push(Box::new(AddShapeAction { shape }));
-                                }
-                                avb.on_creation = None;
-                            }
                             IconsShapes::Disc => {
                                 let start = points.get(0);
                                 let end = pointer.pos();
@@ -820,7 +751,6 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                                 {
                                     log!("Disc created");
                                     avb.pools.shapes.add(shape.clone());
-                                    avb.pools.shapes.recalc_full_segs();
 
                                     // Push the AddShapeAction to the undo/redo system
                                     avb.undo_redo.push(Box::new(AddShapeAction { shape }));
@@ -850,7 +780,6 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
 
                     if let Some(positions) = avb.on_creation.clone() {
                         match ishape {
-                            IconsShapes::Rectangle => log!("Rectangle canceled"),
                             IconsShapes::Polygon => {
                                 // End of polygon creation
                                 if let Some(shape) =
@@ -860,7 +789,6 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                                     avb.pools.shapes.add(shape.clone());
                                     // Push the AddShapeAction to the undo/redo system
                                     avb.undo_redo.push(Box::new(AddShapeAction { shape }));
-                                    avb.pools.shapes.recalc_full_segs();
                                 }
                             }
                             IconsShapes::Disc => log!("Disc canceled"),
@@ -1257,13 +1185,11 @@ fn on_window_keydown(av: RefAV, event: Event) {
                 // Change ShapeCustom: A) edge (line, arc,...) or B) vertex (none, fillet, chamfer)
                 Tab => {
                     if let Some(shid_custom) = avb.pools.shapes.get_polygon_on_select() {
-                        avb.change_polygon_vertex_or_edge(shid_custom);
+                        avb.change_polygon_wedge_or_edge(shid_custom);
                     }
                 }
-                // Toggle primitive property (concavity for arc)
                 Space => {
                     log!("space pressed");
-                    avb.toogle_primitive_prop();
                 }
                 _ => (),
             };
@@ -1369,6 +1295,7 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     // Get the Performance API
     // let performance = window().unwrap().performance().unwrap();
     // let start_time = performance.now();
+    avb.pools.shapes.recalc_full_segs();
 
     let scale = avb.canvases.get_drawing_scale();
     avb.canvases.clear_main_canvas();
@@ -1380,7 +1307,7 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
         avb.canvases.draw_pointer(avb.pointer.pos());
     }
 
-    // Draw the final contour shapes
+    // SHAPES: Draw the final contour
     let full_segs = avb.pools.shapes.get_full_segs();
     avb.canvases.draw_closed_path(
         &CanvasKind::Draw,

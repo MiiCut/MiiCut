@@ -197,10 +197,6 @@ impl ObjectsFuncs for ShapeDisc {
         }
     }
 
-    fn toggle_selected_prop(&mut self) {
-        ()
-    }
-
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         let dpos = pointer.dpos();
         self.center.pos = self.center.saved_pos + dpos;

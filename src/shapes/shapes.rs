@@ -75,7 +75,6 @@ impl Action for ToogleBoolOpsShapesAction {
 
 #[derive(Debug, Clone)]
 pub enum ShapeKind {
-    KindRectangle(ShapePolygon),
     KindDisc(ShapeDisc),
     KindPolygon(ShapePolygon),
 }
@@ -83,11 +82,6 @@ impl ShapeKind {
     pub fn new_disc(center: Vec2, end: Vec2, boolean_op: BoolOps) -> Option<MiiShape> {
         let shid = BSid::new();
         let shape_kind = ShapeDisc::new(center, end)?;
-        Some(MiiShape::new(shid, shape_kind, boolean_op))
-    }
-    pub fn new_rectangle(tl: Vec2, br: Vec2, boolean_op: BoolOps) -> Option<MiiShape> {
-        let shid = BSid::new();
-        let shape_kind = ShapePolygon::new_rectangle(tl, br)?;
         Some(MiiShape::new(shid, shape_kind, boolean_op))
     }
     pub fn new_polygon(positions: VecRing<Vec2>, boolean_op: BoolOps) -> Option<MiiShape> {
@@ -99,7 +93,6 @@ impl ShapeKind {
     pub fn get_geo_polygon(&self) -> Polygon<f64> {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.get_polygon(),
             KindDisc(sh) => sh.get_polygon(),
             KindPolygon(sh) => sh.get_polygon(),
         }
@@ -109,7 +102,6 @@ impl Display for ShapeKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => write!(f, "{sh}"),
             KindDisc(sh) => write!(f, "{sh}"),
             KindPolygon(sh) => write!(f, "{sh}"),
         }
@@ -123,7 +115,6 @@ impl ObjectsFuncs for ShapeKind {
     fn save_vars(&mut self) {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.save_vars(),
             KindDisc(sh) => sh.save_vars(),
             KindPolygon(sh) => sh.save_vars(),
         }
@@ -131,7 +122,6 @@ impl ObjectsFuncs for ShapeKind {
     fn restore_vars(&mut self) {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.restore_vars(),
             KindDisc(sh) => sh.restore_vars(),
             KindPolygon(sh) => sh.restore_vars(),
         }
@@ -139,7 +129,6 @@ impl ObjectsFuncs for ShapeKind {
     fn get_vars(&self) -> ShapeKind {
         use ShapeKind::*;
         match &self {
-            KindRectangle(sh) => sh.get_vars(),
             KindDisc(sh) => sh.get_vars(),
             KindPolygon(sh) => sh.get_vars(),
         }
@@ -147,7 +136,6 @@ impl ObjectsFuncs for ShapeKind {
     fn set_vars(&mut self, vars: &ShapeKind) {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.set_vars(vars),
             KindDisc(sh) => sh.set_vars(vars),
             KindPolygon(sh) => sh.set_vars(vars),
         }
@@ -156,7 +144,6 @@ impl ObjectsFuncs for ShapeKind {
     fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.get_state(get),
             KindDisc(sh) => sh.get_state(get),
             KindPolygon(sh) => sh.get_state(get),
         }
@@ -164,7 +151,6 @@ impl ObjectsFuncs for ShapeKind {
     fn set_state(&mut self, set: SetEntityState) {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.set_state(set),
             KindDisc(sh) => sh.set_state(set),
             KindPolygon(sh) => sh.set_state(set),
         }
@@ -177,25 +163,14 @@ impl ObjectsFuncs for ShapeKind {
     ) {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.set_state_from_pos(pointer, keys_states, set),
             KindDisc(sh) => sh.set_state_from_pos(pointer, keys_states, set),
             KindPolygon(sh) => sh.set_state_from_pos(pointer, keys_states, set),
-        }
-    }
-
-    fn toggle_selected_prop(&mut self) {
-        use ShapeKind::*;
-        match self {
-            KindRectangle(sh) => sh.toggle_selected_prop(),
-            KindDisc(sh) => sh.toggle_selected_prop(),
-            KindPolygon(sh) => sh.toggle_selected_prop(),
         }
     }
 
     fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.move_position(pointer, keys_states),
             KindDisc(sh) => sh.move_position(pointer, keys_states),
             KindPolygon(sh) => sh.move_position(pointer, keys_states),
         }
@@ -203,7 +178,6 @@ impl ObjectsFuncs for ShapeKind {
     fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.move_controls(pointer, keys_states),
             KindDisc(sh) => sh.move_controls(pointer, keys_states),
             KindPolygon(sh) => sh.move_controls(pointer, keys_states),
         }
@@ -211,7 +185,6 @@ impl ObjectsFuncs for ShapeKind {
     fn get_position(&self) -> Vec2 {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.get_position(),
             KindDisc(sh) => sh.get_position(),
             KindPolygon(sh) => sh.get_position(),
         }
@@ -224,7 +197,6 @@ impl ObjectsFuncs for ShapeKind {
     ) -> Vec<(BezPath, Pattern)> {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.get_paths_and_patterns(das, cinfo),
             KindDisc(sh) => sh.get_paths_and_patterns(das, cinfo),
             KindPolygon(sh) => sh.get_paths_and_patterns(das, cinfo),
         }
@@ -236,7 +208,6 @@ impl ObjectsFuncs for ShapeKind {
     ) -> Vec<(BezPath, Pattern)> {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
             KindDisc(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
             KindPolygon(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
         }
@@ -248,7 +219,6 @@ impl ObjectsFuncs for ShapeKind {
     ) -> Vec<(BezPath, Pattern, CanvasText)> {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
             KindDisc(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
             KindPolygon(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
         }
@@ -260,7 +230,6 @@ impl Shape for ShapeKind {
     fn path_elements(&self, tolerance: f64) -> ShapeIter {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => ShapeIter::RectangleIter(sh.path_elements(tolerance)),
             KindDisc(sh) => ShapeIter::DiscIter(sh.path_elements(tolerance)),
             KindPolygon(sh) => ShapeIter::CustomIter(sh.path_elements(tolerance)),
         }
@@ -269,7 +238,6 @@ impl Shape for ShapeKind {
     fn area(&self) -> f64 {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.area(),
             KindDisc(sh) => sh.area(),
             KindPolygon(sh) => sh.area(),
         }
@@ -278,7 +246,6 @@ impl Shape for ShapeKind {
     fn perimeter(&self, accuracy: f64) -> f64 {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.perimeter(accuracy),
             KindDisc(sh) => sh.perimeter(accuracy),
             KindPolygon(sh) => sh.perimeter(accuracy),
         }
@@ -287,7 +254,6 @@ impl Shape for ShapeKind {
     fn winding(&self, pt: Point) -> i32 {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.winding(pt),
             KindDisc(sh) => sh.winding(pt),
             KindPolygon(sh) => sh.winding(pt),
         }
@@ -296,7 +262,6 @@ impl Shape for ShapeKind {
     fn bounding_box(&self) -> Rect {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.bounding_box(),
             KindDisc(sh) => sh.bounding_box(),
             KindPolygon(sh) => sh.bounding_box(),
         }
@@ -305,7 +270,6 @@ impl Shape for ShapeKind {
     fn as_circle(&self) -> Option<Circle> {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.as_circle(),
             KindDisc(sh) => sh.as_circle(),
             KindPolygon(sh) => sh.as_circle(),
         }
@@ -314,14 +278,12 @@ impl Shape for ShapeKind {
     fn contains(&self, pt: Point) -> bool {
         use ShapeKind::*;
         match self {
-            KindRectangle(sh) => sh.contains(pt),
             KindDisc(sh) => sh.contains(pt),
             KindPolygon(sh) => sh.contains(pt),
         }
     }
 }
 pub enum ShapeIter {
-    RectangleIter(PolygonIter),
     DiscIter(CirclePathIter),
     CustomIter(PolygonIter),
 }
@@ -331,7 +293,6 @@ impl Iterator for ShapeIter {
         use ShapeIter::*;
         log!("MiiShapeIter::next");
         match self {
-            RectangleIter(sh) => sh.next(),
             DiscIter(sh) => sh.next(),
             CustomIter(sh) => sh.next(),
         }

@@ -904,38 +904,6 @@ pub fn rotate_vector(vector: Vec2, angle: f64) -> Vec2 {
     )
 }
 
-// Unit perpendicular of a segment formed by two points
-pub fn unit_perpendicular(pt1: Vec2, pt2: Vec2, clockwise: bool) -> Option<(Vec2, Vec2)> {
-    // Vector representing the segment
-    let v = pt2 - pt1;
-    // Compute the perpendicular vector
-    let perp = if clockwise {
-        Vec2::new(-v.y, v.x) // Clockwise
-    } else {
-        Vec2::new(v.y, -v.x) // Counterclockwise
-    };
-    if perp.hypot() < EPSILON {
-        log!("WARNING: Degenerate case unit_perpendicular()");
-        return None;
-    }
-    // Normalize to unit length
-    Some((perp.normalize(), (pt1 + pt2) / 2.0))
-}
-
-// Project v1(pt2-pos) vector to the perpendicular of vector v2(pt1-pt2)
-// pub fn get_unit_vector_perpendicular(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Option<Vec2> {
-//     let v1 = pos - pt2;
-//     let v2 = pt2 - pt1;
-//     if v2.hypot2() == 0. {
-//         log!("WARNING: Degenerate case, get_unit_vector_perpendicular()");
-//         return None;
-//     }
-//     let pv2 = Vec2::new(-v2.y, v2.x).normalize();
-//     let dot_product = v1.dot(pv2) * pv2;
-
-//     Some(dot_product)
-// }
-
 // Project v on v_p =(pt2-pt1)
 pub fn project_on_vec(pt1: Vec2, pt2: Vec2, v: Vec2) -> Vec2 {
     let v_p = pt2 - pt1;
@@ -2048,32 +2016,49 @@ fn snap_length(length: f64, snap: f64) -> f64 {
     (length / snap).round() * snap
 }
 
-pub fn move_apex_with_snapping(a: Vec2, apex: Vec2, c: Vec2, dpos: Vec2, snap: f64) -> Vec2 {
-    // Apply the small displacement to B
+/// Moves the apex point with snapping. Given points `a` and `c` (the two fixed endpoints),
+/// the original apex, and a displacement `dpos`, this function computes the new apex position
+/// by snapping the distances |AB| and |BC| to multiples of `snap` and then finding the circle‐
+/// circle intersection.
+///
+/// Returns `Some(new_apex)` if an intersection is found, or `None` if no valid intersection exists.
+pub fn move_apex_with_snapping(
+    a: Vec2,
+    apex: Vec2,
+    c: Vec2,
+    dpos: Vec2,
+    snap: f64,
+) -> Option<Vec2> {
+    // Apply the small displacement to the apex (B)
     let new_b = apex + dpos;
 
-    // Compute snapped lengths for AB and BC
+    // Compute the current distances from the new apex to points a and c
     let ab = (new_b - a).hypot();
     let bc = (new_b - c).hypot();
+
+    // Snap these distances to the nearest multiple of 'snap'
     let snap_ab = snap_length(ab, snap);
     let snap_bc = snap_length(bc, snap);
 
-    // Find the intersection of the two circles
+    // Find the intersection of the two circles centered at 'a' and 'c'
+    // with radii 'snap_ab' and 'snap_bc' respectively.
     match circle_circle_intersection(a, snap_ab, c, snap_bc) {
-        Some((i1, None)) => i1,
+        // If there's a single intersection, return it.
+        Some((i1, None)) => Some(i1),
+        // If there are two intersections, choose the one closest to the new_b position.
         Some((i1, Some(i2))) => {
-            // Choose the intersection point closest to the proposed B
             let dist1 = (i1 - new_b).hypot();
             let dist2 = (i2 - new_b).hypot();
             if dist1 < dist2 {
-                i1
+                Some(i1)
             } else {
-                i2
+                Some(i2)
             }
         }
+        // If no intersection is found, log a warning and return None.
         _ => {
-            log!("WARNING: No intersection found in move_b_with_snapping()");
-            apex
+            log!("WARNING: No intersection found in move_apex_with_snapping()");
+            None
         }
     }
 }
@@ -2254,6 +2239,7 @@ pub fn arc_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<Arc> {
             sweep + 2.0 * PI
         };
     }
+
     // Construct the Arc
     Some(Arc {
         center: Point::new(center.x, center.y),
@@ -2469,4 +2455,231 @@ pub fn area_from_points(pts: &VecRing<Vec2>) -> f64 {
         area += vi.x * vj.y - vj.x * vi.y;
     }
     area * 0.5
+}
+
+/// Computes the wedge’s interior angle at point `b`, given points `a`, `b`, `c`
+/// (with the points in that order) such that the angle is measured as the
+/// counter‑clockwise rotation from the ray \( \overrightarrow{b\,a} \) to the ray \( \overrightarrow{b\,c} \).
+/// The returned angle is in the range [0, 2π).
+pub fn wedge_angle(a: Vec2, b: Vec2, c: Vec2) -> f64 {
+    // Compute the vectors from b to a and from b to c.
+    let v1 = Vec2::new(a.x - b.x, a.y - b.y); // ray from b to a
+    let v2 = Vec2::new(c.x - b.x, c.y - b.y); // ray from b to c
+
+    // Compute the angles (in radians) of these vectors.
+    // The standard atan2 returns an angle in (-π, π], so we work with that.
+    let angle1 = v1.y.atan2(v1.x);
+    let angle2 = v2.y.atan2(v2.x);
+
+    // The angle at b (wedge angle) is the difference from angle1 to angle2,
+    // normalized to the range [0, 2π).
+    (angle2 - angle1).rem_euclid(2.0 * PI)
+}
+
+/// Represents an edge curve. For a line, the curve is defined by a second point,
+/// with the common apex given separately to the fillet function.
+/// For an arc, the curve is defined by a kurbo::Arc.
+#[derive(Debug, Copy, Clone)]
+pub enum EdgeCurve {
+    Line { pt2: Vec2 },
+    Arc { arc: Arc },
+}
+
+/// Returns a tuple (fillet_center, tangent_point_on_curve1, tangent_point_on_curve2)
+/// for a fillet arc of radius `fillet_r` that smoothly blends two curves meeting at `apex`.
+///
+/// For a Line, the tangency point is computed as the projection of the fillet center
+/// onto the line defined by (apex, pt2), and it is required to lie between the apex and pt2.
+/// For an Arc, the tangency point is the point on the arc (assumed circular) along the ray
+/// from the arc’s center to the fillet center.
+pub fn fillet_between(
+    apex: Vec2,
+    curve1: EdgeCurve,
+    curve2: EdgeCurve,
+    fillet_r: f64,
+) -> Option<(Vec2, Vec2, Vec2)> {
+    match (curve1, curve2) {
+        // ─── CASE 1: FILLET BETWEEN TWO LINES ─────────────────────────────
+        (EdgeCurve::Line { pt2: pt2_1 }, EdgeCurve::Line { pt2: pt2_2 }) => {
+            // Compute the unit directions for each line (from the common apex).
+            let t1 = (apex - pt2_1).normalize();
+            let t2 = (pt2_2 - apex).normalize();
+            // Compute the "inward" normals by rotating each tangent by +90°.
+            let n1 = Vec2::new(-t1.y, t1.x);
+            let n2 = Vec2::new(-t2.y, t2.x);
+            // The fillet center will lie along the bisector of the inward normals.
+            let bisector = (n1 + n2).normalize();
+            // The angle between the two tangent directions:
+            let dot = t1.dot(t2).max(-1.0).min(1.0);
+            let theta = dot.acos();
+            if theta.abs() < EPSILON {
+                // Lines are nearly collinear.
+                return None;
+            }
+            // Distance from the apex to the fillet center:
+            let d = fillet_r / (theta / 2.0).sin();
+            let fillet_center = apex + bisector * d;
+            // Compute the tangency points by projecting the fillet center onto each line.
+            let proj1 = (fillet_center - apex).dot(t1);
+            // if proj1 < 0.0 || proj1 > (pt2_1 - apex).hypot() {
+            //     return None;
+            // }
+            let tangency1 = apex + t1 * proj1;
+            let proj2 = (fillet_center - apex).dot(t2);
+            // if proj2 < 0.0 || proj2 > (pt2_2 - apex).hypot() {
+            //     return None;
+            // }
+            let tangency2 = apex + t2 * proj2;
+            Some((fillet_center, tangency1, tangency2))
+        }
+
+        // ─── CASE 2: FILLET BETWEEN A LINE AND AN ARC ─────────────────────
+        (EdgeCurve::Line { pt2 }, EdgeCurve::Arc { arc })
+        | (EdgeCurve::Arc { arc }, EdgeCurve::Line { pt2 }) => {
+            // The line is defined by (apex, pt2).
+            let t_line = (pt2 - apex).normalize();
+            let n_line = Vec2::new(-t_line.y, t_line.x);
+            // For the arc, we assume it is circular.
+            // arc.radii.x is used as the radius.
+            let arc_radius = arc.radii.x;
+            let c = arc.center.to_vec2();
+            // We want the fillet circle (center O, radius fillet_r) that is tangent to both the line
+            // and the arc. Express O as:
+            //   O = apex + t * t_line + fillet_r * n_line.
+            // For tangency with the arc, we require:
+            //   |O - c| = arc_radius + fillet_r.
+            // Let ac = apex - c, and decompose ac along t_line and n_line.
+            let ac = apex - c;
+            let ac_t = ac.dot(t_line);
+            let ac_n = ac.dot(n_line);
+            // This leads to the quadratic:
+            //   t^2 + 2 * ac_t * t + 2 * fillet_r * (ac_n - arc_radius) = 0.
+            let disc = ac_t * ac_t - 2.0 * fillet_r * (ac_n - arc_radius);
+            if disc < 0.0 {
+                return None;
+            }
+            let sqrt_disc = disc.sqrt();
+            let candidate_ts = [-ac_t + sqrt_disc, -ac_t - sqrt_disc];
+            let max_t = (pt2 - apex).hypot();
+            let chosen_t = candidate_ts
+                .iter()
+                .copied()
+                .filter(|&t| t > EPSILON && t <= max_t + EPSILON)
+                .min_by(|a, b| a.partial_cmp(b).unwrap())?;
+            let fillet_center = apex + t_line * chosen_t + n_line * fillet_r;
+            let tangency_line = apex + t_line * chosen_t;
+            // Tangency on the arc: the point on the arc along the ray from its center to the fillet center.
+            let tangency_arc = c + (fillet_center - c).normalize() * arc_radius;
+            Some((fillet_center, tangency_line, tangency_arc))
+        }
+
+        // ─── CASE 3: FILLET BETWEEN TWO ARCS ───────────────────────────────
+        (EdgeCurve::Arc { arc: arc1 }, EdgeCurve::Arc { arc: arc2 }) => {
+            // Assume both arcs are circular.
+            let c1 = arc1.center.to_vec2();
+            let r1 = arc1.radii.x;
+            let c2 = arc2.center.to_vec2();
+            let r2 = arc2.radii.x;
+            // For external filleting, the fillet circle must be tangent to both arcs:
+            //   |O - c1| = r1 + fillet_r and |O - c2| = r2 + fillet_r.
+            let rf1 = r1 + fillet_r;
+            let rf2 = r2 + fillet_r;
+            let d = (c2 - c1).length();
+            if d.abs() < EPSILON || d > rf1 + rf2 || d < (rf1 - rf2).abs() {
+                return None;
+            }
+            let a = (rf1 * rf1 - rf2 * rf2 + d * d) / (2.0 * d);
+            let h = (rf1 * rf1 - a * a).sqrt();
+            let base = c1 + (c2 - c1) * (a / d);
+            let perp = Vec2::new(-(c2 - c1).y, (c2 - c1).x).normalize();
+            let o1 = base + perp * h;
+            let o2 = base - perp * h;
+            let fillet_center = if (o1 - apex).length() < (o2 - apex).length() {
+                o1
+            } else {
+                o2
+            };
+            // Tangency on the first arc is along the ray from c1 to O.
+            let tangency1 = c1 + (fillet_center - c1).normalize() * r1;
+            // Tangency on the second arc is along the ray from c2 to O.
+            let tangency2 = c2 + (fillet_center - c2).normalize() * r2;
+            Some((fillet_center, tangency1, tangency2))
+        }
+    }
+}
+
+/// Creates a circular Arc given a center, a start point, and an end point.
+/// Returns None if the arc is degenerate.
+pub fn arc_from_center_and_points(center: Vec2, start: Vec2, end: Vec2) -> Option<Arc> {
+    // Compute vectors from the center to the start and end points.
+    let v_start = start - center;
+    let v_end = end - center;
+
+    // Compute the radius from the start point. It should be > 0.
+    let radius = v_start.length();
+    if radius.abs() < EPSILON {
+        // Degenerate: the start point is at the center.
+        return None;
+    }
+
+    // Ensure that the end point is approximately on the same circle.
+    if (v_end.length() - radius).abs() > EPSILON {
+        return None;
+    }
+
+    // Compute the angles from the center to the start and end.
+    let start_angle = v_start.y.atan2(v_start.x);
+    let end_angle = v_end.y.atan2(v_end.x);
+
+    // Normalize the sweep angle to be within (-PI, PI] using rem_euclid.
+    let sweep = (end_angle - start_angle + PI).rem_euclid(2.0 * PI) - PI;
+
+    // Degenerate: if the sweep is zero (or nearly zero) there is no meaningful arc.
+    if sweep.abs() < EPSILON {
+        return None;
+    }
+
+    Some(Arc {
+        center: center.to_point(),
+        radii: Vec2::new(radius, radius),
+        start_angle,
+        sweep_angle: sweep,
+        x_rotation: 0.0,
+    })
+}
+
+pub fn sub_arc(arc: Arc, pt1: Vec2, pt2: Vec2) -> Option<Arc> {
+    let _r = arc.radii.x;
+    let center = arc.center.to_vec2();
+
+    // Compute the angles from the center to the points.
+    let a1 = (pt1 - center).atan2();
+    let a2 = (pt2 - center).atan2();
+
+    // rem_euclid angles to be within [0, 2π).
+    let a1 = a1.rem_euclid(2.0 * PI);
+    let a2 = a2.rem_euclid(2.0 * PI);
+
+    let sweep = if arc.sweep_angle > 0. {
+        (a2 - a1).rem_euclid(2.0 * PI)
+    } else {
+        -(a1 - a2).rem_euclid(2.0 * PI)
+    };
+
+    // log!("a1: {:.2}, sweep: {:.2}", a1 / PI * 180., sweep / PI * 180.);
+    // log!(
+    //     "ARC center: ({:.2},{:.2}), radius: {:.2}, start: {:.2}, sweep: {:.2}",
+    //     center.x,
+    //     center.y,
+    //     r,
+    //     arc.start_angle / PI * 180.,
+    //     arc.sweep_angle / PI * 180.,
+    // );
+    Some(Arc {
+        center: arc.center,
+        radii: arc.radii,
+        start_angle: a1,
+        sweep_angle: sweep,
+        x_rotation: 0.0,
+    })
 }

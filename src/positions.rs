@@ -1,176 +1,80 @@
 use crate::{
-    curves::{
-        curves::CurveControls, from_dihedron::CurveFromDihedron, from_segment::CurveFromSegment,
-    },
+    curves::{curves::CurveControls, curves_edge::Edge, curves_wedge::CurveWedge},
     pools::HS,
 };
 use kurbo::Vec2;
-use std::fmt::Display;
 
 #[derive(Copy, Debug, Clone)]
-pub enum HalfEdgeProperty {
-    RectangleLike,
-    General,
+pub struct Minimum {
+    min_bundle: Option<(f64, i64, Vec2)>,
 }
-impl Display for HalfEdgeProperty {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use HalfEdgeProperty::*;
-        match self {
-            RectangleLike => write!(f, "Rectangle"),
-            General => write!(f, "Polygon"),
+impl Minimum {
+    pub fn new() -> Self {
+        Self { min_bundle: None }
+    }
+    pub fn update(&mut self, value: f64, index: i64, pos: Vec2) {
+        if let Some((min, idx_min, pos_min)) = self.min_bundle.as_mut() {
+            if value < *min {
+                *min = value;
+                *idx_min = index;
+                *pos_min = pos;
+            }
+        } else {
+            self.min_bundle = Some((value, index, pos));
         }
+    }
+    pub fn get_min(&self) -> Option<(f64, i64, Vec2)> {
+        self.min_bundle
     }
 }
 
 #[derive(Copy, Debug, Clone)]
 pub enum HalfEdgeElement {
     Apex,
-    Dihedron,
+    Wedge,
     Edge,
 }
+
 #[derive(Copy, Debug, Clone)]
 pub struct HalfEdge {
-    // vertex: Vertex,
-    dihedron_curve: CurveFromDihedron,
-    edge_curve: CurveFromSegment,
+    wedge_curve: CurveWedge,
+    edge_curve: Edge,
 }
 impl HalfEdge {
-    pub fn new(
-        // vertex: Vertex,
-        dihedron_curve: CurveFromDihedron,
-        edge_curve: CurveFromSegment,
-    ) -> Self {
+    pub fn new(dihedron_curve: CurveWedge, edge_curve: Edge) -> Self {
         Self {
             // vertex,
-            dihedron_curve,
+            wedge_curve: dihedron_curve,
             edge_curve,
         }
     }
-    // pub fn get_apex(&self) -> &Position {
-    //     &self.vertex
-    // }
-    // pub fn get_vertex_mut(&mut self) -> &mut Position {
-    //     &mut self.vertex
-    // }
-    pub fn get_wedge(&self) -> &CurveFromDihedron {
-        &self.dihedron_curve
+    pub fn get_wedge(&self) -> &CurveWedge {
+        &self.wedge_curve
     }
-    pub fn get_wedge_mut(&mut self) -> &mut CurveFromDihedron {
-        &mut self.dihedron_curve
+    pub fn get_wedge_mut(&mut self) -> &mut CurveWedge {
+        &mut self.wedge_curve
     }
-    pub fn get_edge(&self) -> &CurveFromSegment {
+    pub fn get_edge(&self) -> &Edge {
         &self.edge_curve
     }
-    pub fn get_edge_mut(&mut self) -> &mut CurveFromSegment {
+    pub fn get_edge_mut(&mut self) -> &mut Edge {
         &mut self.edge_curve
     }
-
-    pub fn toogle_wedge_curve(&mut self) {
-        self.dihedron_curve.toogle();
+    pub fn prev_wedge_curve(&mut self) {
+        self.wedge_curve.next();
+    }
+    pub fn next_wedge_curve(&mut self) {
+        self.wedge_curve.next();
     }
     pub fn save_vars(&mut self) {
-        // self.vertex.save_vars();
         self.edge_curve.save_vars();
-        self.dihedron_curve.save_vars();
+        self.wedge_curve.save_vars();
     }
     pub fn restore_vars(&mut self) {
-        // self.vertex.restore_vars();
         self.edge_curve.restore_vars();
-        self.dihedron_curve.restore_vars();
+        self.wedge_curve.restore_vars();
     }
 }
-
-#[derive(Copy, Debug, Clone, PartialEq, Default)]
-pub enum VertexCurveKind {
-    Chamfer,
-    Fillet,
-    #[default]
-    Dummy,
-}
-
-// #[derive(Copy, Debug, Clone, PartialEq)]
-// pub struct Vertex {
-//     pos: Position,
-//     state: Status,
-// }
-// impl Vertex {
-//     const GRAB_RADIUS: f64 = 5.;
-
-//     pub fn new(pos: Vec2) -> Self {
-//         Self {
-//             pos: Position::new(pos),
-//             state: Status::default(),
-//         }
-//     }
-//     pub fn get_pos(&self) -> &Position {
-//         &self.pos
-//     }
-//     pub fn get_pos_mut(&mut self) -> &mut Position {
-//         &mut self.pos
-//     }
-//     pub fn set_pos(&mut self, pos: Vec2) {
-//         self.pos.pos = pos;
-//     }
-//     pub fn get_state(&self, hs: HS) -> Option<Vec2> {
-//         self.state.is_hs(hs).then(|| self.pos.pos)
-//     }
-//     pub fn set_state(&mut self, hs: HS, value: bool) {
-//         match hs {
-//             HS::Highlight => self.state.highlighted = value,
-//             HS::Select => self.state.selected = value,
-//         }
-//     }
-//     pub fn set_state_from_pos(&mut self, hs: HS, pointer: &mut Pointer) {
-//         let state = (pointer.pos() - self.pos.pos).hypot() < Self::GRAB_RADIUS;
-//         match hs {
-//             HS::Highlight => {
-//                 self.state.highlighted = state;
-//                 if self.state.highlighted {
-//                     pointer.set_pos(self.pos.pos);
-//                 }
-//             }
-//             HS::Select => {
-//                 self.state.selected = state;
-//                 if self.state.selected {
-//                     pointer.set_pos(self.pos.pos);
-//                     pointer.save_pos();
-//                 }
-//             }
-//         }
-//     }
-//     pub fn get_dist_from_pos(&self, pos: Vec2) -> f64 {
-//         (pos - self.pos.pos).hypot()
-//     }
-//     pub fn save_pos(&mut self) {
-//         self.pos.saved_pos = self.pos.pos;
-//     }
-//     pub fn restore_pos(&mut self) {
-//         self.pos.pos = self.pos.saved_pos;
-//     }
-//     pub fn save_vars(&mut self) {
-//         self.save_pos();
-//     }
-//     pub fn restore_vars(&mut self) {
-//         self.restore_pos();
-//     }
-
-//     pub fn move_pos(&mut self, dpos: Vec2) {
-//         self.pos.pos = self.pos.saved_pos + dpos;
-//     }
-
-//     pub fn get_pattern(&self) -> Pattern {
-//         use HS::*;
-//         match (
-//             self.get_state(Select).is_some(),
-//             self.get_state(Highlight).is_some(),
-//         ) {
-//             (false, false) => Pattern::BasicNormal,
-//             (false, true) => Pattern::BasicHighlighted,
-//             (true, false) => Pattern::BasicSelected,
-//             (true, true) => Pattern::BasicSelected,
-//         }
-//     }
-// }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Pointer {
@@ -304,24 +208,6 @@ impl Position {
     }
     pub fn move_pos(&mut self, dpos: Vec2) {
         self.pos = self.saved_pos + dpos;
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct RadiusValue {
-    pub radius: Value,
-    pub up: bool,
-    pub saved_up: bool,
-}
-impl RadiusValue {
-    const _GRAB_RADIUS: f64 = 5.;
-
-    pub fn new(radius: f64, up: bool) -> Self {
-        Self {
-            radius: Value::new(radius),
-            up,
-            saved_up: up,
-        }
     }
 }
 

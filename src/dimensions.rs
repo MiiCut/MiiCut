@@ -4,6 +4,7 @@ use kurbo::{BezPath, Vec2};
 
 use crate::{
     canvas::{CanvasText, CanvasTextConfig, Pattern, TextAlign, TextPos},
+    curves::curves_edge::SegInfo,
     math::*,
 };
 
@@ -252,13 +253,12 @@ impl Dimension {
         } else {
             self.value
         };
-        let start = self.start;
-        let end = self.end;
-        if let Some((unit_perp, _)) = unit_perpendicular(start, end, false) {
-            let unit_rot45 = rotate_vector(end - start, PI / 4.).normalize();
+        let seg_info = SegInfo::new(self.start, self.end);
+        if let Some(seg) = seg_info {
+            let unit_rot45 = rotate_vector(seg.end() - seg.start(), PI / 4.).normalize();
             let text = CanvasText::new(
                 format!("{:.1}", value),
-                TextPos::PosCustom(self.get_center() + unit_perp * (self.dim_offset + 10.)),
+                TextPos::PosCustom(self.get_center() + seg.n_dir() * (self.dim_offset + 10.)),
                 CanvasTextConfig::new(
                     self.get_text_pattern(false, false),
                     self.get_text_angle(),
@@ -268,14 +268,18 @@ impl Dimension {
                 ),
             );
 
-            path.move_to((start + unit_perp * self.dim_offset).to_point());
-            path.line_to((end + unit_perp * self.dim_offset).to_point());
+            path.move_to((seg.start() + seg.n_dir() * self.dim_offset).to_point());
+            path.line_to((seg.end() + seg.n_dir() * self.dim_offset).to_point());
 
-            path.move_to((start + unit_perp * self.dim_offset - 2. * unit_rot45).to_point());
-            path.line_to((start + unit_perp * self.dim_offset + 2. * unit_rot45).to_point());
+            path.move_to(
+                (seg.start() + seg.n_dir() * self.dim_offset - 2. * unit_rot45).to_point(),
+            );
+            path.line_to(
+                (seg.start() + seg.n_dir() * self.dim_offset + 2. * unit_rot45).to_point(),
+            );
 
-            path.move_to((end + unit_perp * self.dim_offset - 2. * unit_rot45).to_point());
-            path.line_to((end + unit_perp * self.dim_offset + 2. * unit_rot45).to_point());
+            path.move_to((seg.end() + seg.n_dir() * self.dim_offset - 2. * unit_rot45).to_point());
+            path.line_to((seg.end() + seg.n_dir() * self.dim_offset + 2. * unit_rot45).to_point());
 
             (path, DimensionNormal, text)
         } else {

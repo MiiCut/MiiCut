@@ -239,7 +239,7 @@ impl PoolsFunctions for ShapesPool {
                         break;
                     }
                 }
-                ShapeKind::KindPolygon(sh) | ShapeKind::KindRectangle(sh) => {
+                ShapeKind::KindPolygon(sh) => {
                     if sh.magnet_to_point(pointer, keys_states) {
                         break;
                     }

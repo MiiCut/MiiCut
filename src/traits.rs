@@ -55,7 +55,7 @@ pub trait ObjectsFuncs: Debug + Clone {
         keys_states: KeysStates,
         set: SetEntityStateFromPos,
     );
-    fn toggle_selected_prop(&mut self);
+
     fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool;
     fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool;
     fn get_position(&self) -> Vec2;

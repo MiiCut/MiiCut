@@ -33,6 +33,11 @@ impl TextPos {
         }
     }
 }
+impl Default for TextPos {
+    fn default() -> Self {
+        TextPos::Pos1(10.)
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextAlign {
@@ -40,7 +45,8 @@ pub enum TextAlign {
     Right,
     Center,
 }
-#[derive(Clone, Debug)]
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasTextConfig {
     pattern: Pattern,
     angle: f64,
@@ -106,6 +112,8 @@ impl Default for CanvasTextConfig {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct CanvasText {
     text: String,
     pos: TextPos,

@@ -1,3 +1,3 @@
 pub mod curves;
-pub mod from_dihedron;
-pub mod from_segment;
+pub mod curves_edge;
+pub mod curves_wedge;

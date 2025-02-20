@@ -6,7 +6,6 @@ use web_sys::{window, Document, Element, Event, EventTarget, HtmlElement, MouseE
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum IconsShapes {
-    Rectangle,
     Disc,
     Polygon,
 }
@@ -14,7 +13,6 @@ impl IconsShapes {
     pub fn id(&self) -> &'static str {
         use IconsShapes::*;
         match self {
-            Rectangle => "icon-rectangle",
             Disc => "icon-circle",
             Polygon => "icon-custom",
         }

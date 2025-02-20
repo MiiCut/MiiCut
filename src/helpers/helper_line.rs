@@ -124,10 +124,6 @@ impl ObjectsFuncs for HelperLine {
         }
     }
 
-    fn toggle_selected_prop(&mut self) {
-        ()
-    }
-
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         self.center.pos = snap_pt(
             self.center.saved_pos + pointer.dpos(),

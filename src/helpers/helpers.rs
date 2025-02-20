@@ -133,14 +133,6 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn toggle_selected_prop(&mut self) {
-        use HelperKind::*;
-        match self {
-            Line(sh) => sh.toggle_selected_prop(),
-            Circle(sh) => sh.toggle_selected_prop(),
-        }
-    }
-
     fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
         use HelperKind::*;
         match self {
