@@ -106,7 +106,7 @@ impl ObjectsFuncs for HelperKind {
         }
     }
 
-    fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
+    fn get_state(&self, get: GetEntityState) -> bool {
         use HelperKind::*;
         match self {
             Line(sh) => sh.get_state(get),
@@ -125,14 +125,20 @@ impl ObjectsFuncs for HelperKind {
         pointer: &mut Pointer,
         keys_states: KeysStates,
         set: SetEntityStateFromPos,
-    ) {
+    ) -> bool {
         use HelperKind::*;
         match self {
             Line(sh) => sh.set_state_from_pos(pointer, keys_states, set),
             Circle(sh) => sh.set_state_from_pos(pointer, keys_states, set),
         }
     }
-
+    fn contains_pointer(&self, pointer: &Pointer) -> bool {
+        use HelperKind::*;
+        match self {
+            Line(sh) => sh.contains_pointer(pointer),
+            Circle(sh) => sh.contains_pointer(pointer),
+        }
+    }
     fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
         use HelperKind::*;
         match self {

@@ -25,9 +25,12 @@ use canvas::TextAlign;
 use canvas::TextPos;
 use canvas::{CanvasKind, Canvases, Pattern};
 use clipboard::*;
+use curves::half_edge::HalfEdge;
 use helpers::helpers::HelperKind;
 use helpers::helpers_pool::AddHelperAction;
 use helpers::helpers_pool::DeleteHelperAction;
+use kurbo::Circle;
+use kurbo::Shape;
 use kurbo::{Size, Vec2};
 use pools::Pools;
 use pools::PoolsFunctions;
@@ -73,7 +76,7 @@ fn main() {
 
 struct AppVars {
     pools: Pools,
-    on_creation: Option<VecRing<Vec2>>, // Shape or Helper
+    on_creation: Option<VecRing<HalfEdge>>, // Shape or Helper
 
     //
     clipboard: Clipboard,
@@ -134,13 +137,14 @@ impl AppVars {
         }
     }
     fn paste_entity(&mut self) {
+        use SetEntityState::*;
         use HS::*;
         let mut pointer = self.pointer;
         let icon_selected = self.icon_selected.clone();
         if let Icons::Arrow = icon_selected {
             self.clipboard.paste_item(&mut pointer);
             // Clear actual selection
-            self.pools.shapes.set_state(Select, false);
+            self.pools.shapes.set_state(SetHS(Select, false));
         }
         self.pointer = pointer;
     }
@@ -295,6 +299,7 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     user_icons.insert(Arrow);
     user_icons.insert(IShapes(Disc));
     user_icons.insert(IShapes(Polygon));
+    user_icons.insert(IShapes(Tube));
     user_icons.insert(IHelpers(IconsConstruction::Line));
     user_icons.insert(IHelpers(IconsConstruction::Circle));
 
@@ -614,31 +619,19 @@ fn convert_svg_to_shapes(_av: RefAV, svg_data: String) {
 #[allow(unused_variables)]
 fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
     use MouseState::*;
+    use SetEntityState::*;
     use HS::*;
     let icon_selected = avb.icon_selected.clone();
     let keys_states = avb.keys_states;
     let mut pointer = avb.pointer;
     pointer.set_draw_scale(avb.canvases.get_drawing_scale());
+    pointer.set_magnetized(false);
 
     match icon_selected {
         Icons::Arrow => match avb.mouse.get_mouse_state() {
             LeftDown(mouse_pos_down) => {
                 pointer.set_pos(mouse_pos_down);
                 pointer.save_pos();
-                pointer.set_magnetized(false);
-
-                avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if pointer.is_magnetized() {
-                    pointer.save_pos();
-                } else {
-                    avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
-                }
-
-                // Always clear selection before proceeding
-                avb.pools.shapes.set_state(Select, false);
-                avb.pools.shapes.set_controls_state(Select, false);
-                avb.pools.helpers.set_state(Select, false);
-                avb.pools.helpers.set_controls_state(Select, false);
 
                 if avb.clipboard.is_paste_empty() {
                     let pointer_pos_saved = pointer.pos_saved();
@@ -663,42 +656,28 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
             }
             LeftDownMove(mouse_pos_down, mouse_pos) => {
                 pointer.set_pos(mouse_pos);
-                pointer.set_magnetized(false);
+                avb.pools
+                    .helpers
+                    .magnet_to_points(&mut pointer, keys_states);
 
-                avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if !pointer.is_magnetized() {
-                    avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
-                }
-
-                _ = avb.pools.move_objects(&mut pointer, keys_states);
+                avb.pools.move_objects(&mut pointer, keys_states);
             }
             LeftUp(mouse_pos_up) => {
                 pointer.set_pos(mouse_pos_up);
                 pointer.save_pos();
-                pointer.set_magnetized(false);
-
-                avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if pointer.is_magnetized() {
-                    pointer.save_pos();
-                } else {
-                    avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
-                }
 
                 // Push the MoveAction to the undo/redo system
                 if let Some(move_action) = avb.pools.get_move_action() {
                     avb.undo_redo.push(move_action);
                 }
-                // User has finished moving the objects, create the new magnet points
+                // User has finished moving the objects, create the helpers new magnet points
                 avb.pools.helpers.create_magnet_points();
             }
             LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
                 pointer.set_pos(mouse_pos);
-                pointer.set_magnetized(false);
-
-                avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if !pointer.is_magnetized() {
-                    avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
-                }
+                avb.pools
+                    .helpers
+                    .magnet_to_points(&mut pointer, keys_states);
 
                 if !avb.clipboard.is_paste_empty() {
                     avb.clipboard.move_paste(&mut pointer);
@@ -709,8 +688,8 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
             }
             RightDown(_) => {
                 avb.clipboard.clear();
-                avb.pools.shapes.set_state(HS::Select, false);
-                avb.pools.helpers.set_state(HS::Select, false);
+                avb.pools.shapes.set_state(SetHS(Select, false));
+                avb.pools.helpers.set_state(SetHS(Select, false));
                 avb.canvases.save_drawing_offset();
             }
             RightDownMove(mouse_pos_down, mouse_pos) => {
@@ -727,27 +706,23 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
             match avb.mouse.get_mouse_state() {
                 LeftDown(mouse_pos_down) => {
                     pointer.set_pos(mouse_pos_down);
+                    avb.pools
+                        .helpers
+                        .magnet_to_points(&mut pointer, keys_states);
                     pointer.save_pos();
-                    pointer.set_magnetized(false);
-
-                    avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                    if pointer.is_magnetized() {
-                        pointer.save_pos();
-                    } else {
-                        avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
-                    }
 
                     if let Some(points) = &mut avb.on_creation {
                         // A. We are/were drawing a new shape
                         match ishape {
-                            IconsShapes::Polygon => {
-                                points.push(pointer.pos());
+                            IconsShapes::Polygon | IconsShapes::Tube => {
+                                points.push(HalfEdge::new(pointer.pos(), true, true))
                             }
+
                             IconsShapes::Disc => {
-                                let start = points.get(0);
+                                let center = points.get(0).get_vertex().pos;
                                 let end = pointer.pos();
                                 if let Some(shape) =
-                                    ShapeKind::new_disc(*start, end, BoolOps::Union)
+                                    ShapeKind::new_disc(center, end, BoolOps::Union)
                                 {
                                     log!("Disc created");
                                     avb.pools.shapes.add(shape.clone());
@@ -760,28 +735,27 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                         }
                     } else {
                         // B. We start drawing a new shape, don't create the shape yet
-                        avb.on_creation = Some(VecRing::from_element(pointer.pos()));
+                        avb.on_creation = Some(VecRing::from_element(HalfEdge::new(
+                            pointer.pos(),
+                            true,
+                            true,
+                        )));
                     }
                 }
 
                 LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
                     pointer.set_pos(mouse_pos);
-                    pointer.set_magnetized(false);
-
-                    avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                    if !pointer.is_magnetized() {
-                        avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
-                    }
+                    avb.pools
+                        .helpers
+                        .magnet_to_points(&mut pointer, keys_states);
                 }
                 RightDown(mouse_pos_down) => {
                     pointer.set_pos(mouse_pos_down);
                     pointer.save_pos();
-                    pointer.set_magnetized(false);
 
                     if let Some(positions) = avb.on_creation.clone() {
                         match ishape {
                             IconsShapes::Polygon => {
-                                // End of polygon creation
                                 if let Some(shape) =
                                     ShapeKind::new_polygon(positions, BoolOps::Union)
                                 {
@@ -792,6 +766,16 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                                 }
                             }
                             IconsShapes::Disc => log!("Disc canceled"),
+                            IconsShapes::Tube => {
+                                if let Some(shape) =
+                                    ShapeKind::new_oblong(positions, BoolOps::Union)
+                                {
+                                    log!("Oblong created");
+                                    avb.pools.shapes.add(shape.clone());
+                                    // Push the AddShapeAction to the undo/redo system
+                                    avb.undo_redo.push(Box::new(AddShapeAction { shape }));
+                                }
+                            }
                         }
                     }
                     avb.on_creation = None;
@@ -804,22 +788,14 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
             LeftDown(mouse_pos_down) => {
                 pointer.set_pos(snap_pt(mouse_pos_down, pointer.get_snap().val()));
                 pointer.save_pos();
-                pointer.set_magnetized(false);
-
-                avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if pointer.is_magnetized() {
-                    pointer.save_pos();
-                } else {
-                    avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
-                }
 
                 if let Some(points) = &mut avb.on_creation {
                     // A. We are/were drawing a new shape
-                    let start = points.get(0);
+                    let start = points.get(0).get_vertex().pos;
                     let end = pointer.pos();
                     match ihelper {
                         IconsConstruction::Circle => {
-                            if let Some(helper) = HelperKind::new_circle(*start, end) {
+                            if let Some(helper) = HelperKind::new_circle(start, end) {
                                 avb.pools.helpers.add(helper.clone());
                                 // Push the AddHelperAction to the undo/redo system
                                 avb.undo_redo.push(Box::new(AddHelperAction { helper }));
@@ -827,7 +803,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                             avb.on_creation = None;
                         }
                         IconsConstruction::Line => {
-                            if let Some(helper) = HelperKind::new_line(*start, end) {
+                            if let Some(helper) = HelperKind::new_line(start, end) {
                                 avb.pools.helpers.add(helper.clone());
                                 // Push the AddHelperAction to the undo/redo system
                                 avb.undo_redo.push(Box::new(AddHelperAction { helper }));
@@ -838,43 +814,28 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     avb.on_creation = None;
                 } else {
                     // B. We start drawing a new helper, don't create the helper yet
-                    avb.on_creation = Some(VecRing::from_element(pointer.pos()));
+                    avb.on_creation = Some(VecRing::from_element(HalfEdge::new(
+                        pointer.pos(),
+                        true,
+                        true,
+                    )));
                 }
             }
             LeftDownMove(mouse_pos_down, mouse_pos) => {
                 pointer.set_pos(snap_pt(mouse_pos, pointer.get_snap().val()));
-                pointer.set_magnetized(false);
-
-                avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if !pointer.is_magnetized() {
-                    avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
-                }
             }
             LeftUp(mouse_pos_up) => {
                 pointer.set_pos(mouse_pos_up);
                 pointer.save_pos();
-                pointer.set_magnetized(false);
-
-                avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if pointer.is_magnetized() {
-                    pointer.save_pos();
-                } else {
-                    avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
-                }
+                // User has finished drawing the objects, create the helper new magnet points
+                avb.pools.helpers.create_magnet_points();
             }
             LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
                 pointer.set_pos(snap_pt(mouse_pos, pointer.get_snap().val()));
-                pointer.set_magnetized(false);
-
-                avb.pools.shapes.magnet_to_point(&mut pointer, keys_states);
-                if !pointer.is_magnetized() {
-                    avb.pools.helpers.magnet_to_point(&mut pointer, keys_states);
-                }
             }
             RightDown(mouse_pos_down) => {
                 pointer.set_pos(snap_pt(mouse_pos_down, pointer.get_snap().val()));
                 pointer.save_pos();
-                pointer.set_magnetized(false);
 
                 avb.on_creation = None;
                 avb.go_to_arrow_tool();
@@ -1225,6 +1186,7 @@ fn on_window_keyup(av: RefAV, event: Event) {
 ///////////////
 // Icons events
 fn on_icon_click(av: RefAV, event: Event) {
+    use SetEntityState::*;
     use HS::*;
     let mut avb = av.borrow_mut();
     if let Some(target) = event.target() {
@@ -1233,8 +1195,8 @@ fn on_icon_click(av: RefAV, event: Event) {
                 if let Some(icon) = avb.user_icons.iter().find(|&&k| k.id() == id).cloned() {
                     avb.icon_selected = icon;
                     avb.on_creation = None;
-                    avb.pools.shapes.set_state(Select, false);
-                    avb.pools.shapes.set_controls_state(Select, false);
+                    avb.pools.shapes.set_state(SetHS(Select, false));
+                    avb.pools.shapes.set_state(SetAllControlsHS(Select, false));
                     avb.user_icons
                         .iter()
                         .for_each(|icon| avb.html_deselect_icons(*icon));
@@ -1335,16 +1297,10 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     }
     // SHAPES: Draw dimensions
     for shape in avb.pools.shapes.values() {
-        if shape.get_kind().get_state(IsHS(Select)).is_some()
-            || shape.get_kind().get_state(IsHS(Highlight)).is_some()
-            || shape
-                .get_kind()
-                .get_state(GetFirstControlHS(Select))
-                .is_some()
-            || shape
-                .get_kind()
-                .get_state(GetFirstControlHS(Highlight))
-                .is_some()
+        if shape.get_kind().get_state(IsHS(Select))
+            || shape.get_kind().get_state(IsHS(Highlight))
+            || shape.get_kind().get_state(IsAControlHS(Select))
+            || shape.get_kind().get_state(IsAControlHS(Highlight))
         {
             for (path, pattern, text) in shape
                 .get_kind()
@@ -1378,16 +1334,10 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     }
     // HELPERS: Draw dimensions
     for helper in avb.pools.helpers.values() {
-        if helper.get_kind().get_state(IsHS(Select)).is_some()
-            || helper.get_kind().get_state(IsHS(Highlight)).is_some()
-            || helper
-                .get_kind()
-                .get_state(GetFirstControlHS(Select))
-                .is_some()
-            || helper
-                .get_kind()
-                .get_state(GetFirstControlHS(Highlight))
-                .is_some()
+        if helper.get_kind().get_state(IsHS(Select))
+            || helper.get_kind().get_state(IsHS(Highlight))
+            || helper.get_kind().get_state(IsAControlHS(Select))
+            || helper.get_kind().get_state(IsAControlHS(Highlight))
         {
             for (path, pattern, text) in helper
                 .get_kind()
@@ -1444,31 +1394,89 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     }
 
     // Draw the on_creation vertices with lines if any
-    if let Some(vertices) = avb.on_creation.clone() {
-        let vlen = vertices.len() as i64;
+    match avb.icon_selected {
+        Icons::IShapes(ishape) => match ishape {
+            IconsShapes::Polygon | IconsShapes::Tube => {
+                if let Some(points) = avb.on_creation.clone() {
+                    let vlen = points.len() as i64;
+                    for idx in 0..vlen {
+                        let vertex = points.get(idx).get_vertex().pos;
+                        let vertex_next = if idx + 1 == vlen {
+                            avb.pointer.pos()
+                        } else {
+                            points.get(idx + 1).get_vertex().pos
+                        };
+                        avb.canvases.draw_path(
+                            &CanvasKind::Draw,
+                            (
+                                modifiers_path(vertex, scale, 5.),
+                                modifiers_pattern(false, false),
+                            ),
+                            vec![],
+                        );
+                        avb.canvases.draw_path(
+                            &CanvasKind::Draw,
+                            (line_path(vertex, vertex_next), Pattern::BasicNormal),
+                            vec![],
+                        );
+                    }
+                }
+            }
+            IconsShapes::Disc => {
+                if let Some(points) = avb.on_creation.clone() {
+                    let center = points.get(0).get_vertex().pos;
+                    let end = avb.pointer.pos();
+                    let radius = (end - center).length();
+                    let tolerance = 0.1;
 
-        for idx in 0..vlen {
-            let v = *vertices.get(idx);
-            let v_next = if idx + 1 == vlen {
-                avb.pointer.pos()
-            } else {
-                *vertices.get(idx + 1)
-            };
-            avb.canvases.draw_path(
-                &CanvasKind::Draw,
-                (
-                    modifiers_path(v, scale, 5.),
-                    modifiers_pattern(false, false),
-                ),
-                vec![],
-            );
-            avb.canvases.draw_path(
-                &CanvasKind::Draw,
-                (line_path(v, v_next), Pattern::BasicNormal),
-                vec![],
-            );
-        }
+                    avb.canvases.draw_path(
+                        &CanvasKind::Draw,
+                        (
+                            modifiers_path(center, scale, 5.),
+                            modifiers_pattern(false, false),
+                        ),
+                        vec![],
+                    );
+                    avb.canvases.draw_path(
+                        &CanvasKind::Draw,
+                        (
+                            Circle::new(center.to_point(), radius)
+                                .path_elements(tolerance)
+                                .collect(),
+                            Pattern::BasicNormal,
+                        ),
+                        vec![],
+                    );
+                }
+            }
+        },
+        _ => (),
     }
+    // if let Some(hes) = avb.on_creation.clone() {
+    //     let vlen = hes.len() as i64;
+
+    //     for idx in 0..vlen {
+    //         let corner = hes.get(idx).get_vertex().pos;
+    //         let corner_next = if idx + 1 == vlen {
+    //             avb.pointer.pos()
+    //         } else {
+    //             hes.get(idx + 1).get_vertex().pos
+    //         };
+    //         avb.canvases.draw_path(
+    //             &CanvasKind::Draw,
+    //             (
+    //                 modifiers_path(corner, scale, 5.),
+    //                 modifiers_pattern(false, false),
+    //             ),
+    //             vec![],
+    //         );
+    //         avb.canvases.draw_path(
+    //             &CanvasKind::Draw,
+    //             (line_path(corner, corner_next), Pattern::BasicNormal),
+    //             vec![],
+    //         );
+    //     }
+    // }
 
     // let end_time = performance.now();
     // log!("Rendering time: {:.2} ms", end_time - start_time);

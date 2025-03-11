@@ -29,7 +29,7 @@ use std::fmt::Display;
 pub struct HelperCircle {
     center: Position,
     radius: Value,
-    radius_status: Status,
+    radius_state: Status,
 
     state: Status,
 }
@@ -41,9 +41,9 @@ impl HelperCircle {
             return None;
         }
         Some(HelperKind::Circle(HelperCircle {
-            center: Position::new(center),
+            center: Position::new(center, true),
             radius: Value::new((pos2 - center).hypot()),
-            radius_status: Status::default(),
+            radius_state: Status::default(),
             state: Status::default(),
         }))
     }
@@ -55,28 +55,6 @@ impl HelperCircle {
         let center = self.center.pos;
         let radius = self.radius.value;
         Circle::new(center.to_point(), radius)
-    }
-
-    fn hs_controls_from_pos(&mut self, pointer: &mut Pointer, _keys_states: KeysStates, hs: HS) {
-        // circonference
-        let within_grab_radius = |pos: Vec2, center: Vec2, radius: f64| -> bool {
-            ((pos - center).hypot() - radius).abs() < Self::GRAB_RADIUS
-        };
-        self.radius_status.set_hs(
-            hs,
-            within_grab_radius(pointer.pos(), self.center.pos, self.radius.value),
-        );
-
-        // Pointer update
-        if self.radius_status.is_hs(hs) {
-            pointer.set_pos(
-                self.center.pos + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
-            );
-        }
-        if self.radius_status.is_hs(HS::Select) {
-            log!("hs_controls_from_pos");
-            pointer.save_pos();
-        }
     }
 }
 impl Display for HelperCircle {
@@ -108,11 +86,11 @@ impl ObjectsFuncs for HelperCircle {
         }
     }
 
-    fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
+    fn get_state(&self, get: GetEntityState) -> bool {
         use GetEntityState::*;
         match get {
-            IsHS(hs) => self.state.is_hs(hs).then(|| self.get_position()),
-            GetFirstControlHS(hs) => self.radius_status.is_hs(hs).then(|| self.get_position()),
+            IsHS(hs) => self.state.is_hs(hs),
+            IsAControlHS(hs) => self.radius_state.is_hs(hs),
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
@@ -120,7 +98,7 @@ impl ObjectsFuncs for HelperCircle {
         match set {
             SetHS(hs, value) => self.state.set_hs(hs, value),
             SetAllControlsHS(hs, value) => {
-                self.radius_status.set_hs(hs, value);
+                self.radius_state.set_hs(hs, value);
             }
         }
     }
@@ -129,17 +107,40 @@ impl ObjectsFuncs for HelperCircle {
         pointer: &mut Pointer,
         keys_states: KeysStates,
         set: SetEntityStateFromPos,
-    ) {
+    ) -> bool {
         use SetEntityStateFromPos::*;
         match set {
-            SetHSFromPos(hs) => self.state.set_hs(
-                hs,
-                (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS,
-            ),
+            SetHSFromPos(hs) => {
+                let state = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+                self.state.set_hs(hs, state);
+                state
+            }
             SetControlHSFromPos(hs) => {
-                self.hs_controls_from_pos(pointer, keys_states, hs);
+                use HS::*;
+                // circonference
+                if ((pointer.pos() - self.center.pos).hypot() - self.radius.value).abs()
+                    < Self::GRAB_RADIUS
+                {
+                    self.radius_state.set_hs(hs, true);
+                    if !keys_states.alt_pressed {
+                        pointer.set_pos(
+                            self.center.pos
+                                + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
+                        );
+                        if self.radius_state.is_hs(Select) {
+                            pointer.save_pos();
+                        }
+                        pointer.set_magnetized(true);
+                    }
+                    true
+                } else {
+                    false
+                }
             }
         }
+    }
+    fn contains_pointer(&self, _pointer: &Pointer) -> bool {
+        false
     }
 
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
@@ -151,7 +152,7 @@ impl ObjectsFuncs for HelperCircle {
     }
     fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
         use HS::*;
-        if self.radius_status.is_hs(Select) {
+        if self.radius_state.is_hs(Select) {
             let radius = snap_val(
                 (pointer.pos() - self.center.pos).hypot(),
                 pointer.get_snap().val(),
@@ -175,8 +176,8 @@ impl ObjectsFuncs for HelperCircle {
     ) -> Vec<(BezPath, Pattern)> {
         use HS::*;
         let pattern_circle = match (
-            self.radius_status.is_hs(Select),
-            self.radius_status.is_hs(Highlight),
+            self.radius_state.is_hs(Select),
+            self.radius_state.is_hs(Highlight),
         ) {
             (false, false) => Pattern::HelperNormalCircle,
             (false, true) => Pattern::HelperHighlightedCircle,
@@ -198,7 +199,6 @@ impl ObjectsFuncs for HelperCircle {
         res.push(dim);
         res
     }
-
     fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         use HS::*;
         let pattern_center = match (self.state.is_hs(Select), self.state.is_hs(Highlight)) {

@@ -8,7 +8,7 @@
     --main-color: #8d8b8b;
 
     --modifiers-color: #ffffff6a;
-    --modifiers-highlight-color: #ffffffc7;
+    --modifiers-highlight-color: #ff9500c7;
     --modifiers-selected-color: #ff00008c;
     /*  */
     --basic-normal-color: #424242;
@@ -259,8 +259,8 @@ canvas {
     background-image: url('../assets/icon-arrow.svg');
 }
 
-#icon-rectangle {
-    background-image: url('../assets/icon-rectangle.svg');
+#icon-tube {
+    background-image: url('../assets/icon-tube.svg');
 }
 #icon-rectangle-rounded {
     background-image: url('../assets/icon-rectangle-rounded.svg');

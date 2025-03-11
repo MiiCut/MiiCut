@@ -26,7 +26,6 @@ pub struct ShapeDisc {
     center: Position,
     radius: Value,
     radius_state: Status,
-
     state: Status,
 
     segs: BezPath,
@@ -36,7 +35,7 @@ impl ShapeDisc {
     const MIN_RADIUS: f64 = 2.;
 
     pub fn new(center: Vec2, pos2: Vec2) -> Option<ShapeKind> {
-        let center = Position::new(center);
+        let center = Position::new(center, true);
         let radius = Value::new((pos2 - center.pos).hypot());
         if radius.value < EPSILON {
             return None;
@@ -57,40 +56,6 @@ impl ShapeDisc {
         let center = self.center.pos;
         let radius = self.radius.value;
         Circle::new(center.to_point(), radius)
-    }
-    fn hs_controls_from_pos(&mut self, pointer: &mut Pointer, _keys_states: KeysStates, hs: HS) {
-        use HS::*;
-
-        // circonference
-        let within_grab_radius = |pos: Vec2, center: Vec2, radius: f64| -> bool {
-            ((pos - center).hypot() - radius).abs() < Self::GRAB_RADIUS
-        };
-        self.radius_state.set_hs(
-            hs,
-            within_grab_radius(pointer.pos(), self.center.pos, self.radius.value),
-        );
-
-        // Pointer update
-        if self.radius_state.is_hs(hs) {
-            pointer.set_pos(
-                self.center.pos + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
-            );
-        }
-        if self.radius_state.is_hs(Select) {
-            pointer.save_pos();
-        }
-    }
-
-    pub fn magnet_to_point(&self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
-        log!("disc magnet_to_point");
-        if !keys_states.alt_pressed {
-            if (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS {
-                pointer.set_pos(self.center.pos);
-                pointer.set_magnetized(true);
-                return true;
-            }
-        }
-        false
     }
     pub fn get_polygon(&self) -> Polygon<f64> {
         self.polygon.clone()
@@ -168,11 +133,11 @@ impl ObjectsFuncs for ShapeDisc {
         self.update_geo_polygon();
     }
 
-    fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
+    fn get_state(&self, get: GetEntityState) -> bool {
         use GetEntityState::*;
         match get {
-            IsHS(hs) => self.state.is_hs(hs).then(|| self.get_position()),
-            GetFirstControlHS(hs) => self.radius_state.is_hs(hs).then(|| self.get_position()),
+            IsHS(hs) => self.state.is_hs(hs),
+            IsAControlHS(hs) => self.radius_state.is_hs(hs),
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
@@ -187,16 +152,43 @@ impl ObjectsFuncs for ShapeDisc {
         pointer: &mut Pointer,
         keys_states: KeysStates,
         set: SetEntityStateFromPos,
-    ) {
+    ) -> bool {
         use SetEntityStateFromPos::*;
         match set {
-            SetHSFromPos(hs) => self
-                .state
-                .set_hs(hs, self.contains(pointer.pos().to_point())),
-            SetControlHSFromPos(hs) => self.hs_controls_from_pos(pointer, keys_states, hs),
+            SetHSFromPos(hs) => {
+                let state = self.contains(pointer.pos().to_point());
+                self.state.set_hs(hs, state);
+                state
+            }
+            SetControlHSFromPos(hs) => {
+                use HS::*;
+                self.state.set_hs(hs, false);
+                self.radius_state.set_hs(hs, false);
+                // circonference
+                if ((pointer.pos() - self.center.pos).hypot() - self.radius.value).abs()
+                    < Self::GRAB_RADIUS
+                {
+                    self.radius_state.set_hs(hs, true);
+                    if !keys_states.alt_pressed {
+                        pointer.set_pos(
+                            self.center.pos
+                                + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
+                        );
+                        if self.radius_state.is_hs(Select) {
+                            pointer.save_pos();
+                        }
+                        pointer.set_magnetized(true);
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
-
+    fn contains_pointer(&self, pointer: &Pointer) -> bool {
+        self.contains(pointer.pos().to_point())
+    }
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         let dpos = pointer.dpos();
         self.center.pos = self.center.saved_pos + dpos;

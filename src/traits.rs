@@ -9,7 +9,7 @@ use std::fmt::Debug;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GetEntityState {
     IsHS(HS),
-    GetFirstControlHS(HS),
+    IsAControlHS(HS),
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SetEntityState {
@@ -47,14 +47,15 @@ pub trait ObjectsFuncs: Debug + Clone {
     fn restore_vars(&mut self);
     fn get_vars(&self) -> Self::Kindvars;
     fn set_vars(&mut self, vars: &Self::Kindvars);
-    fn get_state(&self, get: GetEntityState) -> Option<Vec2>;
+    fn get_state(&self, get: GetEntityState) -> bool;
     fn set_state(&mut self, set: SetEntityState);
     fn set_state_from_pos(
         &mut self,
         pointer: &mut Pointer,
         keys_states: KeysStates,
         set: SetEntityStateFromPos,
-    );
+    ) -> bool;
+    fn contains_pointer(&self, pointer: &Pointer) -> bool;
 
     fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool;
     fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool;

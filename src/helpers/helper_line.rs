@@ -39,7 +39,7 @@ impl HelperLine {
             return None;
         }
         Some(HelperKind::Line(HelperLine {
-            center: Position::new(pos1),
+            center: Position::new(pos1, true),
             angle: Value::new((pos2 - pos1).atan2()),
             angle_status: Status::default(),
             state: Status::default(),
@@ -47,16 +47,6 @@ impl HelperLine {
     }
     pub fn get_angle(&self) -> f64 {
         self.angle.value
-    }
-
-    fn hs_modifiers_from_pos(&mut self, pointer: &mut Pointer, hs: HS) {
-        let state = is_near_line(
-            self.center.pos,
-            self.angle.value,
-            pointer.pos(),
-            Self::GRAB_RADIUS,
-        );
-        self.angle_status.set_hs(hs, state);
     }
 }
 impl Display for HelperLine {
@@ -88,11 +78,11 @@ impl ObjectsFuncs for HelperLine {
         }
     }
 
-    fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
+    fn get_state(&self, get: GetEntityState) -> bool {
         use GetEntityState::*;
         match get {
-            IsHS(hs) => self.state.is_hs(hs).then(|| self.get_position()),
-            GetFirstControlHS(hs) => self.angle_status.is_hs(hs).then(|| self.center.pos),
+            IsHS(hs) => self.state.is_hs(hs),
+            IsAControlHS(hs) => self.angle_status.is_hs(hs),
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
@@ -102,26 +92,37 @@ impl ObjectsFuncs for HelperLine {
             SetAllControlsHS(hs, value) => self.angle_status.set_hs(hs, value),
         }
     }
-
     fn set_state_from_pos(
         &mut self,
         pointer: &mut Pointer,
         _keys_states: KeysStates,
         set: SetEntityStateFromPos,
-    ) {
+    ) -> bool {
         use SetEntityStateFromPos::*;
         // A closure to check if pointer is within the grab radius
         let within_grab_radius =
             |pointer: &Pointer, center: Vec2| (pointer.pos() - center).hypot() < Self::GRAB_RADIUS;
 
         match set {
-            SetHSFromPos(hs) => self
-                .state
-                .set_hs(hs, within_grab_radius(pointer, self.center.pos)),
+            SetHSFromPos(hs) => {
+                let state = within_grab_radius(pointer, self.center.pos);
+                self.state.set_hs(hs, state);
+                state
+            }
             SetControlHSFromPos(hs) => {
-                self.hs_modifiers_from_pos(pointer, hs);
+                let state = is_near_line(
+                    self.center.pos,
+                    self.angle.value,
+                    pointer.pos(),
+                    Self::GRAB_RADIUS,
+                );
+                self.angle_status.set_hs(hs, state);
+                state
             }
         }
+    }
+    fn contains_pointer(&self, _pointer: &Pointer) -> bool {
+        false
     }
 
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
@@ -183,7 +184,6 @@ impl ObjectsFuncs for HelperLine {
             pattern_line,
         )]
     }
-
     fn get_dimensions_paths_and_patterns(
         &self,
         _: &Size,
@@ -196,7 +196,6 @@ impl ObjectsFuncs for HelperLine {
         res.push(dim);
         res
     }
-
     fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
         use HS::*;
         let pattern_center = match (self.state.is_hs(Select), self.state.is_hs(Highlight)) {

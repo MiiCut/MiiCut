@@ -1,4 +1,7 @@
-use super::curves::{CurveControls, PrimitiveKindIter};
+use super::{
+    curves::{CurveControls, PrimitiveKindIter},
+    curves_wedge::Wedge,
+};
 use crate::{
     canvas::Pattern, math::*, pools::HS, positions::Status, KeysStates, Pointer, Position,
 };
@@ -226,16 +229,43 @@ impl Edge {
             }
         })
     }
+
+    fn path_elements(&self, wedge_prev: Wedge, wedge_next: Wedge) -> PrimitiveKindIter {
+        use EdgeKind::*;
+
+        match self.edge_kind {
+            Line => PrimitiveKindIter::Line(
+                kurbo::Line::new(start.to_point(), end.to_point()).path_elements(Self::TOLERANCE),
+            ),
+            Arc => {
+                if let Some(seg) = self.seg_info {
+                    if let Some(arc) =
+                        arc_from_three_points(seg.start.pos, seg.third_pt.pos, seg.end.pos)
+                    {
+                        if let Some(sub_arc) = sub_arc(arc, start, end) {
+                            PrimitiveKindIter::Arc(sub_arc.path_elements(Self::TOLERANCE))
+                        } else {
+                            PrimitiveKindIter::None
+                        }
+                    } else {
+                        PrimitiveKindIter::None
+                    }
+                } else {
+                    PrimitiveKindIter::None
+                }
+            }
+        }
+    }
     pub fn get_paths_and_patterns(
         &self,
-        start: Vec2,
-        end: Vec2,
+        wedge_prev: Wedge,
+        wedge_next: Wedge,
         parent_selected: bool,
         parent_highlighted: bool,
     ) -> (BezPath, Pattern) {
         use HS::*;
         (
-            self.path_elements(start, end).collect(),
+            self.path_elements(wedge_prev, wedge_next).collect(),
             self.get_pattern(
                 self.state.is_hs(Select) || parent_selected,
                 self.state.is_hs(Highlight) || parent_highlighted,
@@ -275,32 +305,6 @@ impl Edge {
     //         }
     //     }
     // }
-
-    fn path_elements(&self, start: Vec2, end: Vec2) -> PrimitiveKindIter {
-        use EdgeKind::*;
-        match self.edge_kind {
-            Line => PrimitiveKindIter::Line(
-                kurbo::Line::new(start.to_point(), end.to_point()).path_elements(Self::TOLERANCE),
-            ),
-            Arc => {
-                if let Some(seg) = self.seg_info {
-                    if let Some(arc) =
-                        arc_from_three_points(seg.start.pos, seg.third_pt.pos, seg.end.pos)
-                    {
-                        if let Some(sub_arc) = sub_arc(arc, start, end) {
-                            PrimitiveKindIter::Arc(sub_arc.path_elements(Self::TOLERANCE))
-                        } else {
-                            PrimitiveKindIter::None
-                        }
-                    } else {
-                        PrimitiveKindIter::None
-                    }
-                } else {
-                    PrimitiveKindIter::None
-                }
-            }
-        }
-    }
 }
 impl CurveControls for Edge {
     const TOLERANCE: f64 = 0.01;

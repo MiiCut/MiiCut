@@ -1,7 +1,4 @@
-use crate::{
-    curves::{curves::CurveControls, curves_edge::Edge, curves_wedge::CurveWedge},
-    pools::HS,
-};
+use crate::pools::HS;
 use kurbo::Vec2;
 
 #[derive(Copy, Debug, Clone)]
@@ -25,54 +22,6 @@ impl Minimum {
     }
     pub fn get_min(&self) -> Option<(f64, i64, Vec2)> {
         self.min_bundle
-    }
-}
-
-#[derive(Copy, Debug, Clone)]
-pub enum HalfEdgeElement {
-    Apex,
-    Wedge,
-    Edge,
-}
-
-#[derive(Copy, Debug, Clone)]
-pub struct HalfEdge {
-    wedge_curve: CurveWedge,
-    edge_curve: Edge,
-}
-impl HalfEdge {
-    pub fn new(dihedron_curve: CurveWedge, edge_curve: Edge) -> Self {
-        Self {
-            // vertex,
-            wedge_curve: dihedron_curve,
-            edge_curve,
-        }
-    }
-    pub fn get_wedge(&self) -> &CurveWedge {
-        &self.wedge_curve
-    }
-    pub fn get_wedge_mut(&mut self) -> &mut CurveWedge {
-        &mut self.wedge_curve
-    }
-    pub fn get_edge(&self) -> &Edge {
-        &self.edge_curve
-    }
-    pub fn get_edge_mut(&mut self) -> &mut Edge {
-        &mut self.edge_curve
-    }
-    pub fn prev_wedge_curve(&mut self) {
-        self.wedge_curve.next();
-    }
-    pub fn next_wedge_curve(&mut self) {
-        self.wedge_curve.next();
-    }
-    pub fn save_vars(&mut self) {
-        self.edge_curve.save_vars();
-        self.wedge_curve.save_vars();
-    }
-    pub fn restore_vars(&mut self) {
-        self.edge_curve.restore_vars();
-        self.wedge_curve.restore_vars();
     }
 }
 
@@ -197,13 +146,15 @@ pub struct Position {
     pub saved_pos: Vec2,
     pub last_pos: Vec2,
     pub pos: Vec2,
+    pub editable: bool,
 }
 impl Position {
-    pub fn new(pos: Vec2) -> Self {
+    pub fn new(pos: Vec2, editable: bool) -> Self {
         Self {
             saved_pos: pos,
             last_pos: pos,
             pos,
+            editable,
         }
     }
     pub fn move_pos(&mut self, dpos: Vec2) {

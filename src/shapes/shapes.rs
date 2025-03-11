@@ -11,6 +11,7 @@ use super::shape_polygon::VecRing;
 use super::shapes_pool::BSid;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
+use crate::curves::half_edge::HalfEdge;
 use crate::pools::Pools;
 use crate::pools::PoolsFunctions;
 use crate::traits::*;
@@ -80,16 +81,21 @@ pub enum ShapeKind {
 }
 impl ShapeKind {
     pub fn new_disc(center: Vec2, end: Vec2, boolean_op: BoolOps) -> Option<MiiShape> {
-        let shid = BSid::new();
         let shape_kind = ShapeDisc::new(center, end)?;
-        Some(MiiShape::new(shid, shape_kind, boolean_op))
-    }
-    pub fn new_polygon(positions: VecRing<Vec2>, boolean_op: BoolOps) -> Option<MiiShape> {
         let shid = BSid::new();
-        let shape_kind = ShapePolygon::new_polygon(positions)?;
         Some(MiiShape::new(shid, shape_kind, boolean_op))
     }
-
+    pub fn new_polygon(positions: VecRing<HalfEdge>, boolean_op: BoolOps) -> Option<MiiShape> {
+        let shape_kind = ShapePolygon::new_polygon(positions)?;
+        let shid = BSid::new();
+        Some(MiiShape::new(shid, shape_kind, boolean_op))
+    }
+    pub fn new_oblong(positions: VecRing<HalfEdge>, boolean_op: BoolOps) -> Option<MiiShape> {
+        let shape_kind = ShapePolygon::new_oblong(positions)?;
+        let shid = BSid::new();
+        Some(MiiShape::new(shid, shape_kind, boolean_op))
+    }
+    //
     pub fn get_geo_polygon(&self) -> Polygon<f64> {
         use ShapeKind::*;
         match self {
@@ -141,7 +147,7 @@ impl ObjectsFuncs for ShapeKind {
         }
     }
 
-    fn get_state(&self, get: GetEntityState) -> Option<Vec2> {
+    fn get_state(&self, get: GetEntityState) -> bool {
         use ShapeKind::*;
         match self {
             KindDisc(sh) => sh.get_state(get),
@@ -160,11 +166,18 @@ impl ObjectsFuncs for ShapeKind {
         pointer: &mut Pointer,
         keys_states: KeysStates,
         set: SetEntityStateFromPos,
-    ) {
+    ) -> bool {
         use ShapeKind::*;
         match self {
             KindDisc(sh) => sh.set_state_from_pos(pointer, keys_states, set),
             KindPolygon(sh) => sh.set_state_from_pos(pointer, keys_states, set),
+        }
+    }
+    fn contains_pointer(&self, pointer: &Pointer) -> bool {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.contains_pointer(pointer),
+            KindPolygon(sh) => sh.contains_pointer(pointer),
         }
     }
 
