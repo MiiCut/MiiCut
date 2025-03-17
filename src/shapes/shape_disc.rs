@@ -7,7 +7,6 @@
 
 use crate::{
     canvas::{CanvasText, Pattern},
-    dimensions::{DimKind, Dimension},
     math::*,
     pools::HS,
     positions::{Position, Status, Value},
@@ -35,7 +34,7 @@ impl ShapeDisc {
     const MIN_RADIUS: f64 = 2.;
 
     pub fn new(center: Vec2, pos2: Vec2) -> Option<ShapeKind> {
-        let center = Position::new(center, true);
+        let center = Position::new(center);
         let radius = Value::new((pos2 - center.pos).hypot());
         if radius.value < EPSILON {
             return None;
@@ -230,14 +229,16 @@ impl ObjectsFuncs for ShapeDisc {
     fn get_dimensions_paths_and_patterns(
         &self,
         _: &Size,
-        _: (Rect, f64, Vec2),
+        cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern, CanvasText)> {
         let mut res = vec![];
-        let offset = self.radius.value / 2_f64.sqrt();
-        let end = self.center.pos + Vec2::new(offset, -offset);
-        let dim = Dimension::new(DimKind::Radius, self.center.pos, end, self.radius.value)
-            .get_path_and_pattern();
-        res.push(dim);
+        let r = self.radius.value / 2_f64.sqrt();
+        let end = Vec2::new(r, r) + self.center.pos;
+        let start = self.center.pos;
+        // Dimension::new(DimKind::Linear, end, start, cinfo).and_then(|dim| {
+        //     res.push(dim.get_path_and_pattern());
+        //     Some(())
+        // });
         res
     }
     fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
@@ -256,5 +257,12 @@ impl ObjectsFuncs for ShapeDisc {
             }
         };
         vec![(self.to_path(Self::TOLERANCE), pattern)]
+    }
+    fn get_prim_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
+        vec![]
     }
 }

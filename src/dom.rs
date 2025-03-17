@@ -7,7 +7,8 @@ use web_sys::{window, Document, Element, Event, EventTarget, HtmlElement, MouseE
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum IconsShapes {
     Disc,
-    Polygon,
+    Rectangle,
+    Custom,
     Tube,
 }
 impl IconsShapes {
@@ -15,7 +16,8 @@ impl IconsShapes {
         use IconsShapes::*;
         match self {
             Disc => "icon-circle",
-            Polygon => "icon-custom",
+            Rectangle => "icon-rectangle-rounded",
+            Custom => "icon-custom",
             Tube => "icon-tube",
         }
     }

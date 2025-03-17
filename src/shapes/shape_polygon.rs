@@ -1,16 +1,17 @@
 use super::shapes::ShapeKind;
 use crate::{
     canvas::{CanvasText, Pattern},
-    curves::half_edge::HalfEdge,
+    curves::half_edge::{EdgeKind, HEProps, HalfEdge},
+    dimensions::dim_linear,
     math::*,
     pools::HS,
-    positions::{Minimum, Status},
+    positions::{Status, Value},
     prefab::*,
     GetEntityState, KeysStates, ObjectsFuncs, Pointer, SetEntityState, SetEntityStateFromPos,
 };
 use geo::{LineString, Polygon};
 use kurbo::{BezPath, PathEl, Point, Rect, Shape, Size, Vec2};
-use std::{fmt::Display, vec};
+use std::{f64::consts::PI, fmt::Display, vec};
 
 #[derive(Debug, Clone)]
 pub struct VecRing<T> {
@@ -52,8 +53,15 @@ impl<T> VecRing<T> {
 }
 
 #[derive(Debug, Clone)]
+enum PolyKind {
+    Rectangle,
+    Oblong,
+    Custom,
+}
+#[derive(Debug, Clone)]
 pub struct ShapePolygon {
-    hes_prim: Option<VecRing<HalfEdge>>,
+    kind: PolyKind,
+    hes_prim: Option<(VecRing<HalfEdge>, Value)>,
     hes: VecRing<HalfEdge>,
     state: Status,
     segs: BezPath,
@@ -61,10 +69,71 @@ pub struct ShapePolygon {
 }
 
 impl ShapePolygon {
-    const GRAB: f64 = 5.;
-    pub const MIN_OBLONG_WIDTH: f64 = 10.;
+    pub const MIN_OBLONG_WIDTH: f64 = 2.;
 
-    pub fn new_polygon(mut hes: VecRing<HalfEdge>) -> Option<ShapeKind> {
+    pub fn new_rectangle(hes_prim: VecRing<HalfEdge>) -> Option<ShapeKind> {
+        use ShapeKind::*;
+        (hes_prim.len() == 2).then(|| {
+            let tmp1 = hes_prim.get(0).get_vertex().pos;
+            let tmp2 = hes_prim.get(1).get_vertex().pos;
+            // Always counter clockwize to have a positive area
+            let pt1 = Vec2::new(tmp1.x.min(tmp2.x), tmp2.y.min(tmp1.y));
+            let pt3 = Vec2::new(tmp2.x.max(tmp1.x), tmp1.y.max(tmp2.y));
+            let pt4 = Vec2::new(tmp1.x.min(tmp2.x), tmp1.y.max(tmp2.y));
+            let pt2 = Vec2::new(tmp2.x.max(tmp1.x), tmp2.y.min(tmp1.y));
+            let mut props = HEProps::default();
+            props.vertex_selectable = true;
+            props.vertex_movable = false;
+            props.edge_changeable = false;
+            let mut hes = VecRing::from_element(HalfEdge::new(pt1, props));
+            hes.push(HalfEdge::new(pt2, props));
+            hes.push(HalfEdge::new(pt3, props));
+            hes.push(HalfEdge::new(pt4, props));
+            let mut shape_polygon = ShapePolygon {
+                kind: PolyKind::Rectangle,
+                hes_prim: None,
+                hes,
+                state: Status::default(),
+                segs: BezPath::new(),
+                polygon: Polygon::new(LineString::new(vec![]), vec![]),
+            };
+            shape_polygon.update_all();
+            log!("area: {}", shape_polygon.area());
+            log!("new_rectangle");
+            KindPolygon(shape_polygon)
+        })
+    }
+    pub fn new_oblong(hes_prim: VecRing<HalfEdge>) -> Option<ShapeKind> {
+        use ShapeKind::*;
+        (hes_prim.len() == 2).then(|| {
+            let mut props = HEProps::default();
+            // props.vertex_selectable = true;
+            props.vertex_movable = false;
+            // Create hes dummy
+            let mut hes = VecRing::from_element(HalfEdge::new(Vec2::ZERO, props));
+            hes.push(HalfEdge::new(Vec2::ZERO, props));
+            hes.push(HalfEdge::new(Vec2::ZERO, props));
+            hes.push(HalfEdge::new(Vec2::ZERO, props));
+            let mut shape_polygon = ShapePolygon {
+                kind: PolyKind::Oblong,
+                hes_prim: Some((hes_prim, Value::new(10. * Self::MIN_OBLONG_WIDTH))),
+                hes,
+                state: Status::default(),
+                segs: BezPath::new(),
+                polygon: Polygon::new(LineString::new(vec![]), vec![]),
+            };
+            // Update hes from hes_prim
+            shape_polygon
+                .update_hes_vertices_from_hes_prim_vertices()
+                .then(|| {
+                    shape_polygon.update_all();
+                    log!("area: {}", shape_polygon.area());
+                    log!("new_oblong");
+                    KindPolygon(shape_polygon)
+                })
+        })?
+    }
+    pub fn new_custom(mut hes: VecRing<HalfEdge>) -> Option<ShapeKind> {
         use ShapeKind::*;
         if hes.len() < 3 {
             return None;
@@ -75,6 +144,7 @@ impl ShapePolygon {
             hes.vec.reverse();
         }
         let mut shape_polygon = ShapePolygon {
+            kind: PolyKind::Custom,
             hes_prim: None,
             hes,
             state: Status::default(),
@@ -85,82 +155,77 @@ impl ShapePolygon {
         shape_polygon.update_all();
         Some(KindPolygon(shape_polygon))
     }
-    pub fn new_oblong(hes_prim: VecRing<HalfEdge>) -> Option<ShapeKind> {
-        use ShapeKind::*;
-        (hes_prim.len() >= 2).then(|| {
-            // Construct hes from hes_prim
-            let mut shape_polygon = ShapePolygon {
-                hes_prim: Some(hes_prim),
-                hes: VecRing::from_element(HalfEdge::new(Vec2::ZERO, false, false)),
-                state: Status::default(),
-                segs: BezPath::new(),
-                polygon: Polygon::new(LineString::new(vec![]), vec![]),
-            };
-            shape_polygon.construct_hes_from_hes_prim().then(|| {
-                shape_polygon.update_all();
-                log!("area: {}", shape_polygon.area());
-                log!("new_oblong");
-                KindPolygon(shape_polygon)
-            })
-        })?
-    }
-    fn construct_hes_from_hes_prim(&mut self) -> bool {
-        let mut hes_up = vec![];
-        let mut hes_down = vec![];
+
+    fn update_hes_vertices_from_hes_prim_vertices(&mut self) -> bool {
         self.hes_prim
             .as_ref()
-            .and_then(|hes_prim| {
-                // Here we are sure that prim_len >= 2
-                let prim_len = hes_prim.len() as i64;
-                for idx in 0..prim_len {
-                    match idx {
-                        0 => {
-                            // Code for the first element
-                            let v = hes_prim.get(idx).get_vertex().pos;
-                            let v_next = hes_prim.get(idx + 1).get_vertex().pos;
-                            let bdl = get_seg_bdle(v, v_next)?;
-                            // Continue processing...
-                            hes_up.push(v + bdl.n * Self::MIN_OBLONG_WIDTH);
-                            hes_down.push(v - bdl.n * Self::MIN_OBLONG_WIDTH);
-                        }
-                        _ if idx == prim_len - 1 => {
-                            // Code for the last element
-                            let v_prev = hes_prim.get(idx - 1).get_vertex().pos;
-                            let v = hes_prim.get(idx).get_vertex().pos;
-                            let bdl = get_seg_bdle(v_prev, v)?;
-                            // Continue processing...
-                            hes_up.push(v + bdl.n * Self::MIN_OBLONG_WIDTH);
-                            hes_down.push(v - bdl.n * Self::MIN_OBLONG_WIDTH);
-                        }
-                        _ => {
-                            // Code for all other elements
-                            let v_prev = hes_prim.get(idx - 1).get_vertex().pos;
-                            let v = hes_prim.get(idx).get_vertex().pos;
-                            let v_next = hes_prim.get(idx + 1).get_vertex().pos;
-                            let bdl_prev = get_seg_bdle(v_prev, v)?;
-                            let bdl_next = get_seg_bdle(v, v_next)?;
-                            // Continue processing...
-                            let n = bdl_prev.n + bdl_next.n;
-                            hes_up.push(v + n * Self::MIN_OBLONG_WIDTH);
-                            hes_down.push(v - n * Self::MIN_OBLONG_WIDTH);
-                        }
+            .and_then(|(hes_prim, width)| {
+                let v = hes_prim.get(0).get_vertex().pos;
+                let v_next = hes_prim.get(1).get_vertex().pos;
+                let bdl = get_seg_bdle(v, v_next)?;
+                match hes_prim.get(0).get_edge_kind() {
+                    EdgeKind::Segment { dum: _ } => {
+                        self.hes.get_mut(0).set_vertex_pos(v - bdl.n * width.value);
+                        self.hes.get_mut(3).set_vertex_pos(v + bdl.n * width.value);
+                        self.hes
+                            .get_mut(1)
+                            .set_vertex_pos(v_next - bdl.n * width.value);
+                        self.hes
+                            .get_mut(2)
+                            .set_vertex_pos(v_next + bdl.n * width.value);
+                    }
+                    EdgeKind::Arc { sag_rel } => {
+                        let sagitta_pt = bdl.m - bdl.n * bdl.len * sag_rel.value;
+                        circle_from_three_points(v, sagitta_pt, v_next).and_then(
+                            |(center, _radius)| {
+                                let n_v = (v - center).normalize()
+                                    * (sagitta_pt - v).cross(bdl.u).signum();
+                                let n_v_next = (v_next - center).normalize()
+                                    * (sagitta_pt - v_next).cross(bdl.u).signum();
+                                self.hes.get_mut(0).set_vertex_pos(v + n_v * width.value);
+                                self.hes
+                                    .get_mut(1)
+                                    .set_vertex_pos(v_next + n_v_next * width.value);
+                                self.hes
+                                    .get_mut(2)
+                                    .set_vertex_pos(v_next - n_v_next * width.value);
+                                self.hes.get_mut(3).set_vertex_pos(v - n_v * width.value);
+                                Some(())
+                            },
+                        );
                     }
                 }
-                // Construct the half edges
-                let mut hes = VecRing::from_element(HalfEdge::new(hes_down[0], false, false));
-                for idx in 1..hes_down.len() {
-                    hes.push(HalfEdge::new(hes_down[idx], false, false));
-                }
-                hes_up.reverse();
-                for idx in 0..hes_up.len() {
-                    hes.push(HalfEdge::new(hes_up[idx], false, false));
-                }
-                self.hes = hes;
+
                 Some(())
             })
             .is_some()
     }
-
+    fn update_hes_edges_from_hes_prim_edges(&mut self) -> bool {
+        self.hes_prim
+            .as_ref()
+            .and_then(|(hes_prim, _width)| {
+                // Update the edge kind
+                let edge_kind = *hes_prim.get(0).get_edge_kind();
+                match edge_kind {
+                    EdgeKind::Segment { dum } => {
+                        self.hes.get_mut(0).set_edge_kind(EdgeKind::Segment { dum });
+                        self.hes.get_mut(2).set_edge_kind(EdgeKind::Segment {
+                            dum: Value::new(-dum.value),
+                        });
+                    }
+                    EdgeKind::Arc { sag_rel } => {
+                        self.hes
+                            .get_mut(0)
+                            .set_edge_kind(EdgeKind::Arc { sag_rel: sag_rel });
+                        self.hes.get_mut(2).set_edge_kind(EdgeKind::Arc {
+                            sag_rel: Value::new(-sag_rel.value),
+                        });
+                    }
+                }
+                Some(())
+            })
+            .is_some()
+    }
     fn get_hes_len(&self) -> usize {
         self.hes.len()
     }
@@ -170,52 +235,113 @@ impl ShapePolygon {
     fn get_he_mut(&mut self, idx: i64) -> &mut HalfEdge {
         self.hes.get_mut(idx)
     }
-    fn near_vertex(&self, pointer: &mut Pointer) -> Option<(f64, i64, Vec2)> {
-        let mut minimum = Minimum::new();
+    fn set_near_vertex(&mut self, pointer: &mut Pointer, keys_states: KeysStates, hs: HS) -> bool {
         for idx_he in 0..self.hes.len() as i64 {
-            let (dist, v) = self.hes.get(idx_he).get_distance_to_vertex(pointer.pos());
-            if dist < Self::GRAB_RADIUS {
-                minimum.update(dist, idx_he, v);
-            }
-        }
-        minimum.get_min()
-    }
-    fn near_edge(&self, pointer: &mut Pointer) -> Option<(f64, i64, Vec2)> {
-        let mut minimum = Minimum::new();
-        for idx_he in 0..self.hes.len() as i64 {
-            let s_next = self.hes.get(idx_he + 1).get_s();
-            let v_next = self.hes.get(idx_he + 1).get_vertex().pos;
-            let dist = self
-                .hes
-                .get(idx_he)
-                .get_distance_to_edge(s_next, v_next, pointer.pos());
-            if let Some((dist, pos)) = dist {
-                if dist < Self::GRAB_RADIUS {
-                    minimum.update(dist, idx_he, pos);
+            if self.hes.get(idx_he).is_vertex_selectable() {
+                let (dist, v) = self.hes.get(idx_he).get_distance_to_vertex(pointer.pos());
+                if dist < Self::GRAB_RADIUS / pointer.get_draw_scale() {
+                    if !keys_states.alt_pressed {
+                        pointer.set_pos(v);
+                        pointer.set_magnetized(true);
+                    }
+                    self.hes.get_mut(idx_he).set_vertex_state(hs, true);
+                    return true;
                 }
             }
         }
-        minimum.get_min()
-    }
-    fn near_corner(&self, pointer: &mut Pointer) -> Option<(f64, i64, Vec2)> {
-        let mut minimum = Minimum::new();
-        for idx_he in 0..self.hes.len() as i64 {
-            let dist = self.hes.get(idx_he).get_distance_to_corner(pointer.pos());
-            if let Some((dist, pos)) = dist {
-                if dist < Self::GRAB_RADIUS {
-                    minimum.update(dist, idx_he, pos);
+        if let Some((hes_prim, _width)) = self.hes_prim.as_mut() {
+            for idx_he in 0..hes_prim.len() as i64 {
+                if hes_prim.get(idx_he).is_vertex_selectable() {
+                    let (dist, pos) = hes_prim.get(idx_he).get_distance_to_vertex(pointer.pos());
+                    if dist < Self::GRAB_RADIUS / pointer.get_draw_scale() {
+                        if !keys_states.alt_pressed {
+                            pointer.set_pos(pos);
+                            pointer.set_magnetized(true);
+                        }
+                        hes_prim.get_mut(idx_he).set_vertex_state(hs, true);
+                        return true;
+                    }
                 }
             }
         }
-        minimum.get_min()
+        false
+    }
+    fn set_near_edge(&mut self, pointer: &mut Pointer, keys_states: KeysStates, hs: HS) -> bool {
+        for idx_he in 0..self.hes.len() as i64 {
+            if self.hes.get(idx_he).is_edge_selectable() {
+                let s_next = self.hes.get(idx_he + 1).get_s();
+                let v_next = self.hes.get(idx_he + 1).get_vertex().pos;
+                if let Some((dist, pos)) =
+                    self.hes
+                        .get(idx_he)
+                        .get_distance_to_edge(s_next, v_next, pointer.pos())
+                {
+                    if dist < Self::GRAB_RADIUS / pointer.get_draw_scale() {
+                        if !keys_states.alt_pressed {
+                            pointer.set_pos(pos);
+                            pointer.set_magnetized(true);
+                        }
+                        self.hes.get_mut(idx_he).set_edge_state(hs, true);
+                        return true;
+                    }
+                }
+            }
+        }
+        if let Some((hes_prim, _width)) = self.hes_prim.as_mut() {
+            for idx_he in 0..(hes_prim.len() - 1) as i64 {
+                if hes_prim.get(idx_he).is_edge_selectable() {
+                    let s_next = hes_prim.get(idx_he + 1).get_s();
+                    let v_next = hes_prim.get(idx_he + 1).get_vertex().pos;
+                    if let Some((dist, pos)) =
+                        hes_prim
+                            .get(idx_he)
+                            .get_distance_to_edge(s_next, v_next, pointer.pos())
+                    {
+                        if dist < Self::GRAB_RADIUS / pointer.get_draw_scale() {
+                            if !keys_states.alt_pressed {
+                                pointer.set_pos(pos);
+                                pointer.set_magnetized(true);
+                            }
+                            hes_prim.get_mut(idx_he).set_edge_state(hs, true);
+                            return true;
+                        }
+                    }
+                }
+            }
+        };
+        false
+    }
+    fn set_near_corner(&mut self, pointer: &mut Pointer, keys_states: KeysStates, hs: HS) -> bool {
+        for idx_he in 0..self.hes.len() as i64 {
+            if let Some((dist, pos)) = self.hes.get(idx_he).get_distance_to_corner(pointer.pos()) {
+                if dist < Self::GRAB_RADIUS / pointer.get_draw_scale() {
+                    if !keys_states.alt_pressed {
+                        pointer.set_pos(pos);
+                        pointer.set_magnetized(true);
+                    }
+                    self.hes.get_mut(idx_he).set_corner_state(hs, true);
+                    return true;
+                }
+            }
+        }
+        false
     }
     fn clear_selections(&mut self, hs: HS) {
+        self.state.set_hs(hs, false);
+
         self.hes.iter_mut().for_each(|he| {
             he.set_vertex_state(hs, false);
             he.set_corner_state(hs, false);
             he.set_edge_state(hs, false);
         });
-        self.state.set_hs(hs, false);
+        self.hes_prim.as_mut().and_then(|(hes_prim, _width)| {
+            hes_prim.iter_mut().for_each(|he| {
+                he.set_vertex_state(hs, false);
+                he.set_corner_state(hs, false);
+                he.set_edge_state(hs, false);
+            });
+            Some(())
+        });
     }
     fn get_centroid(&self) -> Vec2 {
         let mut sum = Vec2::ZERO;
@@ -233,32 +359,50 @@ impl ShapePolygon {
             self.get_he_mut(idx_he)
                 .update_data(v_prev, edge_kind_prev, v_next);
         }
+        // Update the primitives half edges
+        if let Some((hes_prim, _width)) = self.hes_prim.as_mut() {
+            for idx_he in 0..hes_prim.len() as i64 {
+                let v_prev = hes_prim.get(idx_he - 1).get_vertex().pos;
+                let v_next = hes_prim.get(idx_he + 1).get_vertex().pos;
+                let edge_kind_prev = hes_prim.get(idx_he - 1).get_edge().clone();
+                hes_prim
+                    .get_mut(idx_he)
+                    .update_data(v_prev, edge_kind_prev, v_next);
+            }
+        }
         // Update the polygon
         self.segs = calc_segs(self.to_path(Self::TOLERANCE));
         self.polygon = calc_polygon(&self.segs);
     }
 
-    pub fn change_polygon_wedge_or_edge(&mut self, keys_states: &KeysStates) {
+    pub fn change_polygon_wedge_or_edge(&mut self, _keys_states: &KeysStates) {
         use HS::*;
         for idx_he in 0..self.get_hes_len() as i64 {
             let he = self.get_he_mut(idx_he);
             // A. Change first primitive selected and break if found
             if he.get_edge_state(Select) {
-                if keys_states.shift_pressed {
-                    he.edge_next_kind();
-                } else {
-                    he.edge_prev_kind();
-                }
+                he.edge_next_kind();
+                self.update_hes_edges_from_hes_prim_edges();
+                self.update_hes_vertices_from_hes_prim_vertices();
                 break;
             }
             // B. Change first corner selected and break if found
             if he.get_corner_state(Select) || he.get_vertex_state(Select) {
-                if keys_states.shift_pressed {
-                    he.corner_next_kind();
-                } else {
-                    he.corner_prev_kind();
-                }
+                he.corner_next_kind();
                 break;
+            }
+        }
+        // Prim edges
+        if let Some((hes_prim, _width)) = self.hes_prim.as_mut() {
+            for idx_he in 0..hes_prim.len() as i64 {
+                let he = hes_prim.get_mut(idx_he);
+                if he.get_edge_state(Select) {
+                    he.edge_next_kind();
+                    self.update_hes_edges_from_hes_prim_edges();
+                    self.update_hes_vertices_from_hes_prim_vertices();
+                    self.update_all();
+                    break;
+                }
             }
         }
         self.update_all();
@@ -337,31 +481,34 @@ impl Shape for ShapePolygon {
 }
 impl ObjectsFuncs for ShapePolygon {
     const TOLERANCE: f64 = 0.01;
-    const GRAB_RADIUS: f64 = 5.;
+    const GRAB_RADIUS: f64 = 10.;
     type Kindvars = ShapeKind;
 
     fn save_vars(&mut self) {
         for he in self.hes.iter_mut() {
             he.save_vars();
         }
-        if let Some(hes_prim) = &mut self.hes_prim {
+        if let Some((hes_prim, width)) = &mut self.hes_prim {
             for he_prim in hes_prim.iter_mut() {
                 he_prim.save_vars();
             }
+            width.saved_val = width.value;
         }
     }
     fn restore_vars(&mut self) {
         for he in self.hes.iter_mut() {
             he.restore_vars();
         }
-        if let Some(hes_prim) = &mut self.hes_prim {
+        if let Some((hes_prim, width)) = &mut self.hes_prim {
             for he_prim in hes_prim.iter_mut() {
                 he_prim.restore_vars();
             }
+            width.value = width.saved_val;
         }
     }
     fn get_vars(&self) -> ShapeKind {
         ShapeKind::KindPolygon(ShapePolygon {
+            kind: self.kind.clone(),
             hes_prim: self.hes_prim.clone(),
             hes: self.hes.clone(),
             state: Status::default(),
@@ -371,6 +518,7 @@ impl ObjectsFuncs for ShapePolygon {
     }
     fn set_vars(&mut self, shape_kind: &ShapeKind) {
         if let ShapeKind::KindPolygon(shape_polygon) = shape_kind {
+            self.kind = shape_polygon.kind.clone();
             self.hes = shape_polygon.hes.clone();
             self.hes_prim = shape_polygon.hes_prim.clone();
         }
@@ -392,6 +540,19 @@ impl ObjectsFuncs for ShapePolygon {
                         return true;
                     }
                 }
+                if let Some((hes_prim, _width)) = self.hes_prim.as_ref() {
+                    for he in hes_prim.iter() {
+                        if he.get_vertex_state(hs) {
+                            return true;
+                        }
+                        if he.get_corner_state(hs) {
+                            return true;
+                        }
+                        if he.get_edge_state(hs) {
+                            return true;
+                        }
+                    }
+                }
                 false
             }
         }
@@ -401,12 +562,18 @@ impl ObjectsFuncs for ShapePolygon {
         match set {
             SetHS(hs, value) => self.state.set_hs(hs, value),
             SetAllControlsHS(hs, state) => {
-                self.hes
-                    .iter_mut()
-                    .for_each(|he| he.set_vertex_state(hs, state));
                 self.hes.iter_mut().for_each(|he| {
+                    he.set_vertex_state(hs, state);
                     he.set_corner_state(hs, state);
                     he.set_edge_state(hs, state);
+                });
+                self.hes_prim.as_mut().and_then(|(hes_prim, _width)| {
+                    hes_prim.iter_mut().for_each(|he| {
+                        he.set_vertex_state(hs, state);
+                        he.set_corner_state(hs, state);
+                        he.set_edge_state(hs, state);
+                    });
+                    Some(())
                 });
             }
         }
@@ -427,33 +594,20 @@ impl ObjectsFuncs for ShapePolygon {
             SetControlHSFromPos(hs) => {
                 // Clear all selections
                 self.clear_selections(hs);
-                // 1. Check for the edges
-                if let Some((_, idx, pos)) = self.near_edge(pointer) {
-                    if !keys_states.alt_pressed {
-                        pointer.set_pos(pos);
-                        pointer.set_magnetized(true);
-                    }
-                    self.hes.get_mut(idx as i64).set_edge_state(hs, true);
+
+                // 1. Check for the vertices
+                if self.set_near_vertex(pointer, keys_states, hs) {
                     return true;
                 };
-                // 2. Check for the apices
-                if let Some((_, idx, pos)) = self.near_corner(pointer) {
-                    if !keys_states.alt_pressed {
-                        pointer.set_pos(pos);
-                        pointer.set_magnetized(true);
-                    }
-                    self.hes.get_mut(idx as i64).set_corner_state(hs, true);
+                // 2. Check for the edges
+                if self.set_near_edge(pointer, keys_states, hs) {
+                    return true;
+                };
+                // 3. Check for the corners
+                if self.set_near_corner(pointer, keys_states, hs) {
                     return true;
                 }
-                // 3. Check for the vertices
-                if let Some((_, idx, pos)) = self.near_vertex(pointer) {
-                    if !keys_states.alt_pressed {
-                        pointer.set_pos(pos);
-                        pointer.set_magnetized(true);
-                    }
-                    self.hes.get_mut(idx as i64).set_vertex_state(hs, true);
-                    return true;
-                };
+
                 // Check also for polygon center
                 let centroid = self.get_centroid();
                 if (pointer.pos() - centroid).hypot() < Self::GRAB_RADIUS {
@@ -475,51 +629,173 @@ impl ObjectsFuncs for ShapePolygon {
         for idx_he in 0..self.hes.len() as i64 {
             self.hes.get_mut(idx_he).move_vertex(pointer.dpos());
         }
+        self.hes_prim.as_mut().and_then(|(hes_prim, _width)| {
+            for idx_he in 0..hes_prim.len() as i64 {
+                hes_prim.get_mut(idx_he).move_vertex(pointer.dpos());
+            }
+            Some(())
+        });
         self.update_all();
         true
     }
     fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
+        use PolyKind::*;
         use HS::*;
         let snap = pointer.get_snap().val();
         // 1. Check vertices, move the first selected found and return
         for idx_he in 0..self.hes.len() as i64 {
             if self.hes.get(idx_he).get_vertex_state(Select) {
-                // We need prev and next vertices for the snapping
-                let v_prev = self.hes.get(idx_he - 1).get_vertex().pos;
-                let v_next = self.hes.get(idx_he + 1).get_vertex().pos;
-                let v_saved = self.hes.get(idx_he).get_vertex().saved_pos;
+                if self.hes.get(idx_he).is_vertex_movable() {
+                    // We need prev and next vertices for the snapping
+                    // The snapping serves to keep the edges length as a round number
+                    let v_prev = self.hes.get(idx_he - 1).get_vertex().pos;
+                    let v_next = self.hes.get(idx_he + 1).get_vertex().pos;
+                    let v_saved = self.hes.get(idx_he).get_vertex().saved_pos;
 
-                // Try move the vertex (None if snapping not found)
-                let o_v_new = if pointer.is_magnetized() {
-                    Some(pointer.pos())
-                } else {
-                    move_vertex_with_snapping(v_prev, v_saved, v_next, pointer.dpos(), snap)
-                };
-                if let Some(v_new) = o_v_new {
-                    self.hes.get_mut(idx_he).set_vertex_pos(v_new);
-                    self.update_all();
-                    return true;
+                    // Try move the vertex (None if snapping not found)
+                    let o_v_new = if pointer.is_magnetized() {
+                        Some(pointer.pos())
+                    } else {
+                        move_vertex_with_3v_snapping(v_prev, v_saved, v_next, pointer.dpos(), snap)
+                    };
+                    if let Some(v_new) = o_v_new {
+                        self.hes.get_mut(idx_he).set_vertex_pos(v_new);
+                        self.update_all();
+                        return true;
+                    }
                 }
                 return false;
             }
         }
 
-        // 2. Move apices (chamfer/fillet): move the first control selected found and return
+        // 2. Move corner (chamfer/fillet): move the first control selected found and return
         for idx_he in 0..self.hes.len() as i64 {
             if self.hes.get(idx_he).get_corner_state(Select) {
-                self.hes.get_mut(idx_he).move_corner(pointer.dpos());
+                if self.hes.get(idx_he).is_corner_movable() {
+                    self.hes.get_mut(idx_he).move_corner(pointer.dpos());
+                    self.update_all();
+                    return true;
+                }
+            }
+        }
+
+        // 3. Move edges: move the first control selected found and return
+        for idx_he in 0..self.hes.len() as i64 {
+            if self.hes.get(idx_he).get_edge_state(Select) {
+                use EdgeKind::*;
+                match *self.hes.get_mut(idx_he).get_edge_kind() {
+                    Segment { dum: _ } => {
+                        if self.hes.get(idx_he).is_edge_movable() {
+                            match self.kind {
+                                Rectangle => {
+                                    self.hes.get_mut(idx_he).move_vertex(pointer.dpos());
+                                    self.hes.get_mut(idx_he + 1).move_vertex(pointer.dpos());
+                                }
+                                Oblong => {
+                                    if idx_he == 0 || idx_he == 2 {
+                                        if let Some((hes_prim, width)) = self.hes_prim.as_mut() {
+                                            let v = hes_prim.get(0).get_vertex().pos;
+                                            let v_next = hes_prim.get(1).get_vertex().pos;
+                                            if let Some(bdl) = get_seg_bdle(v, v_next) {
+                                                let dpos_proj = pointer.dpos().dot(bdl.n);
+                                                width.value = if idx_he == 0 {
+                                                    width.saved_val - dpos_proj
+                                                } else {
+                                                    width.saved_val + dpos_proj
+                                                };
+                                                if width.value < Self::MIN_OBLONG_WIDTH {
+                                                    width.value = Self::MIN_OBLONG_WIDTH;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Custom => {
+                                    self.hes.get_mut(idx_he).move_vertex(pointer.dpos());
+                                    self.hes.get_mut(idx_he + 1).move_vertex(pointer.dpos());
+                                }
+                            }
+                        }
+                    }
+                    Arc { sag_rel } => {
+                        let v = self.hes.get(idx_he).get_vertex().pos;
+                        let v_next = self.hes.get(idx_he + 1).get_vertex().pos;
+                        if let Some(sb) = get_seg_bdle(v, v_next) {
+                            let mut new_sag_rel = Value::new(
+                                (sb.len * sag_rel.saved_val - pointer.dpos().dot(sb.n)) / sb.len,
+                            );
+                            new_sag_rel.saved_val = sag_rel.saved_val;
+                            self.hes.get_mut(idx_he).set_edge_kind(Arc {
+                                sag_rel: new_sag_rel,
+                            });
+                        }
+                    }
+                }
+                self.update_hes_edges_from_hes_prim_edges();
+                self.update_hes_vertices_from_hes_prim_vertices();
                 self.update_all();
                 return true;
             }
         }
 
-        // 3. Move edges (third point): move the first control selected found and return
-        for idx_he in 0..self.hes.len() as i64 {
-            if self.hes.get(idx_he).get_edge_state(Select) {
-                let v_next = self.hes.get(idx_he + 1).get_vertex().pos;
-                self.hes.get_mut(idx_he).move_edge(v_next, pointer.dpos());
-                self.update_all();
-                return true;
+        /*
+           hes primitives
+        */
+        if let Some((hes_prim, _width)) = self.hes_prim.as_mut() {
+            // 4. Check prim vertices, move the first selected found and return
+            for idx_he in 0..hes_prim.len() as i64 {
+                if hes_prim.get(idx_he).get_vertex_state(Select) {
+                    if hes_prim.get(idx_he).is_vertex_movable() {
+                        hes_prim.get_mut(idx_he).set_vertex_pos(pointer.pos());
+                        self.update_hes_vertices_from_hes_prim_vertices();
+                        self.update_all();
+                        return true;
+                    }
+                }
+            }
+
+            // 5. Move corner (chamfer/fillet): move the first control selected found and return
+            for idx_he in 0..hes_prim.len() as i64 {
+                if hes_prim.get(idx_he).get_corner_state(Select) {
+                    if hes_prim.get(idx_he).is_corner_movable() {
+                        hes_prim.get_mut(idx_he).move_corner(pointer.dpos());
+                        self.update_all();
+                        return true;
+                    }
+                }
+            }
+
+            // 6. Move edges: move the first control selected found and return
+            for idx_he in 0..(hes_prim.len() - 1) as i64 {
+                if hes_prim.get(idx_he).get_edge_state(Select) {
+                    if hes_prim.get(idx_he).is_edge_movable() {
+                        use EdgeKind::*;
+                        match *hes_prim.get_mut(idx_he).get_edge_kind() {
+                            Segment { dum: _ } => {
+                                hes_prim.get_mut(idx_he).move_vertex(pointer.dpos());
+                                hes_prim.get_mut(idx_he + 1).move_vertex(pointer.dpos());
+                            }
+                            Arc { sag_rel } => {
+                                let v = hes_prim.get(idx_he).get_vertex().pos;
+                                let v_next = hes_prim.get(idx_he + 1).get_vertex().pos;
+                                if let Some(sb) = get_seg_bdle(v, v_next) {
+                                    let mut new_sag_rel = Value::new(
+                                        (sb.len * sag_rel.saved_val - pointer.dpos().dot(sb.n))
+                                            / sb.len,
+                                    );
+                                    new_sag_rel.saved_val = sag_rel.saved_val;
+                                    hes_prim.get_mut(idx_he).set_edge_kind(Arc {
+                                        sag_rel: new_sag_rel,
+                                    });
+                                }
+                            }
+                        }
+                        self.update_hes_edges_from_hes_prim_edges();
+                        self.update_hes_vertices_from_hes_prim_vertices();
+                        self.update_all();
+                        return true;
+                    }
+                }
             }
         }
         false
@@ -540,9 +816,9 @@ impl ObjectsFuncs for ShapePolygon {
         // VERTICES
         for idx_he in 0..self.hes.len() as i64 {
             let he = self.hes.get(idx_he);
-            if he.is_vertex_editable() {
+            if he.is_vertex_selectable() {
                 paths_patterns.push((
-                    modifiers_path(he.get_vertex().pos, scale, Self::GRAB),
+                    modifiers_path(he.get_vertex().pos, scale),
                     modifiers_pattern(he.get_vertex_state(Select), he.get_vertex_state(Highlight)),
                 ));
             }
@@ -566,6 +842,21 @@ impl ObjectsFuncs for ShapePolygon {
             //     ));
             // }
         }
+        self.hes_prim.as_ref().and_then(|(hes_prim, _width)| {
+            for idx_he in 0..hes_prim.len() as i64 {
+                let he = hes_prim.get(idx_he);
+                if he.is_vertex_selectable() {
+                    paths_patterns.push((
+                        modifiers_path(he.get_vertex().pos, scale),
+                        modifiers_pattern(
+                            he.get_vertex_state(Select),
+                            he.get_vertex_state(Highlight),
+                        ),
+                    ));
+                }
+            }
+            Some(())
+        });
 
         // DEBUG
         // paths_patterns.push((
@@ -585,7 +876,7 @@ impl ObjectsFuncs for ShapePolygon {
 
         // POLYGON CENTER
         paths_patterns.push((
-            center_path(self.get_centroid(), scale, Self::GRAB),
+            center_path(self.get_centroid(), scale, Self::GRAB_RADIUS),
             modifiers_pattern(self.state.is_hs(Select), self.state.is_hs(Highlight)),
         ));
         paths_patterns
@@ -612,27 +903,103 @@ impl ObjectsFuncs for ShapePolygon {
         }
         paths_patterns
     }
+    fn get_prim_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
+        use HS::*;
+        let mut paths_patterns = vec![];
+        if let Some((hes_prim, _width)) = self.hes_prim.as_ref() {
+            if hes_prim.get(0).is_edge_selectable() {
+                let s_next = hes_prim.get(1).get_s();
+                let v_next = hes_prim.get(1).get_vertex().pos;
+                paths_patterns.push(hes_prim.get(0).get_prim_edge_paths_and_patterns(
+                    s_next,
+                    v_next,
+                    self.state.is_hs(Select),
+                    self.state.is_hs(Highlight),
+                ));
+            }
+        };
+        paths_patterns
+    }
     fn get_dimensions_paths_and_patterns(
         &self,
         _size: &Size,
-        _cinfo: (Rect, f64, Vec2),
+        cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern, CanvasText)> {
-        // use HS::*;
-        let mut _res = vec![];
-        // for he_idx in 0..self.hes.len() as i64 {
-        //     let edge = self.hes.get(he_idx).get_edge();
-        //     let start_corner = self.hes.get(he_idx).get_wedge().get_corner().pos;
-        //     let end_corner = self.hes.get(he_idx + 1).get_wedge().get_corner().pos;
-        //     let selected = edge.get_state(Select).is_some() || self.state.is_hs(Select);
-        //     let highlighted = edge.get_state(Highlight).is_some() || self.state.is_hs(Highlight);
-        //     if selected || highlighted {
-        //         vec![Dimension::new(DimKind::Linear, start_apex, end_apex, 0.)
-        //             .get_path_and_pattern()];
-        //         let dim = edge.get_dimensions_paths_and_patterns(start_corner, end_corner, size);
-        //         res.extend(dim);
-        //     }
-        // }
-        _res
+        use PolyKind::*;
+        use HS::*;
+        let mut res = vec![];
+        match self.kind {
+            Rectangle => {
+                let display = (0..4).any(|idx| {
+                    self.hes.get(idx).get_edge_state(Select)
+                        || self.hes.get(idx).get_edge_state(Highlight)
+                }) || self.state.is_hs(Select)
+                    || self.state.is_hs(Highlight);
+
+                (0..2).for_each(|idx| {
+                    let he = self.hes.get(idx);
+                    display.then(|| {
+                        get_seg_bdle(he.get_vertex().pos, self.hes.get(idx + 1).get_vertex().pos)
+                            .and_then(|bdl| {
+                                res.push(dim_linear(bdl, cinfo));
+                                Some(())
+                            });
+                    });
+                });
+            }
+            Oblong => {
+                let display = (0..4).any(|idx| {
+                    self.hes.get(idx).get_edge_state(Select)
+                        || self.hes.get(idx).get_edge_state(Highlight)
+                }) || self.state.is_hs(Select)
+                    || self.state.is_hs(Highlight);
+
+                let v0 = self.hes.get(0).get_vertex().pos;
+                let v1 = self.hes.get(1).get_vertex().pos;
+                let v2 = self.hes.get(2).get_vertex().pos;
+                let v3 = self.hes.get(3).get_vertex().pos;
+                display.then(|| {
+                    get_seg_bdle(v0, v1).and_then(|bdl1| {
+                        res.push(dim_linear(bdl1, cinfo));
+                        let (vm1, vm2) = if bdl1.a > -PI / 2. && bdl1.a < PI / 2. {
+                            (
+                                v3 + bdl1.u * bdl1.len * 3. / 4.,
+                                v0 + bdl1.u * bdl1.len * 3. / 4.,
+                            )
+                        } else {
+                            (v3 + bdl1.u * bdl1.len / 4., v0 + bdl1.u * bdl1.len / 4.)
+                        };
+                        get_seg_bdle(vm1, vm2).and_then(|bdl2| {
+                            res.push(dim_linear(bdl2, cinfo));
+                            Some(())
+                        })
+                    });
+                });
+            }
+            Custom => {
+                for he_idx in 0..self.hes.len() as i64 {
+                    let he = self.hes.get(he_idx);
+                    let selected = he.get_vertex_state(Select) || self.state.is_hs(Select);
+                    let highlighted = he.get_vertex_state(Highlight) || self.state.is_hs(Highlight);
+                    (selected || highlighted).then(|| {
+                        get_seg_bdle(
+                            he.get_vertex().pos,
+                            self.hes.get(he_idx + 1).get_vertex().pos,
+                        )
+                        .and_then(|bdl| {
+                            res.push(dim_linear(bdl, cinfo));
+                            Some(())
+                        });
+                    });
+                }
+            }
+        }
+
+        res
     }
 }
 

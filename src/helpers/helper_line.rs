@@ -2,8 +2,6 @@ use super::helpers::HelperKind;
 use super::helpers::HelperKindvars;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
-use crate::dimensions::DimKind;
-use crate::dimensions::Dimension;
 use crate::get_line_segment;
 use crate::is_near_line;
 use crate::math::*;
@@ -39,7 +37,7 @@ impl HelperLine {
             return None;
         }
         Some(HelperKind::Line(HelperLine {
-            center: Position::new(pos1, true),
+            center: Position::new(pos1),
             angle: Value::new((pos2 - pos1).atan2()),
             angle_status: Status::default(),
             state: Status::default(),
@@ -187,13 +185,15 @@ impl ObjectsFuncs for HelperLine {
     fn get_dimensions_paths_and_patterns(
         &self,
         _: &Size,
-        _: (Rect, f64, Vec2),
+        cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern, CanvasText)> {
         let mut res = vec![];
+        let start = self.center.pos;
         let end = get_point_at_dist_from_angle(self.center.pos, self.angle.value, 200.);
-        let dim = Dimension::new(DimKind::Angle, self.center.pos, end, self.angle.value);
-        let dim = dim.get_path_and_pattern();
-        res.push(dim);
+        // Dimension::new(DimKind::Linear, end, start, cinfo).and_then(|dim| {
+        //     res.push(dim.get_path_and_pattern());
+        //     Some(())
+        // });
         res
     }
     fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
@@ -208,5 +208,12 @@ impl ObjectsFuncs for HelperLine {
             center_path(self.center.pos, 1., Self::GRAB_RADIUS),
             pattern_center,
         )]
+    }
+    fn get_prim_paths_and_patterns(
+        &self,
+        _das: &Size,
+        _cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
+        vec![]
     }
 }

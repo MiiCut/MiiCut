@@ -2,8 +2,6 @@ use super::helpers::HelperKind;
 use super::helpers::HelperKindvars;
 use crate::canvas::CanvasText;
 use crate::canvas::Pattern;
-use crate::dimensions::DimKind;
-use crate::dimensions::Dimension;
 use crate::math::*;
 use crate::pools::HS;
 use crate::positions::Status;
@@ -41,7 +39,7 @@ impl HelperCircle {
             return None;
         }
         Some(HelperKind::Circle(HelperCircle {
-            center: Position::new(center, true),
+            center: Position::new(center),
             radius: Value::new((pos2 - center).hypot()),
             radius_state: Status::default(),
             state: Status::default(),
@@ -189,14 +187,16 @@ impl ObjectsFuncs for HelperCircle {
     fn get_dimensions_paths_and_patterns(
         &self,
         _: &Size,
-        _: (Rect, f64, Vec2),
+        cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern, CanvasText)> {
         let mut res = vec![];
-        let offset = self.radius.value / 2_f64.sqrt();
-        let end = self.center.pos + Vec2::new(offset, -offset);
-        let dim = Dimension::new(DimKind::Radius, self.center.pos, end, self.radius.value)
-            .get_path_and_pattern();
-        res.push(dim);
+        let r = self.radius.value / 2_f64.sqrt();
+        let end = Vec2::new(r, r) + self.center.pos;
+        let start = self.center.pos;
+        // Dimension::new(DimKind::Linear, end, start, cinfo).and_then(|dim| {
+        //     res.push(dim.get_path_and_pattern());
+        //     Some(())
+        // });
         res
     }
     fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
@@ -211,5 +211,12 @@ impl ObjectsFuncs for HelperCircle {
             center_path(self.center.pos, 1., Self::GRAB_RADIUS),
             pattern_center,
         )]
+    }
+    fn get_prim_paths_and_patterns(
+        &self,
+        _das: &Size,
+        _cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
+        vec![]
     }
 }

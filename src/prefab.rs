@@ -54,9 +54,9 @@ pub fn helper_point_path(pos: Vec2, size: f64) -> BezPath {
     BezPath::from_vec(v)
 }
 
-pub fn modifiers_path(pos: Vec2, scale: f64, size: f64) -> BezPath {
+pub fn modifiers_path(pos: Vec2, scale: f64) -> BezPath {
     let tol = 0.01;
-    let size = size;
+    let size = 5.;
     Circle::new(pos.to_point(), size / scale).to_path(tol)
 }
 pub fn line_path(pos1: Vec2, pos2: Vec2) -> BezPath {
@@ -65,7 +65,14 @@ pub fn line_path(pos1: Vec2, pos2: Vec2) -> BezPath {
         PathEl::LineTo(pos2.to_point()),
     ])
 }
-
+pub fn get_text_pattern(selected: bool, highlighted: bool) -> Pattern {
+    match (selected, highlighted) {
+        (false, false) => Pattern::DimensionTextNormal,
+        (false, true) => Pattern::DimensionTextHighlighted,
+        (true, false) => Pattern::DimensionTextSelected,
+        (true, true) => Pattern::DimensionTextSelected,
+    }
+}
 pub fn modifiers_pattern(selected: bool, highlighted: bool) -> Pattern {
     match (selected, highlighted) {
         (false, false) => Pattern::Modifiers,

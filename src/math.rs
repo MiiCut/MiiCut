@@ -1577,12 +1577,7 @@ pub fn perpendicular_points_with_distance(
     }
 }
 
-pub fn line_line_intersection(
-    point1: Vec2,
-    angle1: f64,
-    point2: Vec2,
-    angle2: f64,
-) -> Option<Vec2> {
+pub fn lines_intersection_1(point1: Vec2, angle1: f64, point2: Vec2, angle2: f64) -> Option<Vec2> {
     // Direction vectors for the two lines
     let dir1 = Vec2::new(angle1.cos(), angle1.sin());
     let dir2 = Vec2::new(angle2.cos(), angle2.sin());
@@ -1599,6 +1594,24 @@ pub fn line_line_intersection(
     }
 
     // Solve for t and u
+    let t = (delta.x * dir2.y - delta.y * dir2.x) / det;
+
+    // Compute the intersection point
+    Some(point1 + dir1 * t)
+}
+pub fn lines_intersection_2(point1: Vec2, dir1: Vec2, point2: Vec2, dir2: Vec2) -> Option<Vec2> {
+    // Differences between the points
+    let delta = point2 - point1;
+
+    // Determinant (cross product of the direction vectors)
+    let det = dir1.x * dir2.y - dir1.y * dir2.x;
+
+    // If determinant is zero (or near zero), the lines are parallel or coincident
+    if det.abs() < f64::EPSILON {
+        return None;
+    }
+
+    // Solve for t (the scalar parameter along dir1)
     let t = (delta.x * dir2.y - delta.y * dir2.x) / det;
 
     // Compute the intersection point
@@ -1820,13 +1833,45 @@ fn find_arc_circle_intersections(
     }
 }
 
+pub fn move_vertex_with_2v_snapping(a: Vec2, b: Vec2, dpos: Vec2, snap: f64) -> Option<Vec2> {
+    // Apply the small displacement to the apex (B)
+    let new_b = b + dpos;
+
+    // Compute the current distance from the new apex to point a
+    let ab = (new_b - a).hypot();
+
+    // Snap this distance to the nearest multiple of 'snap'
+    let snap_ab = (ab / snap).round() * snap;
+
+    // Find the intersection of the circle centered at 'a' with radius 'snap_ab'
+    // and the circle centered at 'b' with radius 'snap'
+    match circle_circle_intersection(a, snap_ab, new_b, snap) {
+        // If there's a single intersection, return it.
+        Some((i1, None)) => Some(i1),
+        // If there are two intersections, choose the one closest to the new_b position.
+        Some((i1, Some(i2))) => {
+            let dist1 = (i1 - new_b).hypot();
+            let dist2 = (i2 - new_b).hypot();
+            if dist1 < dist2 {
+                Some(i1)
+            } else {
+                Some(i2)
+            }
+        }
+        // If no intersection is found, log a warning and return None.
+        _ => {
+            log!("WARNING: No intersection found in move_vertex_with_2v_snapping()");
+            None
+        }
+    }
+}
 /// Moves the apex point with snapping. Given points `a` and `c` (the two fixed endpoints),
 /// the original apex, and a displacement `dpos`, this function computes the new apex position
 /// by snapping the distances |AB| and |BC| to multiples of `snap` and then finding the circle‐
 /// circle intersection.
 ///
 /// Returns `Some(new_apex)` if an intersection is found, or `None` if no valid intersection exists.
-pub fn move_vertex_with_snapping(
+pub fn move_vertex_with_3v_snapping(
     a: Vec2,
     apex: Vec2,
     c: Vec2,
@@ -2164,6 +2209,7 @@ pub struct SegBundle {
     pub u: Vec2,
     pub n: Vec2,
     pub len: f64,
+    pub a: f64,
 }
 pub fn get_seg_bdle(s: Vec2, e: Vec2) -> Option<SegBundle> {
     let seg_len = (e - s).hypot();
@@ -2171,6 +2217,7 @@ pub fn get_seg_bdle(s: Vec2, e: Vec2) -> Option<SegBundle> {
         let mid_pt = (e + s) / 2.;
         let u_dir = (e - s).normalize();
         let n_dir = Vec2::new(-u_dir.y, u_dir.x);
+        let a = (e - s).atan2();
         SegBundle {
             s,
             e,
@@ -2178,6 +2225,7 @@ pub fn get_seg_bdle(s: Vec2, e: Vec2) -> Option<SegBundle> {
             u: u_dir,
             n: n_dir,
             len: seg_len,
+            a,
         }
     })
 }

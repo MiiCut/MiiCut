@@ -69,6 +69,9 @@ impl Pointer {
     pub fn set_draw_scale(&mut self, scale: f64) {
         self.draw_scale = scale;
     }
+    pub fn get_draw_scale(&self) -> f64 {
+        self.draw_scale
+    }
     pub fn set_snap(&mut self, snap: SnapValue) {
         self.snap = snap;
     }
@@ -146,15 +149,13 @@ pub struct Position {
     pub saved_pos: Vec2,
     pub last_pos: Vec2,
     pub pos: Vec2,
-    pub editable: bool,
 }
 impl Position {
-    pub fn new(pos: Vec2, editable: bool) -> Self {
+    pub fn new(pos: Vec2) -> Self {
         Self {
             saved_pos: pos,
             last_pos: pos,
             pos,
-            editable,
         }
     }
     pub fn move_pos(&mut self, dpos: Vec2) {

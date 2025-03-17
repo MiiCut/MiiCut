@@ -25,6 +25,7 @@ use canvas::TextAlign;
 use canvas::TextPos;
 use canvas::{CanvasKind, Canvases, Pattern};
 use clipboard::*;
+use curves::half_edge::HEProps;
 use curves::half_edge::HalfEdge;
 use helpers::helpers::HelperKind;
 use helpers::helpers_pool::AddHelperAction;
@@ -298,7 +299,8 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     use IconsShapes::*;
     user_icons.insert(Arrow);
     user_icons.insert(IShapes(Disc));
-    user_icons.insert(IShapes(Polygon));
+    user_icons.insert(IShapes(Rectangle));
+    user_icons.insert(IShapes(Custom));
     user_icons.insert(IShapes(Tube));
     user_icons.insert(IHelpers(IconsConstruction::Line));
     user_icons.insert(IHelpers(IconsConstruction::Circle));
@@ -714,10 +716,6 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     if let Some(points) = &mut avb.on_creation {
                         // A. We are/were drawing a new shape
                         match ishape {
-                            IconsShapes::Polygon | IconsShapes::Tube => {
-                                points.push(HalfEdge::new(pointer.pos(), true, true))
-                            }
-
                             IconsShapes::Disc => {
                                 let center = points.get(0).get_vertex().pos;
                                 let end = pointer.pos();
@@ -732,13 +730,39 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                                 }
                                 avb.on_creation = None;
                             }
+                            IconsShapes::Rectangle => {
+                                points.push(HalfEdge::new(pointer.pos(), HEProps::default()));
+                                if let Some(shape) =
+                                    ShapeKind::new_rectangle(points.clone(), BoolOps::Union)
+                                {
+                                    log!("Rectangle created");
+                                    avb.pools.shapes.add(shape.clone());
+                                    // Push the AddShapeAction to the undo/redo system
+                                    avb.undo_redo.push(Box::new(AddShapeAction { shape }));
+                                }
+                                avb.on_creation = None;
+                            }
+                            IconsShapes::Tube => {
+                                points.push(HalfEdge::new(pointer.pos(), HEProps::default()));
+                                if let Some(shape) =
+                                    ShapeKind::new_oblong(points.clone(), BoolOps::Union)
+                                {
+                                    log!("Oblong created");
+                                    avb.pools.shapes.add(shape.clone());
+                                    // Push the AddShapeAction to the undo/redo system
+                                    avb.undo_redo.push(Box::new(AddShapeAction { shape }));
+                                }
+                                avb.on_creation = None;
+                            }
+                            IconsShapes::Custom => {
+                                points.push(HalfEdge::new(pointer.pos(), HEProps::default()))
+                            }
                         }
                     } else {
                         // B. We start drawing a new shape, don't create the shape yet
                         avb.on_creation = Some(VecRing::from_element(HalfEdge::new(
                             pointer.pos(),
-                            true,
-                            true,
+                            HEProps::default(),
                         )));
                     }
                 }
@@ -755,22 +779,14 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
 
                     if let Some(positions) = avb.on_creation.clone() {
                         match ishape {
-                            IconsShapes::Polygon => {
+                            IconsShapes::Disc => log!("Disc canceled"),
+                            IconsShapes::Rectangle => log!("Rectangle canceled"),
+                            IconsShapes::Tube => log!("Oblong canceled"),
+                            IconsShapes::Custom => {
                                 if let Some(shape) =
-                                    ShapeKind::new_polygon(positions, BoolOps::Union)
+                                    ShapeKind::new_custom(positions, BoolOps::Union)
                                 {
                                     log!("Polygon created");
-                                    avb.pools.shapes.add(shape.clone());
-                                    // Push the AddShapeAction to the undo/redo system
-                                    avb.undo_redo.push(Box::new(AddShapeAction { shape }));
-                                }
-                            }
-                            IconsShapes::Disc => log!("Disc canceled"),
-                            IconsShapes::Tube => {
-                                if let Some(shape) =
-                                    ShapeKind::new_oblong(positions, BoolOps::Union)
-                                {
-                                    log!("Oblong created");
                                     avb.pools.shapes.add(shape.clone());
                                     // Push the AddShapeAction to the undo/redo system
                                     avb.undo_redo.push(Box::new(AddShapeAction { shape }));
@@ -816,8 +832,7 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     // B. We start drawing a new helper, don't create the helper yet
                     avb.on_creation = Some(VecRing::from_element(HalfEdge::new(
                         pointer.pos(),
-                        true,
-                        true,
+                        HEProps::default(),
                     )));
                 }
             }
@@ -1289,6 +1304,17 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                     .draw_path(&CanvasKind::Draw, (path.clone(), *pattern), vec![]);
             });
     }
+    // SHAPES: Draw the primitives he
+    for shape in avb.pools.shapes.values() {
+        shape
+            .get_kind()
+            .get_prim_paths_and_patterns(das, cinfo)
+            .iter()
+            .for_each(|(path, pattern)| {
+                avb.canvases
+                    .draw_path(&CanvasKind::Draw, (path.clone(), *pattern), vec![]);
+            });
+    }
     // SHAPES: Draw the modifiers points
     for shape in avb.pools.shapes.values() {
         for path in shape.get_kind().get_controls_paths_and_patterns(das, cinfo) {
@@ -1352,7 +1378,7 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     for magnet_point in avb.pools.helpers.magnet_points() {
         avb.canvases.draw_path(
             &CanvasKind::Draw,
-            (modifiers_path(magnet_point, 1., 5.), Pattern::HelperNormal),
+            (modifiers_path(magnet_point, 1.), Pattern::HelperNormal),
             vec![],
         );
     }
@@ -1396,32 +1422,6 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     // Draw the on_creation vertices with lines if any
     match avb.icon_selected {
         Icons::IShapes(ishape) => match ishape {
-            IconsShapes::Polygon | IconsShapes::Tube => {
-                if let Some(points) = avb.on_creation.clone() {
-                    let vlen = points.len() as i64;
-                    for idx in 0..vlen {
-                        let vertex = points.get(idx).get_vertex().pos;
-                        let vertex_next = if idx + 1 == vlen {
-                            avb.pointer.pos()
-                        } else {
-                            points.get(idx + 1).get_vertex().pos
-                        };
-                        avb.canvases.draw_path(
-                            &CanvasKind::Draw,
-                            (
-                                modifiers_path(vertex, scale, 5.),
-                                modifiers_pattern(false, false),
-                            ),
-                            vec![],
-                        );
-                        avb.canvases.draw_path(
-                            &CanvasKind::Draw,
-                            (line_path(vertex, vertex_next), Pattern::BasicNormal),
-                            vec![],
-                        );
-                    }
-                }
-            }
             IconsShapes::Disc => {
                 if let Some(points) = avb.on_creation.clone() {
                     let center = points.get(0).get_vertex().pos;
@@ -1432,7 +1432,7 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                     avb.canvases.draw_path(
                         &CanvasKind::Draw,
                         (
-                            modifiers_path(center, scale, 5.),
+                            modifiers_path(center, scale),
                             modifiers_pattern(false, false),
                         ),
                         vec![],
@@ -1445,6 +1445,107 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                                 .collect(),
                             Pattern::BasicNormal,
                         ),
+                        vec![],
+                    );
+                }
+            }
+            IconsShapes::Rectangle => {
+                if let Some(points) = avb.on_creation.clone() {
+                    let v1 = points.get(0).get_vertex().pos;
+                    let v3 = avb.pointer.pos();
+                    let v2 = Vec2::new(v1.x, v3.y);
+                    let v4 = Vec2::new(v3.x, v1.y);
+                    let mut vs = VecRing::from_element(v1);
+                    vs.push(v2);
+                    vs.push(v3);
+                    vs.push(v4);
+                    for idx in 0..vs.len() as i64 {
+                        avb.canvases.draw_path(
+                            &CanvasKind::Draw,
+                            (
+                                modifiers_path(*vs.get(idx), scale),
+                                modifiers_pattern(false, false),
+                            ),
+                            vec![],
+                        );
+                        avb.canvases.draw_path(
+                            &CanvasKind::Draw,
+                            (
+                                line_path(*vs.get(idx), *vs.get(idx + 1)),
+                                Pattern::BasicNormal,
+                            ),
+                            vec![],
+                        );
+                    }
+                }
+            }
+            IconsShapes::Custom | IconsShapes::Tube => {
+                if let Some(points) = avb.on_creation.clone() {
+                    let vlen = points.len() as i64;
+                    for idx in 0..vlen {
+                        let vertex = points.get(idx).get_vertex().pos;
+                        let vertex_next = if idx + 1 == vlen {
+                            avb.pointer.pos()
+                        } else {
+                            points.get(idx + 1).get_vertex().pos
+                        };
+                        avb.canvases.draw_path(
+                            &CanvasKind::Draw,
+                            (
+                                modifiers_path(vertex, scale),
+                                modifiers_pattern(false, false),
+                            ),
+                            vec![],
+                        );
+                        avb.canvases.draw_path(
+                            &CanvasKind::Draw,
+                            (line_path(vertex, vertex_next), Pattern::BasicNormal),
+                            vec![],
+                        );
+                    }
+                }
+            }
+        },
+        Icons::IHelpers(ihelper) => match ihelper {
+            IconsConstruction::Circle => {
+                if let Some(points) = avb.on_creation.clone() {
+                    let center = points.get(0).get_vertex().pos;
+                    let end = avb.pointer.pos();
+                    let radius = (end - center).length();
+                    let tolerance = 0.1;
+
+                    avb.canvases.draw_path(
+                        &CanvasKind::Draw,
+                        (
+                            modifiers_path(center, scale),
+                            modifiers_pattern(false, false),
+                        ),
+                        vec![],
+                    );
+                    avb.canvases.draw_path(
+                        &CanvasKind::Draw,
+                        (
+                            Circle::new(center.to_point(), radius)
+                                .path_elements(tolerance)
+                                .collect(),
+                            Pattern::BasicNormal,
+                        ),
+                        vec![],
+                    );
+                }
+            }
+            IconsConstruction::Line => {
+                if let Some(points) = avb.on_creation.clone() {
+                    let v1 = points.get(0).get_vertex().pos;
+                    let v2 = avb.pointer.pos();
+                    avb.canvases.draw_path(
+                        &CanvasKind::Draw,
+                        (modifiers_path(v1, scale), modifiers_pattern(false, false)),
+                        vec![],
+                    );
+                    avb.canvases.draw_path(
+                        &CanvasKind::Draw,
+                        (line_path(v1, v2), Pattern::BasicNormal),
                         vec![],
                     );
                 }

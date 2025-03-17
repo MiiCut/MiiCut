@@ -85,8 +85,13 @@ impl ShapeKind {
         let shid = BSid::new();
         Some(MiiShape::new(shid, shape_kind, boolean_op))
     }
-    pub fn new_polygon(positions: VecRing<HalfEdge>, boolean_op: BoolOps) -> Option<MiiShape> {
-        let shape_kind = ShapePolygon::new_polygon(positions)?;
+    pub fn new_rectangle(positions: VecRing<HalfEdge>, boolean_op: BoolOps) -> Option<MiiShape> {
+        let shape_kind = ShapePolygon::new_rectangle(positions)?;
+        let shid = BSid::new();
+        Some(MiiShape::new(shid, shape_kind, boolean_op))
+    }
+    pub fn new_custom(positions: VecRing<HalfEdge>, boolean_op: BoolOps) -> Option<MiiShape> {
+        let shape_kind = ShapePolygon::new_custom(positions)?;
         let shid = BSid::new();
         Some(MiiShape::new(shid, shape_kind, boolean_op))
     }
@@ -212,6 +217,17 @@ impl ObjectsFuncs for ShapeKind {
         match self {
             KindDisc(sh) => sh.get_paths_and_patterns(das, cinfo),
             KindPolygon(sh) => sh.get_paths_and_patterns(das, cinfo),
+        }
+    }
+    fn get_prim_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern)> {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.get_prim_paths_and_patterns(das, cinfo),
+            KindPolygon(sh) => sh.get_prim_paths_and_patterns(das, cinfo),
         }
     }
     fn get_controls_paths_and_patterns(

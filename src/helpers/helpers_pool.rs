@@ -69,7 +69,7 @@ impl HelpersPool {
         if lines.len() > 1 {
             for i in 0..lines.len() {
                 for j in i + 1..lines.len() {
-                    if let Some(point) = line_line_intersection(
+                    if let Some(point) = lines_intersection_1(
                         lines[i].get_position(),
                         lines[i].get_angle(),
                         lines[j].get_position(),
