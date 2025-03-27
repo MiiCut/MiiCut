@@ -9,7 +9,7 @@ use crate::{math::*, prefab::*};
 use js_sys::Array;
 use kurbo::{BezPath, PathEl, Point, Rect, Size, Vec2};
 use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{CanvasRenderingContext2d, CssStyleDeclaration, HtmlCanvasElement, Window};
+use web_sys::{CanvasRenderingContext2d, Element, HtmlCanvasElement};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextPos {
@@ -48,7 +48,7 @@ pub enum TextAlign {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CanvasTextConfig {
-    pattern: Pattern,
+    color: Color,
     angle: f64,
     align: TextAlign,
     font_size: u32,
@@ -56,22 +56,19 @@ pub struct CanvasTextConfig {
 }
 impl CanvasTextConfig {
     pub fn new(
-        pattern: Pattern,
+        color: Color,
         angle: f64,
         align: TextAlign,
         font_size: u32,
         opacity: f64,
     ) -> CanvasTextConfig {
         CanvasTextConfig {
-            pattern,
+            color,
             angle,
             align,
             font_size,
             opacity,
         }
-    }
-    pub fn set_pattern(&mut self, pattern: Pattern) {
-        self.pattern = pattern
     }
     pub fn set_angle(&mut self, angle: f64) {
         self.angle = angle
@@ -84,9 +81,6 @@ impl CanvasTextConfig {
     }
     pub fn set_opacity(&mut self, opacity: f64) {
         self.opacity = opacity
-    }
-    pub fn get_pattern(&self) -> Pattern {
-        self.pattern
     }
     pub fn get_angle(&self) -> f64 {
         self.angle
@@ -104,7 +98,7 @@ impl CanvasTextConfig {
 impl Default for CanvasTextConfig {
     fn default() -> Self {
         CanvasTextConfig {
-            pattern: Pattern::Rules,
+            color: Color::Text,
             angle: 0.,
             align: TextAlign::Center,
             font_size: 16,
@@ -171,7 +165,7 @@ impl GridRules {
         draw_rec_grid_spacing: f64,
         drawing_offset: Vec2,
         drawing_scale: f64,
-    ) -> (CanvasKind, (BezPath, Pattern), Vec<CanvasText>) {
+    ) -> (CanvasKind, (BezPath, Pattern, Colors, Vec<CanvasText>)) {
         use PathEl::*;
         let mut v: Vec<PathEl> = vec![];
         let mut texts: Vec<CanvasText> = vec![];
@@ -189,7 +183,7 @@ impl GridRules {
                 texts.push(CanvasText::new(
                     format!("{:.0}", wx / 10.),
                     TextPos::PosCustom(Vec2::new(wx, offset_y + 15.)),
-                    CanvasTextConfig::new(Pattern::Rules, 0., TextAlign::Center, 16, 0.4),
+                    CanvasTextConfig::new(Color::Rules, 0., TextAlign::Center, 16, 0.4),
                 ));
                 self.primary_rules_thicks_hw
             } else {
@@ -212,7 +206,7 @@ impl GridRules {
                 texts.push(CanvasText::new(
                     format!("{:.0}", wy / 10.),
                     TextPos::PosCustom(Vec2::new(offset_x + 5., wy)),
-                    CanvasTextConfig::new(Pattern::Rules, 0., TextAlign::Left, 16, 0.4),
+                    CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 16, 0.4),
                 ));
                 self.primary_rules_thicks_hw
             } else {
@@ -225,8 +219,15 @@ impl GridRules {
 
         (
             CanvasKind::Grid,
-            (BezPath::from_vec(v), Pattern::Rules),
-            texts,
+            (
+                BezPath::from_vec(v),
+                Pattern::Rules,
+                Colors {
+                    color: Color::Rules,
+                    fill_color: Color::Transparent,
+                },
+                texts,
+            ),
         )
     }
 
@@ -234,7 +235,7 @@ impl GridRules {
         &mut self,
         draw_rec_size: Size,
         draw_rec_grid_spacing: f64,
-    ) -> (CanvasKind, (BezPath, Pattern), Vec<CanvasText>) {
+    ) -> (CanvasKind, (BezPath, Pattern, Colors, Vec<CanvasText>)) {
         use PathEl::*;
         let mut v: Vec<PathEl> = vec![];
         let spacing = 10. * draw_rec_grid_spacing;
@@ -260,8 +261,15 @@ impl GridRules {
 
         (
             CanvasKind::Grid,
-            (BezPath::from_vec(v), Pattern::GridPrimary),
-            vec![],
+            (
+                BezPath::from_vec(v),
+                Pattern::GridPrimary,
+                Colors {
+                    color: Color::GridPrimary,
+                    fill_color: Color::Transparent,
+                },
+                vec![],
+            ),
         )
     }
 
@@ -269,7 +277,7 @@ impl GridRules {
         &mut self,
         draw_rec_size: Size,
         draw_rec_grid_spacing: f64,
-    ) -> (CanvasKind, (BezPath, Pattern), Vec<CanvasText>) {
+    ) -> (CanvasKind, (BezPath, Pattern, Colors, Vec<CanvasText>)) {
         use PathEl::*;
         let mut v: Vec<PathEl> = vec![];
 
@@ -293,8 +301,15 @@ impl GridRules {
 
         (
             CanvasKind::Grid,
-            (BezPath::from_vec(v), Pattern::GridSecondary),
-            vec![],
+            (
+                BezPath::from_vec(v),
+                Pattern::GridSecondary,
+                Colors {
+                    color: Color::GridSecondary,
+                    fill_color: Color::Transparent,
+                },
+                vec![],
+            ),
         )
     }
 }
@@ -307,6 +322,7 @@ pub struct Canvases {
     c_back_ctx: CanvasRenderingContext2d,
     c_grid_ctx: CanvasRenderingContext2d,
     c_main_ctx: CanvasRenderingContext2d,
+    color_tailwind: Element,
 
     // The size (mm,mm) = (px,px) of the drawing area
     drawing_area_size: Size,
@@ -318,27 +334,25 @@ pub struct Canvases {
     grid_rules: GridRules,
     grid_size: f64,
     grid_snap: f64,
-
-    styles: DrawStyles,
 }
 impl Canvases {
     pub fn new(
-        window: Window,
+        // window: Window,
         c_back: HtmlCanvasElement,
         c_grid: HtmlCanvasElement,
         c_main: HtmlCanvasElement,
         drawing_size: Size,
+        color_tailwind: Element,
     ) -> Result<Canvases, JsValue> {
-        let document = window.document().expect("should have a document on window");
+        // let document = window.document().expect("should have a document on window");
 
-        let document_element = document
-            .document_element()
-            .ok_or("should have a document element")?;
-        let css_styles = window
-            .get_computed_style(&document_element)
-            .unwrap()
-            .unwrap();
-        let styles = DrawStyles::build(css_styles)?;
+        // let document_element = document
+        //     .document_element()
+        //     .ok_or("should have a document element")?;
+        // let css_styles = window
+        //     .get_computed_style(&document_element)
+        //     .unwrap()
+        //     .unwrap();
         let c_back_ctx = c_back
             .get_context("2d")
             .unwrap()
@@ -364,6 +378,7 @@ impl Canvases {
             c_back_ctx,
             c_grid_ctx,
             c_main_ctx,
+            color_tailwind,
             drawing_area_size: drawing_size,
             drawing_offset_saved: Vec2::ZERO,
             drawing_offset: Vec2::ZERO,
@@ -371,7 +386,6 @@ impl Canvases {
             grid_rules: GridRules::new(),
             grid_size: 10.,
             grid_snap: 1.,
-            styles,
         })
     }
     pub fn clear_background_canvas(&mut self) {
@@ -391,27 +405,27 @@ impl Canvases {
         );
 
         // Rules
-        let (canvas_kind, bez_paths, texts) = self.grid_rules.draw_rules(
+        let (canvas_kind, bundle) = self.grid_rules.draw_rules(
             self.get_drawing_size(),
             self.get_grid_size(),
             self.drawing_offset,
             self.drawing_scale,
         );
 
-        self.draw_path(&canvas_kind, bez_paths, texts);
+        self.draw_path(&canvas_kind, bundle);
 
         // Primary grid
-        let (canvas_kind, bez_paths, texts) = self
+        let (canvas_kind, bundle) = self
             .grid_rules
             .draw_grid_primary(self.get_drawing_size(), self.get_grid_size());
 
-        self.draw_path(&canvas_kind, bez_paths, texts);
+        self.draw_path(&canvas_kind, bundle);
 
         // Secondary grid
-        let (canvas_kind, bez_paths, texts) = self
+        let (canvas_kind, bundle) = self
             .grid_rules
             .draw_grid_secondary(self.get_drawing_size(), self.get_grid_size());
-        self.draw_path(&canvas_kind, bez_paths, texts);
+        self.draw_path(&canvas_kind, bundle);
     }
     pub fn clear_main_canvas(&mut self) {
         self.c_main_ctx.clear_rect(
@@ -431,10 +445,18 @@ impl Canvases {
         let origin = to_draw(self.drawing_offset, self.drawing_scale, self.drawing_offset);
         self.draw_path(
             &CanvasKind::Grid,
-            (helper_point_path(origin, 5.), Pattern::Rules),
-            vec![],
+            (
+                helper_point_path(origin, 5.),
+                Pattern::Rules,
+                Colors {
+                    color: Color::Rules,
+                    fill_color: Color::Transparent,
+                },
+                vec![],
+            ),
         );
     }
+
     pub fn draw_text(&self, canvas_kind: &CanvasKind, text: &CanvasText) {
         let ctx = self.get_context(canvas_kind);
         let scale = self.get_drawing_scale();
@@ -452,12 +474,9 @@ impl Canvases {
         ctx.set_font("14px Orbitron");
         ctx.set_font(&format!("{}px Orbitron", text.config.font_size));
         ctx.set_global_alpha(text.config.opacity);
-        let (stroke_style, stroke_width, _) = self.styles.get_styles(text.config.pattern);
-        ctx.set_line_dash(stroke_style).unwrap();
-        ctx.set_line_width(stroke_width);
-        let (fill_color, stroke_color) = self.styles.get_colors(text.config.pattern);
-        ctx.set_stroke_style_str(stroke_color);
-        ctx.set_fill_style_str(fill_color);
+
+        ctx.set_stroke_style_str(Color::Text.get());
+        ctx.set_fill_style_str(Color::Text.get());
         ctx.set_text_align(match text.config.align {
             TextAlign::Left => "left",
             TextAlign::Right => "right",
@@ -467,7 +486,6 @@ impl Canvases {
             .expect("Failed to draw text");
         ctx.restore();
     }
-
     pub fn direct_text(&self, canvas_kind: &CanvasKind, text: &CanvasText) {
         let ctx = self.get_context(canvas_kind);
         ctx.save();
@@ -478,12 +496,9 @@ impl Canvases {
             .expect("Failed to rotate canvas");
         ctx.set_font(&format!("{}px Orbitron", text.config.font_size));
         ctx.set_global_alpha(text.config.opacity);
-        let (stroke_style, stroke_width, _) = self.styles.get_styles(text.config.pattern);
-        ctx.set_line_dash(stroke_style).unwrap();
-        ctx.set_line_width(stroke_width);
-        let (fill_color, stroke_color) = self.styles.get_colors(text.config.pattern);
-        ctx.set_stroke_style_str(stroke_color);
-        ctx.set_fill_style_str(fill_color);
+
+        ctx.set_stroke_style_str(Color::Pink30Opacity.get());
+        ctx.set_fill_style_str(Color::Pink30Opacity.get());
         ctx.set_text_align(match text.config.align {
             TextAlign::Left => "left",
             TextAlign::Right => "right",
@@ -493,24 +508,23 @@ impl Canvases {
             .expect("Failed to draw text");
         ctx.restore();
     }
-
     pub fn draw_path(
         &self,
         canvas_kind: &CanvasKind,
-        paths: (BezPath, Pattern),
-        texts: Vec<CanvasText>,
+        bundle: (BezPath, Pattern, Colors, Vec<CanvasText>),
     ) {
-        let ctx = self.get_context(&canvas_kind);
+        let ctx: &CanvasRenderingContext2d = self.get_context(&canvas_kind);
         let scale = self.get_drawing_scale();
         let offset = self.get_drawing_offset();
-        let (path, pattern) = paths;
+        let (path, pattern, colors, texts) = bundle;
 
-        let (stroke_style, stroke_width, filled) = self.styles.get_styles(pattern);
-        ctx.set_line_dash(stroke_style).unwrap();
+        let (stroke_style, stroke_width, filled) = pattern.get();
+        ctx.set_line_dash(&stroke_style).unwrap();
         ctx.set_line_width(stroke_width);
-        let (fill_color, stroke_color) = self.styles.get_colors(pattern);
-        ctx.set_stroke_style_str(stroke_color);
-        ctx.set_fill_style_str(fill_color);
+
+        ctx.set_fill_style_str(&colors.fill_color.get());
+        ctx.set_stroke_style_str(&colors.color.get());
+
         ctx.begin_path();
         for cst in path.iter() {
             match cst {
@@ -551,18 +565,21 @@ impl Canvases {
         canvas_kind: &CanvasKind,
         paths: Vec<BezPath>,
         pattern: Pattern,
+        color: Color,
+        fill_color: Color,
         texts: Vec<CanvasText>,
     ) {
         let ctx = self.get_context(&canvas_kind);
         let scale = self.get_drawing_scale();
         let offset = self.get_drawing_offset();
 
-        let (stroke_style, stroke_width, filled) = self.styles.get_styles(pattern);
-        ctx.set_line_dash(stroke_style).unwrap();
+        let (stroke_style, stroke_width, filled) = pattern.get();
+        ctx.set_line_dash(&stroke_style).unwrap();
         ctx.set_line_width(stroke_width);
-        let (fill_color, stroke_color) = self.styles.get_colors(pattern);
-        ctx.set_stroke_style_str(stroke_color);
-        ctx.set_fill_style_str(fill_color);
+
+        ctx.set_fill_style_str(&fill_color.get());
+        ctx.set_stroke_style_str(&color.get());
+
         ctx.set_font("14px Orbitron");
         ctx.begin_path();
         for (_idx, path) in paths.iter().enumerate() {
@@ -600,7 +617,6 @@ impl Canvases {
             self.draw_text(canvas_kind, text);
         }
     }
-
     pub fn draw_pointer(&self, position: Vec2) {
         let ctx = self.get_context(&CanvasKind::Draw);
         let scale = self.get_drawing_scale();
@@ -608,14 +624,15 @@ impl Canvases {
         let canvas_size = self.get_canvas_size();
         let pos_canvas = to_canvas(position, scale, offset);
 
-        let (stroke_style, stroke_width, _) = self.styles.get_styles(Pattern::Rules);
-        ctx.set_line_dash(stroke_style).unwrap();
+        let (stroke_style, stroke_width, _) = Pattern::Point.get();
+        ctx.set_line_dash(&stroke_style).unwrap();
         ctx.set_line_width(stroke_width);
-        let (fill_color, stroke_color) = self.styles.get_colors(Pattern::Rules);
-        ctx.set_stroke_style_str(stroke_color);
-        ctx.set_fill_style_str(fill_color);
-        ctx.begin_path();
 
+        let color = Color::Red55Opacity.get();
+        ctx.set_fill_style_str(&color);
+        ctx.set_stroke_style_str(&color);
+
+        ctx.begin_path();
         ctx.move_to(0., pos_canvas.y);
         ctx.line_to(canvas_size.width, pos_canvas.y);
         ctx.move_to(pos_canvas.x, 0.);
@@ -624,7 +641,6 @@ impl Canvases {
 
         ctx.stroke();
     }
-
     pub fn get_main_canvas(&self) -> &HtmlCanvasElement {
         &self.c_main
     }
@@ -726,273 +742,99 @@ impl Canvases {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct DrawStyles {
-    transparent_color: String,
-    background_color: String,
-    grid_primary_color: String,
-    grid_secondary_color: String,
-    rules_color: String,
-    main_color: String,
-    modifiers_color: String,
-    modifiers_highlight_color: String,
-    modifiers_selected_color: String,
-    // Drawing colors
-    basic_normal_color: String,
-    basic_highlight_color: String,
-    basic_selected_color: String,
-    basic_normal_color_dark: String,
-    basic_highlight_color_dark: String,
-    basic_selected_color_dark: String,
-
-    helper_normal_color: String,
-    helper_highlight_color: String,
-    helper_selected_color: String,
-
-    composed_normal_color: String,
-    composed_highlight_color: String,
-    composed_selected_color: String,
-
-    composed_normal_fill_color: String,
-    composed_highlight_fill_color: String,
-    composed_selected_fill_color: String,
-
-    dimension_normal_color: String,
-    dimension_highlight_color: String,
-    dimension_selected_color: String,
-    dimension_text_normal_color: String,
-    dimension_text_highlight_color: String,
-    dimension_text_selected_color: String,
-
-    // line patterns
-    pattern_dashed: JsValue,
-    pattern_solid: JsValue,
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Colors {
+    pub color: Color,
+    pub fill_color: Color,
 }
-impl DrawStyles {
-    pub fn build(style: CssStyleDeclaration) -> Result<DrawStyles, JsValue> {
-        let background_color = style.get_property_value("--background-color")?;
-        let grid_primary_color = style.get_property_value("--grid-primary-color")?;
-        let grid_secondary_color = style.get_property_value("--grid-secondary-color")?;
-        let rules_color = style.get_property_value("--rules-color")?;
-        let main_color = style.get_property_value("--main-color")?;
-        let modifiers_color = style.get_property_value("--modifiers-color")?;
-        let modifiers_highlight_color = style.get_property_value("--modifiers-highlight-color")?;
-        let modifiers_selected_color = style.get_property_value("--modifiers-selected-color")?;
-        let basic_normal_color = style.get_property_value("--basic-normal-color")?;
-        let basic_highlight_color = style.get_property_value("--basic-highlight-color")?;
-        let basic_selected_color = style.get_property_value("--basic-selected-color")?;
-        let basic_normal_color_dark = style.get_property_value("--basic-normal-color-dark")?;
-        let basic_highlight_color_dark =
-            style.get_property_value("--basic-highlight-color-dark")?;
-        let basic_selected_color_dark = style.get_property_value("--basic-selected-color-dark")?;
 
-        let helper_normal_color = style.get_property_value("--helper-normal-color")?;
-        let helper_highlight_color = style.get_property_value("--helper-highlight-color")?;
-        let helper_selected_color = style.get_property_value("--helper-selected-color")?;
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Color {
+    Background,
+    Transparent,
+    GridPrimary,
+    GridSecondary,
+    Rules,
+    OnCreation,
 
-        let composed_normal_color = style.get_property_value("--composed-normal-color")?;
-        let composed_highlight_color = style.get_property_value("--composed-highlight-color")?;
-        let composed_selected_color = style.get_property_value("--composed-selected-color")?;
-        let composed_normal_fill_color =
-            style.get_property_value("--composed-normal-fill-color")?;
-        let composed_highlight_fill_color =
-            style.get_property_value("--composed-highlight-fill-color")?;
-        let composed_selected_fill_color =
-            style.get_property_value("--composed-selected-fill-color")?;
-        let dimension_normal_color = style.get_property_value("--dimension-normal-color")?;
-        let dimension_highlight_color = style.get_property_value("--dimension-highlight-color")?;
-        let dimension_selected_color = style.get_property_value("--dimension-selected-color")?;
-        let dimension_text_normal_color =
-            style.get_property_value("--dimension-text-normal-color")?;
-        let dimension_text_highlight_color =
-            style.get_property_value("--dimension-text-highlight-color")?;
-        let dimension_text_selected_color =
-            style.get_property_value("--dimension-text-selected-color")?;
-
-        let transparent_color = style.get_property_value("--transparent-color")?;
-
-        let dash_pattern = Array::new();
-        dash_pattern.push(&JsValue::from_f64(4.0));
-        dash_pattern.push(&JsValue::from_f64(6.0));
-        let solid_pattern = Array::new();
-        Ok(DrawStyles {
-            background_color,
-            grid_primary_color,
-            grid_secondary_color,
-            rules_color,
-            main_color,
-            modifiers_color,
-            modifiers_highlight_color,
-            modifiers_selected_color,
-            //
-            basic_normal_color,
-            basic_highlight_color,
-            basic_selected_color,
-            basic_normal_color_dark,
-            basic_highlight_color_dark,
-            basic_selected_color_dark,
-
-            helper_normal_color,
-            helper_highlight_color,
-            helper_selected_color,
-
-            composed_normal_color,
-            composed_highlight_color,
-            composed_selected_color,
-            composed_normal_fill_color,
-            composed_highlight_fill_color,
-            composed_selected_fill_color,
-            dimension_normal_color,
-            dimension_highlight_color,
-            dimension_selected_color,
-            dimension_text_normal_color,
-            dimension_text_highlight_color,
-            dimension_text_selected_color,
-            //
-            transparent_color,
-            //
-            pattern_dashed: JsValue::from(dash_pattern),
-            pattern_solid: JsValue::from(solid_pattern),
-        })
-    }
-    pub fn get_styles(&self, pattern: Pattern) -> (&JsValue, f64, bool) {
-        use Pattern::*;
-        let (line_dash, line_width, filled) = match pattern {
-            GridPrimary => (&self.pattern_solid, 1., false),
-            GridSecondary => (&self.pattern_solid, 1., false),
-            Rules => (&self.pattern_solid, 1., false),
-            Modifiers => (&self.pattern_solid, 1., true),
-            ModifiersHighlighted => (&self.pattern_solid, 1., true),
-            ModifiersSelected => (&self.pattern_solid, 1., true),
-            ComposedNormal(filled) => (&self.pattern_solid, 3., filled),
-            ComposedHighlighted(filled) => (&self.pattern_solid, 3., filled),
-            ComposedSelected(filled) => (&self.pattern_solid, 3., filled),
-            BasicNormal => (&self.pattern_dashed, 1., false),
-            BasicHighlighted => (&self.pattern_dashed, 3., false),
-            BasicLightHighlighted => (&self.pattern_dashed, 1., false),
-            BasicSelected => (&self.pattern_dashed, 3., false),
-            BasicLightSelected => (&self.pattern_dashed, 1., false),
-
-            HelperNormal => (&self.pattern_solid, 1., true),
-            HelperHighlighted => (&self.pattern_solid, 1., true),
-            HelperSelected => (&self.pattern_solid, 1., true),
-            HelperNormalCircle => (&self.pattern_dashed, 1., false),
-            HelperHighlightedCircle => (&self.pattern_dashed, 1., false),
-            HelperSelectedCircle => (&self.pattern_dashed, 1., false),
-
-            DimensionNormal => (&self.pattern_solid, 1., false),
-            DimensionHighlighted => (&self.pattern_solid, 1., false),
-            DimensionSelected => (&self.pattern_solid, 1., false),
-            DimensionTextNormal => (&self.pattern_solid, 1., false),
-            DimensionTextHighlighted => (&self.pattern_solid, 1., false),
-            DimensionTextSelected => (&self.pattern_solid, 1., false),
-        };
-        (line_dash, line_width, filled)
-    }
-    pub fn get_colors(&self, pattern: Pattern) -> (&str, &str) {
-        use Pattern::*;
-        let (fill_color, color) = match pattern {
-            GridPrimary => (&self.grid_primary_color, &self.grid_primary_color),
-            GridSecondary => (&self.grid_secondary_color, &self.grid_secondary_color),
-            Rules => (&self.rules_color, &self.rules_color),
-            Modifiers => (&self.modifiers_color, &self.modifiers_color),
-            ModifiersHighlighted => (
-                &self.modifiers_highlight_color,
-                &self.modifiers_highlight_color,
-            ),
-            ModifiersSelected => (
-                &self.modifiers_selected_color,
-                &self.modifiers_selected_color,
-            ),
-            ComposedNormal(_) => (
-                &self.composed_normal_fill_color,
-                &self.composed_normal_color,
-            ),
-            ComposedHighlighted(_) => (
-                &self.composed_highlight_fill_color,
-                &self.composed_highlight_color,
-            ),
-            ComposedSelected(_) => (
-                &self.composed_selected_fill_color,
-                &self.composed_selected_color,
-            ),
-            BasicNormal => (&self.transparent_color, &self.basic_normal_color),
-            BasicHighlighted => (&self.basic_highlight_color, &self.basic_highlight_color),
-            BasicLightHighlighted => (&self.basic_highlight_color, &self.basic_highlight_color),
-            BasicSelected => (&self.basic_selected_color, &self.basic_selected_color),
-            BasicLightSelected => (&self.basic_selected_color, &self.basic_selected_color),
-
-            HelperNormalCircle => (&self.transparent_color, &self.helper_normal_color),
-            HelperHighlightedCircle => (&self.transparent_color, &self.helper_highlight_color),
-            HelperSelectedCircle => (&self.basic_selected_color, &self.helper_selected_color),
-
-            HelperNormal => (&self.helper_normal_color, &self.helper_normal_color),
-            HelperHighlighted => (&self.helper_highlight_color, &self.helper_highlight_color),
-            HelperSelected => (&self.helper_selected_color, &self.helper_selected_color),
-
-            DimensionNormal => (&self.dimension_normal_color, &self.dimension_normal_color),
-            DimensionHighlighted => (
-                &self.dimension_highlight_color,
-                &self.dimension_highlight_color,
-            ),
-            DimensionSelected => (
-                &self.dimension_selected_color,
-                &self.dimension_selected_color,
-            ),
-            DimensionTextNormal => (
-                &self.dimension_text_normal_color,
-                &self.dimension_text_normal_color,
-            ),
-            DimensionTextHighlighted => (
-                &self.dimension_text_highlight_color,
-                &self.dimension_text_highlight_color,
-            ),
-            DimensionTextSelected => (
-                &self.dimension_text_selected_color,
-                &self.dimension_text_selected_color,
-            ),
-        };
-        (fill_color, color)
-    }
-    pub fn get_background_color(&self) -> &str {
-        &self.background_color
-    }
-    pub fn get_transparent_color(&self) -> &str {
-        &self.transparent_color
+    White40Opacity,
+    Yellow,
+    Red55Opacity,
+    Gray,
+    White,
+    Purple55Opacity,
+    Pink30Opacity,
+    Red60Opacity,
+    Text,
+    Gray55Opacity,
+    Olive60Opacity,
+    Black65Opacity,
+    Black,
+    Red,
+}
+impl Color {
+    pub fn get(self) -> &'static str {
+        use Color::*;
+        match self {
+            Background => "rgba(34,68,85,1)",
+            Transparent => "rgba(255,255,255,0.125)",
+            GridPrimary => "rgba(240,240,240,1)",
+            GridSecondary => "rgba(224,224,224,1)",
+            Rules => "rgba(208,208,208,1)",
+            OnCreation => "rgba(0,119,255,1)",
+            White40Opacity => "rgba(255,255,255,0.4)",
+            Yellow => "rgba(251,191,36,1)",
+            Red55Opacity => "rgba(255,0,0,0.55)",
+            Gray => "rgba(107,114,128,1)",
+            White => "rgba(255,255,255,1)",
+            Purple55Opacity => "rgba(128,0,128,0.55)",
+            Pink30Opacity => "rgba(255,192,203,0.3)",
+            Red60Opacity => "rgba(255,0,0,0.6)",
+            Text => "rgba(128,128,0,1)",
+            Gray55Opacity => "rgba(128,128,128,0.55)",
+            Olive60Opacity => "rgba(128,128,0,0.6)",
+            Black65Opacity => "rgba(0,0,0,0.65)",
+            Black => "rgba(0,0,0,1)",
+            Red => "rgba(255,0,0,1)",
+        }
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Pattern {
     GridPrimary,
     GridSecondary,
     Rules,
-    Modifiers,
-    ModifiersHighlighted,
-    ModifiersSelected,
-    ComposedNormal(bool),
-    ComposedHighlighted(bool),
-    ComposedSelected(bool),
+    OnCreation,
+    Point,
+    Composed(bool),
+    Basic,
+    Helper,
+    Text,
+    Dim,
+}
+impl Pattern {
+    pub fn get(&self) -> (JsValue, f64, bool) {
+        use Pattern::*;
+        let dash_pattern = Array::new();
+        dash_pattern.push(&JsValue::from_f64(4.0));
+        dash_pattern.push(&JsValue::from_f64(6.0));
+        let solid_pattern = Array::new();
+        let pattern_dashed = JsValue::from(dash_pattern);
+        let pattern_solid = JsValue::from(solid_pattern);
 
-    BasicNormal,
-    BasicHighlighted,
-    BasicLightHighlighted,
-    BasicSelected,
-    BasicLightSelected,
-
-    HelperNormalCircle,
-    HelperHighlightedCircle,
-    HelperSelectedCircle,
-
-    HelperNormal,
-    HelperHighlighted,
-    HelperSelected,
-
-    DimensionNormal,
-    DimensionHighlighted,
-    DimensionSelected,
-    DimensionTextNormal,
-    DimensionTextHighlighted,
-    DimensionTextSelected,
+        let (line_dash, line_width, filled) = match self {
+            GridPrimary => (pattern_solid, 1., false),
+            GridSecondary => (pattern_solid, 1., false),
+            Rules => (pattern_solid, 1., false),
+            OnCreation => (pattern_dashed, 1., false),
+            Point => (pattern_solid, 1., true),
+            Composed(filled) => (pattern_solid, 3., *filled),
+            Basic => (pattern_dashed, 1., false),
+            Helper => (pattern_dashed, 1., false),
+            Text => (pattern_solid, 1., false),
+            Dim => (pattern_solid, 1., false),
+        };
+        (line_dash, line_width, filled)
+    }
 }

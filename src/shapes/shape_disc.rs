@@ -5,20 +5,19 @@
 //     }
 // }
 
+use super::shapes::ShapeKind;
 use crate::{
-    canvas::{CanvasText, Pattern},
+    canvas::{CanvasText, Colors, Pattern},
     math::*,
     pools::HS,
     positions::{Position, Status, Value},
-    prefab::{center_path, modifiers_pattern},
+    prefab::{center_path, get_shapes_colors, get_shapes_point_colors},
     traits::*,
     KeysStates, Pointer,
 };
 use geo::{LineString, Polygon};
 use kurbo::{BezPath, Circle, CirclePathIter, Point, Rect, Shape, Size, Vec2};
 use std::fmt::Display;
-
-use super::shapes::ShapeKind;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeDisc {
@@ -219,50 +218,42 @@ impl ObjectsFuncs for ShapeDisc {
         &self,
         _: &Size,
         _: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
-        use HS::*;
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         vec![(
             center_path(self.center.pos, 1., ShapeDisc::GRAB_RADIUS),
-            modifiers_pattern(self.state.is_hs(Select), self.state.is_hs(Highlight)),
+            Pattern::Point,
+            get_shapes_point_colors(self.state),
         )]
     }
     fn get_dimensions_paths_and_patterns(
         &self,
         _: &Size,
-        cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern, CanvasText)> {
-        let mut res = vec![];
-        let r = self.radius.value / 2_f64.sqrt();
-        let end = Vec2::new(r, r) + self.center.pos;
-        let start = self.center.pos;
+        _cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern, Colors, Vec<CanvasText>)> {
+        let _res = vec![];
+
         // Dimension::new(DimKind::Linear, end, start, cinfo).and_then(|dim| {
         //     res.push(dim.get_path_and_pattern());
         //     Some(())
         // });
-        res
+        _res
     }
-    fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
-        use HS::*;
-        let pattern = if self.state.is_hs(Select) {
-            Pattern::BasicSelected
-        } else if self.state.is_hs(Highlight) {
-            Pattern::BasicHighlighted
-        } else {
-            if self.radius_state.is_hs(Select) {
-                Pattern::BasicLightSelected
-            } else if self.radius_state.is_hs(Highlight) {
-                Pattern::BasicLightHighlighted
-            } else {
-                Pattern::BasicNormal
-            }
-        };
-        vec![(self.to_path(Self::TOLERANCE), pattern)]
+    fn get_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern, Colors)> {
+        vec![(
+            self.to_path(Self::TOLERANCE),
+            Pattern::Basic,
+            get_shapes_colors(self.state),
+        )]
     }
     fn get_prim_paths_and_patterns(
         &self,
         _: &Size,
         _: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         vec![]
     }
 }

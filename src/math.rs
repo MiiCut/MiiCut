@@ -957,9 +957,10 @@ pub fn symmetric_point_to_segment(p1: Vec2, p2: Vec2, q: Vec2) -> Vec2 {
     symmetric
 }
 
-/// Returns `Some((distance, projection))` if the orthogonal projection of `q`
+/// Returns `Some((distance, projection point))` if the orthogonal projection of `q`
 /// onto the infinite line through `p1->p2` lies within the segment [p1, p2].
-/// Otherwise, returns `None`.
+/// Otherwise, returns `None`. The `offset` parameter is a small distance
+/// to exclude points near the segment's endpoints.
 pub fn distance_and_projection_to_segment(
     p1: Vec2,
     p2: Vec2,
@@ -1216,12 +1217,12 @@ pub fn ring_to_bez_path(ring: &LineString<f64>) -> Option<BezPath> {
     Some(bez_path)
 }
 
-pub fn is_near_line(point: Vec2, angle: f64, cursor: Vec2, precision: f64) -> bool {
-    let dx = cursor.x - point.x;
-    let dy = cursor.y - point.y;
-    let distance = (dx * angle.sin() - dy * angle.cos()).abs();
-    distance <= precision
-}
+// pub fn is_near_line(point: Vec2, angle: f64, cursor: Vec2, precision: f64) -> bool {
+//     let dx = cursor.x - point.x;
+//     let dy = cursor.y - point.y;
+//     let distance = (dx * angle.sin() - dy * angle.cos()).abs();
+//     distance <= precision
+// }
 
 pub fn get_line_segment(size: &Size, point: Vec2, angle: f64) -> (Vec2, Vec2) {
     let width = size.width;
@@ -1290,6 +1291,14 @@ pub fn snap_val(val: f64, snap: f64) -> f64 {
     // Snap to grid
     let val = (val / snap).round() * snap;
     val
+}
+pub fn snap_length(start: Vec2, pos: Vec2, snap: f64) -> Vec2 {
+    SegBundle::new(start, pos)
+        .and_then(|bdl| {
+            let snap_len = (bdl.len / snap).round() * snap;
+            Some(bdl.s + bdl.u * snap_len)
+        })
+        .unwrap_or(pos)
 }
 
 pub fn snap_angle_hv(angle: f64) -> f64 {
@@ -1616,6 +1625,129 @@ pub fn lines_intersection_2(point1: Vec2, dir1: Vec2, point2: Vec2, dir2: Vec2) 
 
     // Compute the intersection point
     Some(point1 + dir1 * t)
+}
+
+/// Computes the intersection point of two line segments, if it exists.
+///
+/// The first segment is defined by the points `p` and `p2`, and the second segment by the points `q` and `q2`.
+/// Each segment is considered as a closed interval, meaning that the endpoints are included in the segment.
+///
+/// The function uses a parametric representation of the segments:
+///
+/// ```ignore
+/// p + t * (p2 - p)
+/// q + u * (q2 - q)
+/// ```
+///
+/// and solves for the parameters `t` and `u` such that:
+///
+/// ```ignore
+/// p + t * (p2 - p) = q + u * (q2 - q)
+/// ```
+///
+/// The cross product `r.cross(s)` (where `r = p2 - p` and `s = q2 - q`) is used to determine if the segments
+/// are parallel (or nearly collinear). If `rxs.abs()` is less than `EPSILON`, the segments are considered parallel,
+/// and the function returns `None`.
+///
+/// If the segments are not parallel, `t` and `u` are computed as:
+///
+/// - `t = (q - p).cross(s) / r.cross(s)`
+/// - `u = (q - p).cross(r) / r.cross(s)`
+///
+/// The segments intersect if and only if both `t` and `u` lie within the range `[0.0, 1.0]`.
+/// In that case, the intersection point is given by `p + t * (p2 - p)`.
+///
+/// # Parameters
+///
+/// - `p`: The starting point of the first segment.
+/// - `p2`: The ending point of the first segment.
+/// - `q`: The starting point of the second segment.
+/// - `q2`: The ending point of the second segment.
+///
+/// # Returns
+///
+/// - `Some(Vec2)` containing the intersection point if the segments intersect.
+/// - `None` if the segments do not intersect, or if they are parallel/collinear within the tolerance defined by `EPSILON`.
+///
+/// # Example
+///
+/// ```
+/// let p = Vec2::new(0.0, 0.0);
+/// let p2 = Vec2::new(4.0, 4.0);
+/// let q = Vec2::new(0.0, 4.0);
+/// let q2 = Vec2::new(4.0, 0.0);
+///
+/// if let Some(intersection) = segment_intersection(p, p2, q, q2) {
+///     println!("Intersection at: {:?}", intersection);
+/// } else {
+///     println!("No intersection.");
+/// }
+/// ```
+///
+pub fn segment_intersection(p: Vec2, p2: Vec2, q: Vec2, q2: Vec2) -> Option<Vec2> {
+    let r = p2 - p;
+    let s = q2 - q;
+    let rxs = r.cross(s);
+    let q_minus_p = q - p;
+
+    // Check if the segments are parallel (or collinear).
+    if rxs.abs() < EPSILON {
+        return None;
+    }
+
+    let t = q_minus_p.cross(s) / rxs;
+    let u = q_minus_p.cross(r) / rxs;
+
+    // If t and u are between 0 and 1, the segments intersect.
+    if t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0 {
+        Some(p + r * t)
+    } else {
+        None
+    }
+}
+
+/// Computes the intersection points between a segment (from `p` to `p2`) and a circle
+/// (with center `center` and radius `radius`).
+///
+/// Returns a vector containing zero, one, or two points.
+/// Note that only intersections that occur within the segment (i.e. where t is between 0 and 1)
+/// are included.
+pub fn segment_circle_intersections(p: Vec2, p2: Vec2, center: Vec2, radius: f64) -> Vec<Vec2> {
+    // The vector along the segment.
+    let d = p2 - p;
+    // The vector from the circle's center to the start of the segment.
+    let f = p - center;
+
+    // Quadratic coefficients for the equation:
+    //   a*t^2 + b*t + c = 0
+    let a = d.dot(d);
+    let b = 2.0 * f.dot(d);
+    let c = f.dot(f) - radius * radius;
+
+    // The discriminant of the quadratic equation.
+    let discriminant = b * b - 4.0 * a * c;
+
+    // If the discriminant is negative, there are no real intersections.
+    if discriminant < 0.0 {
+        Vec::new()
+    } else {
+        let mut intersections = Vec::new();
+        let discriminant_sqrt = discriminant.sqrt();
+        // Find the two potential intersection parameters.
+        let t1 = (-b - discriminant_sqrt) / (2.0 * a);
+        let t2 = (-b + discriminant_sqrt) / (2.0 * a);
+
+        // Only add the intersection if t is within [0, 1] (i.e. on the segment)
+        if t1 >= 0.0 && t1 <= 1.0 {
+            intersections.push(p + d * t1);
+        }
+        // t2 is different from t1 when discriminant > 0. For a tangent (discriminant == 0),
+        // it would be the same, so we avoid a duplicate.
+        if discriminant > 0.0 && t2 >= 0.0 && t2 <= 1.0 {
+            intersections.push(p + d * t2);
+        }
+        intersections
+    }
 }
 
 /// Find the intersection points of a line (origin, angle) and a circle (center, radius)
@@ -2203,31 +2335,79 @@ pub fn intersect_lines(p1: Vec2, d1: Vec2, p2: Vec2, d2: Vec2) -> Option<Vec2> {
 
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub struct SegBundle {
-    pub s: Vec2,
-    pub e: Vec2,
-    pub m: Vec2,
-    pub u: Vec2,
-    pub n: Vec2,
-    pub len: f64,
-    pub a: f64,
+    s: Vec2,
+    e: Vec2,
+    m: Vec2,
+    u: Vec2,
+    n: Vec2,
+    len: f64,
+    a: f64,
 }
-pub fn get_seg_bdle(s: Vec2, e: Vec2) -> Option<SegBundle> {
-    let seg_len = (e - s).hypot();
-    (seg_len >= EPSILON).then(|| {
-        let mid_pt = (e + s) / 2.;
-        let u_dir = (e - s).normalize();
-        let n_dir = Vec2::new(-u_dir.y, u_dir.x);
-        let a = (e - s).atan2();
-        SegBundle {
-            s,
-            e,
-            m: mid_pt,
-            u: u_dir,
-            n: n_dir,
-            len: seg_len,
-            a,
+impl SegBundle {
+    pub fn new(s: Vec2, e: Vec2) -> Option<Self> {
+        let seg_len = (e - s).hypot();
+        (seg_len >= EPSILON).then(|| {
+            let mid_pt = (e + s) / 2.;
+            let u_dir = (e - s).normalize();
+            let n_dir = Vec2::new(-u_dir.y, u_dir.x);
+            let a = (e - s).atan2();
+            SegBundle {
+                s,
+                e,
+                m: mid_pt,
+                u: u_dir,
+                n: n_dir,
+                len: seg_len,
+                a,
+            }
+        })
+    }
+    pub fn s(&self) -> Vec2 {
+        self.s
+    }
+    pub fn e(&self) -> Vec2 {
+        self.e
+    }
+    pub fn m(&self) -> Vec2 {
+        self.m
+    }
+    pub fn u(&self) -> Vec2 {
+        self.u
+    }
+    pub fn n(&self) -> Vec2 {
+        self.n
+    }
+    pub fn len(&self) -> f64 {
+        self.len
+    }
+    pub fn a(&self) -> f64 {
+        self.a
+    }
+    pub fn try_set_s(&mut self, s: Vec2) -> bool {
+        if (s - self.e).hypot() > EPSILON {
+            self.s = s;
+            self.update_seg_bdle();
+            true
+        } else {
+            false
         }
-    })
+    }
+    pub fn try_set_e(&mut self, e: Vec2) -> bool {
+        if (e - self.s).hypot() > EPSILON {
+            self.e = e;
+            self.update_seg_bdle();
+            true
+        } else {
+            false
+        }
+    }
+    pub fn update_seg_bdle(&mut self) {
+        self.len = (self.e - self.s).hypot();
+        self.m = (self.e + self.s) / 2.;
+        self.u = (self.e - self.s).normalize();
+        self.n = Vec2::new(-self.u.y, self.u.x);
+        self.a = (self.e - self.s).atan2();
+    }
 }
 
 pub fn intersect_circles(c1: Vec2, r1: f64, c2: Vec2, r2: f64) -> Option<(Vec2, Vec2)> {
@@ -2328,7 +2508,7 @@ pub fn is_point_inside_wedge(p1: Vec2, apex: Vec2, p3: Vec2, point: Vec2) -> boo
 }
 
 pub fn get_sagitta_pt(v0: Vec2, v1: Vec2, sag_rel: f64) -> Option<Vec2> {
-    get_seg_bdle(v0, v1).and_then(|sb| Some(sb.m - sb.n * sb.len * sag_rel))
+    SegBundle::new(v0, v1).and_then(|sb| Some(sb.m - sb.n * sb.len * sag_rel))
 }
 
 pub fn circle_line_intersection(

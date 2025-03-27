@@ -1,8 +1,10 @@
 use super::helper_circle::HelperCircle;
-use super::helper_line::HelperLine;
+use super::helper_segment::HelperSegment;
 use super::helpers_pool::DHid;
 use crate::canvas::CanvasText;
+use crate::canvas::Colors;
 use crate::canvas::Pattern;
+use crate::math::SegBundle;
 use crate::pools::Pools;
 use crate::pools::PoolsFunctions;
 use crate::traits::*;
@@ -10,7 +12,6 @@ use crate::Action;
 use crate::KeysStates;
 use crate::Pointer;
 use crate::Position;
-use crate::Value;
 use kurbo::BezPath;
 use kurbo::Rect;
 use kurbo::Size;
@@ -43,19 +44,19 @@ impl Action for MoveHelpersAction {
 }
 pub enum HelperKindvars {
     Point(Position),
-    Line(Position, Value),
-    Circle(Position, Value),
+    Segment(SegBundle),
+    Circle(SegBundle),
 }
 
 #[derive(Clone, Debug)]
 pub enum HelperKind {
-    Line(HelperLine),
+    Segment(HelperSegment),
     Circle(HelperCircle),
 }
 impl HelperKind {
-    pub fn new_line(pos1: Vec2, pos2: Vec2) -> Option<Helper> {
+    pub fn new_segment(pos1: Vec2, pos2: Vec2) -> Option<Helper> {
         let dhid: DHid = DHid::new();
-        let helper_kind = HelperLine::new(pos1, pos2)?;
+        let helper_kind = HelperSegment::new(pos1, pos2)?;
         Some(Helper::new(dhid, helper_kind))
     }
     pub fn new_circle(center: Vec2, pos2: Vec2) -> Option<Helper> {
@@ -67,7 +68,7 @@ impl HelperKind {
 impl Display for HelperKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HelperKind::Line(l) => write!(f, "{}", l),
+            HelperKind::Segment(l) => write!(f, "{}", l),
             HelperKind::Circle(c) => write!(f, "{}", c),
         }
     }
@@ -80,28 +81,28 @@ impl ObjectsFuncs for HelperKind {
     fn save_vars(&mut self) {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.save_vars(),
+            Segment(sh) => sh.save_vars(),
             Circle(sh) => sh.save_vars(),
         }
     }
     fn restore_vars(&mut self) {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.restore_vars(),
+            Segment(sh) => sh.restore_vars(),
             Circle(sh) => sh.restore_vars(),
         }
     }
     fn get_vars(&self) -> HelperKindvars {
         use HelperKind::*;
         match &self {
-            Line(sh) => sh.get_vars(),
+            Segment(sh) => sh.get_vars(),
             Circle(sh) => sh.get_vars(),
         }
     }
     fn set_vars(&mut self, vars: &HelperKindvars) {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.set_vars(vars),
+            Segment(sh) => sh.set_vars(vars),
             Circle(sh) => sh.set_vars(vars),
         }
     }
@@ -109,14 +110,14 @@ impl ObjectsFuncs for HelperKind {
     fn get_state(&self, get: GetEntityState) -> bool {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.get_state(get),
+            Segment(sh) => sh.get_state(get),
             Circle(sh) => sh.get_state(get),
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.set_state(set),
+            Segment(sh) => sh.set_state(set),
             Circle(sh) => sh.set_state(set),
         }
     }
@@ -128,35 +129,35 @@ impl ObjectsFuncs for HelperKind {
     ) -> bool {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.set_state_from_pos(pointer, keys_states, set),
+            Segment(sh) => sh.set_state_from_pos(pointer, keys_states, set),
             Circle(sh) => sh.set_state_from_pos(pointer, keys_states, set),
         }
     }
     fn contains_pointer(&self, pointer: &Pointer) -> bool {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.contains_pointer(pointer),
+            Segment(sh) => sh.contains_pointer(pointer),
             Circle(sh) => sh.contains_pointer(pointer),
         }
     }
     fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.move_position(pointer, keys_states),
+            Segment(sh) => sh.move_position(pointer, keys_states),
             Circle(sh) => sh.move_position(pointer, keys_states),
         }
     }
     fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.move_controls(pointer, keys_states),
+            Segment(sh) => sh.move_controls(pointer, keys_states),
             Circle(sh) => sh.move_controls(pointer, keys_states),
         }
     }
     fn get_position(&self) -> Vec2 {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.get_position(),
+            Segment(sh) => sh.get_position(),
             Circle(sh) => sh.get_position(),
         }
     }
@@ -165,10 +166,10 @@ impl ObjectsFuncs for HelperKind {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.get_paths_and_patterns(das, cinfo),
+            Segment(sh) => sh.get_paths_and_patterns(das, cinfo),
             Circle(sh) => sh.get_paths_and_patterns(das, cinfo),
         }
     }
@@ -176,10 +177,10 @@ impl ObjectsFuncs for HelperKind {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.get_prim_paths_and_patterns(das, cinfo),
+            Segment(sh) => sh.get_prim_paths_and_patterns(das, cinfo),
             Circle(sh) => sh.get_prim_paths_and_patterns(das, cinfo),
         }
     }
@@ -187,10 +188,10 @@ impl ObjectsFuncs for HelperKind {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
+            Segment(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
             Circle(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
         }
     }
@@ -198,10 +199,10 @@ impl ObjectsFuncs for HelperKind {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern, CanvasText)> {
+    ) -> Vec<(BezPath, Pattern, Colors, Vec<CanvasText>)> {
         use HelperKind::*;
         match self {
-            Line(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
+            Segment(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
             Circle(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
         }
     }

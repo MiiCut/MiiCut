@@ -59,27 +59,30 @@ impl HelpersPool {
 
     pub fn create_magnet_points(&mut self) {
         self.magnet_points = vec![];
-        // Find the intersection of all lines
-        let mut lines = vec![];
+        // Find the intersection of all segments
+        let mut segs = vec![];
         for helper in self.helpers.values() {
-            if let HelperKind::Line(line) = helper.get_kind() {
-                lines.push(line);
+            if let HelperKind::Segment(seg) = helper.get_kind() {
+                self.magnet_points.push(seg.get_seg_bdl().s());
+                self.magnet_points.push(seg.get_seg_bdl().e());
+                segs.push(seg);
             }
         }
-        if lines.len() > 1 {
-            for i in 0..lines.len() {
-                for j in i + 1..lines.len() {
-                    if let Some(point) = lines_intersection_1(
-                        lines[i].get_position(),
-                        lines[i].get_angle(),
-                        lines[j].get_position(),
-                        lines[j].get_angle(),
+        if segs.len() > 1 {
+            for i in 0..segs.len() {
+                for j in i + 1..segs.len() {
+                    if let Some(point) = segment_intersection(
+                        segs[i].get_seg_bdl().s(),
+                        segs[i].get_seg_bdl().e(),
+                        segs[j].get_seg_bdl().s(),
+                        segs[j].get_seg_bdl().e(),
                     ) {
                         self.magnet_points.push(point);
                     }
                 }
             }
-        }
+        };
+
         // Find the intersection of all circles
         let mut circles = vec![];
         for helper in self.helpers.values() {
@@ -104,20 +107,17 @@ impl HelpersPool {
                 }
             }
         }
-        // Find the intersection of all lines and circles
-        for line in lines {
+        // Find the intersection of all segments and circles
+        for seg in segs {
             for circle in circles.iter() {
-                if let Some((point1, o_point2)) = line_circle_intersection_with_angle(
-                    line.get_position(),
-                    line.get_angle(),
+                segment_circle_intersections(
+                    seg.get_seg_bdl().s(),
+                    seg.get_seg_bdl().e(),
                     circle.get_position(),
                     circle.get_radius(),
-                ) {
-                    self.magnet_points.push(point1);
-                    if let Some(point2) = o_point2 {
-                        self.magnet_points.push(point2);
-                    }
-                }
+                )
+                .iter()
+                .for_each(|point| self.magnet_points.push(*point));
             }
         }
         // Always add origin

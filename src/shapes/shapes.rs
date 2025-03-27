@@ -10,6 +10,7 @@ use super::shape_polygon::ShapePolygon;
 use super::shape_polygon::VecRing;
 use super::shapes_pool::BSid;
 use crate::canvas::CanvasText;
+use crate::canvas::Colors;
 use crate::canvas::Pattern;
 use crate::curves::half_edge::HalfEdge;
 use crate::pools::Pools;
@@ -212,7 +213,7 @@ impl ObjectsFuncs for ShapeKind {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         use ShapeKind::*;
         match self {
             KindDisc(sh) => sh.get_paths_and_patterns(das, cinfo),
@@ -223,7 +224,7 @@ impl ObjectsFuncs for ShapeKind {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         use ShapeKind::*;
         match self {
             KindDisc(sh) => sh.get_prim_paths_and_patterns(das, cinfo),
@@ -234,7 +235,7 @@ impl ObjectsFuncs for ShapeKind {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         use ShapeKind::*;
         match self {
             KindDisc(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
@@ -245,7 +246,7 @@ impl ObjectsFuncs for ShapeKind {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern, CanvasText)> {
+    ) -> Vec<(BezPath, Pattern, Colors, Vec<CanvasText>)> {
         use ShapeKind::*;
         match self {
             KindDisc(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),

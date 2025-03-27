@@ -1,10 +1,9 @@
 use crate::{
-    canvas::Pattern,
+    canvas::{Color, Colors, Pattern},
     math::{
         arc_from_center_and_points, arc_from_three_points, bissector, circle_from_three_points,
         circle_line_intersection, distance_and_projection_to_arc,
-        distance_and_projection_to_segment, get_seg_bdle, nearest_circle_point,
-        project_point_on_line,
+        distance_and_projection_to_segment, nearest_circle_point, project_point_on_line, SegBundle,
     },
     pools::HS,
     positions::{Position, Status, Value},
@@ -166,22 +165,6 @@ impl HalfEdge {
     const TOLERANCE: f64 = 0.01;
     const MIN_FILLET_RADIUS: f64 = 2.;
 
-    fn get_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
-        match (selected, highlighted) {
-            (false, false) => Pattern::BasicNormal,
-            (false, true) => Pattern::BasicHighlighted,
-            (true, false) => Pattern::BasicSelected,
-            (true, true) => Pattern::BasicSelected,
-        }
-    }
-    fn get_prim_pattern(&self, selected: bool, highlighted: bool) -> Pattern {
-        match (selected, highlighted) {
-            (false, false) => Pattern::DimensionNormal,
-            (false, true) => Pattern::DimensionHighlighted,
-            (true, false) => Pattern::DimensionSelected,
-            (true, true) => Pattern::DimensionSelected,
-        }
-    }
     pub fn new(v: Vec2, props: HEProps) -> Self {
         // By default the corner is a point and the edge is a line segment
         Self {
@@ -220,11 +203,17 @@ impl HalfEdge {
     pub fn get_vertex_state(&self, hs: HS) -> bool {
         self.vertex_state.is_hs(hs)
     }
+    pub fn vertex_state(&self) -> Status {
+        self.vertex_state
+    }
     pub fn get_corner_state(&self, hs: HS) -> bool {
         self.corner_state.is_hs(hs)
     }
     pub fn get_edge_state(&self, hs: HS) -> bool {
         self.edge_state.is_hs(hs)
+    }
+    pub fn edge_state(&self) -> Status {
+        self.edge_state
     }
 
     pub fn is_vertex_selectable(&self) -> bool {
@@ -318,17 +307,9 @@ impl HalfEdge {
                         },
                     );
                 }
-                (Segment { dum: _ }, Arc { sag_rel: _ }) => {
-                    self.s = self.vertex.pos;
-                    self.e = self.vertex.pos;
-                    self.c = self.vertex.pos;
-                }
-                (Arc { sag_rel: _ }, Segment { dum: _ }) => {
-                    self.s = self.vertex.pos;
-                    self.e = self.vertex.pos;
-                    self.c = self.vertex.pos;
-                }
-                (Arc { sag_rel: _ }, Arc { sag_rel: _ }) => {
+                (Segment { dum: _ }, Arc { sag_rel: _ })
+                | (Arc { sag_rel: _ }, Segment { dum: _ })
+                | (Arc { sag_rel: _ }, Arc { sag_rel: _ }) => {
                     self.s = self.vertex.pos;
                     self.e = self.vertex.pos;
                     self.c = self.vertex.pos;
@@ -344,132 +325,13 @@ impl HalfEdge {
                         },
                     );
                 }
-                (Segment { dum: _ }, Arc { sag_rel }) => {
-                    get_seg_bdle(vertex_prev, self.vertex.pos).and_then(|sb_p| {
-                        get_seg_bdle(self.vertex.pos, vertex_next).and_then(|sb_n| {
-                            let sagitta_pt = sb_n.m - sb_n.n * sb_n.len * sag_rel.value;
-                            let v_apex = self.vertex.pos;
-                            arc_from_three_points(v_apex, sagitta_pt, vertex_next).map(|arc| {
-                                let ca = arc.center.to_vec2() - v_apex;
-                                let sa = sagitta_pt - v_apex;
-                                let sa_ca = sa.cross(ca).signum() > 0.;
-                                let sbpn_ca = sb_p.n.cross(ca).signum() > 0.;
-
-                                // log!(
-                                //     "sa_ca && !sbpn_ca: {}, sbpn_ca && sa_ca: {}",
-                                //     sa_ca && !sbpn_ca,
-                                //     sbpn_ca && sa_ca
-                                // );
-
-                                let (r, line_pt) = match (sbpn_ca && sa_ca, sa_ca && !sbpn_ca) {
-                                    (true, true) => {
-                                        (arc.radii.x - radius.value, v_apex - sb_p.n * radius.value)
-                                    }
-                                    (true, false) => {
-                                        (arc.radii.x - radius.value, v_apex + sb_p.n * radius.value)
-                                    }
-                                    (false, true) => {
-                                        (arc.radii.x + radius.value, v_apex - sb_p.n * radius.value)
-                                    }
-                                    (false, false) => {
-                                        (arc.radii.x + radius.value, v_apex + sb_p.n * radius.value)
-                                    }
-                                };
-
-                                circle_line_intersection(arc.center.to_vec2(), r, line_pt, sb_p.u)
-                                    .and_then(|(pt1, o_pt2)| {
-                                        Some(match o_pt2 {
-                                            Some(pt2)
-                                                if (pt1 - v_apex).hypot()
-                                                    < (pt2 - v_apex).hypot() =>
-                                            {
-                                                // log!("1 pt1");
-                                                pt1
-                                            }
-                                            Some(pt2) => {
-                                                // log!("pt2");
-                                                pt2
-                                            }
-                                            None => {
-                                                // log!("2 pt1");
-                                                pt1
-                                            }
-                                        })
-                                    })
-                                    .map(|fillet_center| {
-                                        if let Some(e) = nearest_circle_point(
-                                            arc.center.to_vec2(),
-                                            arc.radii.x,
-                                            fillet_center,
-                                        ) {
-                                            self.c = fillet_center;
-                                            self.s = project_point_on_line(
-                                                fillet_center,
-                                                v_apex,
-                                                sb_p.u,
-                                            );
-                                            self.e = e;
-                                        }
-                                    });
-                            })
-                        })
-                    });
+                (Segment { dum: _ }, Arc { sag_rel: _ })
+                | (Arc { sag_rel: _ }, Segment { dum: _ })
+                | (Arc { sag_rel: _ }, Arc { sag_rel: _ }) => {
+                    self.s = self.vertex.pos;
+                    self.e = self.vertex.pos;
+                    self.c = self.vertex.pos;
                 }
-                (Arc { sag_rel: _ }, Segment { dum: _ }) => {}
-
-                //     let v = self.vertex.pos;
-                //     get_seg_bdle(vertex_prev, v).and_then(|sb_p| {
-                //         get_seg_bdle(v, vertex_next).and_then(|sb_n| {
-                //             let sagitta_pt = sb_n.m - sb_n.n * sb_n.len * sag_rel.value;
-                //             arc_from_three_points(vertex_prev, sagitta_pt, v).map(|arc| {
-                //                 let r = arc.center.to_vec2() - v;
-                //                 let add_radiuses = Vec2::new(r.y, -r.x).cross(sb_n.u) < 0.;
-                //                 let line_near_center = !add_radiuses
-                //                     && !((sagitta_pt - v).cross(v - vertex_prev) < 0.);
-                //                 let (r, line_pt) = match (add_radiuses, line_near_center) {
-                //                     (true, true) => {
-                //                         (arc.radii.x - radius.value, v - sb_p.n * radius.value)
-                //                     }
-                //                     (true, false) => {
-                //                         (arc.radii.x - radius.value, v + sb_p.n * radius.value)
-                //                     }
-                //                     (false, true) => {
-                //                         (arc.radii.x + radius.value, v - sb_p.n * radius.value)
-                //                     }
-                //                     (false, false) => {
-                //                         (arc.radii.x + radius.value, v + sb_p.n * radius.value)
-                //                     }
-                //                 };
-                //                 let line_dir = sb_n.u;
-                //                 circle_line_intersection(
-                //                     arc.center.to_vec2(),
-                //                     r,
-                //                     line_pt,
-                //                     line_dir,
-                //                 )
-                //                 .and_then(|(pt1, o_pt2)| {
-                //                     Some(match o_pt2 {
-                //                         Some(pt2) if (pt1 - v).hypot() < (pt2 - v).hypot() => pt1,
-                //                         Some(pt2) => pt2,
-                //                         None => pt1,
-                //                     })
-                //                 })
-                //                 .map(|fillet_center| {
-                //                     if let Some(e) = nearest_circle_point(
-                //                         arc.center.to_vec2(),
-                //                         arc.radii.x,
-                //                         fillet_center,
-                //                     ) {
-                //                         self.c = fillet_center;
-                //                         self.s = project_point_on_line(fillet_center, v, line_dir);
-                //                         self.e = e;
-                //                     }
-                //                 });
-                //             })
-                //         })
-                //     });
-                // }
-                (Arc { sag_rel: _s_rel_p }, Arc { sag_rel: _s_rel_n }) => (),
             },
         }
     }
@@ -499,8 +361,8 @@ impl HalfEdge {
         use EdgeKind::*;
         match self.edge {
             Segment { dum: _ } => None,
-            Arc { sag_rel } => get_seg_bdle(self.vertex.pos, v_next)
-                .and_then(|sb| Some(sb.m - sb.n * sb.len * sag_rel.value)),
+            Arc { sag_rel } => SegBundle::new(self.vertex.pos, v_next)
+                .and_then(|sb| Some(sb.m() - sb.n() * sb.len() * sag_rel.value)),
         }
     }
     pub fn get_sagitta_rel(&self) -> f64 {
@@ -519,14 +381,14 @@ impl HalfEdge {
     }
     pub fn get_k_edge(&self, s_next: Vec2, v_next: Vec2) -> KShape {
         use EdgeKind::*;
-        get_seg_bdle(self.vertex.pos, v_next)
+        SegBundle::new(self.vertex.pos, v_next)
             .and_then(|sb| match self.edge {
                 Segment { dum: _ } => Some(KShape::KLine(kurbo::Line::new(
                     self.e.to_point(),
                     s_next.to_point(),
                 ))),
                 Arc { sag_rel } => {
-                    let sagitta_pt = sb.m - sb.n * sb.len * sag_rel.value;
+                    let sagitta_pt = sb.m() - sb.n() * sb.len() * sag_rel.value;
                     circle_from_three_points(self.vertex.pos, sagitta_pt, v_next).and_then(
                         |(center, radius)| {
                             let start_angle = (self.e - center).atan2();
@@ -595,8 +457,8 @@ impl HalfEdge {
         match &mut self.corner {
             Point { dummy: _ } => (),
             Chamfer { length } => {
-                if let Some(sb) = get_seg_bdle(self.s, self.e) {
-                    let dpos_proj: f64 = dpos.dot(sb.n);
+                if let Some(sb) = SegBundle::new(self.s, self.e) {
+                    let dpos_proj: f64 = dpos.dot(sb.n());
                     let mut new_length = length.saved_val + dpos_proj;
                     if new_length < Self::MIN_FILLET_RADIUS {
                         new_length = Self::MIN_FILLET_RADIUS;
@@ -607,8 +469,8 @@ impl HalfEdge {
                 }
             }
             Fillet { radius } => {
-                if let Some(sb) = get_seg_bdle(self.s, self.e) {
-                    let dpos_proj: f64 = dpos.dot(sb.n);
+                if let Some(sb) = SegBundle::new(self.s, self.e) {
+                    let dpos_proj: f64 = dpos.dot(sb.n());
                     let mut new_radius = radius.saved_val + dpos_proj;
                     if new_radius < Self::MIN_FILLET_RADIUS {
                         new_radius = Self::MIN_FILLET_RADIUS;
@@ -630,18 +492,11 @@ impl HalfEdge {
             KPoint(_) => PNone,
         }
     }
-    pub fn get_corner_paths_and_patterns(
-        &self,
-        parent_selected: bool,
-        parent_highlighted: bool,
-    ) -> (BezPath, Pattern) {
-        use HS::*;
+    pub fn get_corner_paths_and_patterns(&self) -> (BezPath, Pattern, Colors) {
         (
             self.corner_path_elements().collect(),
-            self.get_pattern(
-                self.corner_state.is_hs(Select) || parent_selected,
-                self.corner_state.is_hs(Highlight) || parent_highlighted,
-            ),
+            Pattern::Basic,
+            self.get_colors(self.corner_state),
         )
     }
     fn edge_path_elements(&self, s_next: Vec2, v_next: Vec2) -> PrimitiveKindIter {
@@ -657,32 +512,39 @@ impl HalfEdge {
         &self,
         s_next: Vec2,
         v_next: Vec2,
-        parent_selected: bool,
-        parent_highlighted: bool,
-    ) -> (BezPath, Pattern) {
-        use HS::*;
+    ) -> (BezPath, Pattern, Colors) {
         (
             self.edge_path_elements(s_next, v_next).collect(),
-            self.get_pattern(
-                self.edge_state.is_hs(Select) || parent_selected,
-                self.edge_state.is_hs(Highlight) || parent_highlighted,
-            ),
+            Pattern::Basic,
+            self.get_colors(self.edge_state),
         )
     }
     pub fn get_prim_edge_paths_and_patterns(
         &self,
         s_next: Vec2,
         v_next: Vec2,
-        parent_selected: bool,
-        parent_highlighted: bool,
-    ) -> (BezPath, Pattern) {
-        use HS::*;
+    ) -> (BezPath, Pattern, Colors) {
         (
             self.edge_path_elements(s_next, v_next).collect(),
-            self.get_pattern(
-                self.edge_state.is_hs(Select) || parent_selected,
-                self.edge_state.is_hs(Highlight) || parent_highlighted,
-            ),
+            Pattern::Basic,
+            self.get_colors(self.edge_state),
         )
+    }
+    fn get_colors(&self, state: Status) -> Colors {
+        use HS::*;
+        match (state.is_hs(Select), state.is_hs(Highlight)) {
+            (true, _) => Colors {
+                color: Color::Gray,
+                fill_color: Color::Gray,
+            },
+            (false, false) => Colors {
+                color: Color::Gray,
+                fill_color: Color::Gray,
+            },
+            (false, true) => Colors {
+                color: Color::Gray,
+                fill_color: Color::Gray,
+            },
+        }
     }
 }

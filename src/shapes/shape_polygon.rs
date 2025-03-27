@@ -1,6 +1,6 @@
 use super::shapes::ShapeKind;
 use crate::{
-    canvas::{CanvasText, Pattern},
+    canvas::{CanvasText, Colors, Pattern},
     curves::half_edge::{EdgeKind, HEProps, HalfEdge},
     dimensions::dim_linear,
     math::*,
@@ -162,26 +162,30 @@ impl ShapePolygon {
             .and_then(|(hes_prim, width)| {
                 let v = hes_prim.get(0).get_vertex().pos;
                 let v_next = hes_prim.get(1).get_vertex().pos;
-                let bdl = get_seg_bdle(v, v_next)?;
+                let bdl = SegBundle::new(v, v_next)?;
                 match hes_prim.get(0).get_edge_kind() {
                     EdgeKind::Segment { dum: _ } => {
-                        self.hes.get_mut(0).set_vertex_pos(v - bdl.n * width.value);
-                        self.hes.get_mut(3).set_vertex_pos(v + bdl.n * width.value);
+                        self.hes
+                            .get_mut(0)
+                            .set_vertex_pos(v - bdl.n() * width.value);
+                        self.hes
+                            .get_mut(3)
+                            .set_vertex_pos(v + bdl.n() * width.value);
                         self.hes
                             .get_mut(1)
-                            .set_vertex_pos(v_next - bdl.n * width.value);
+                            .set_vertex_pos(v_next - bdl.n() * width.value);
                         self.hes
                             .get_mut(2)
-                            .set_vertex_pos(v_next + bdl.n * width.value);
+                            .set_vertex_pos(v_next + bdl.n() * width.value);
                     }
                     EdgeKind::Arc { sag_rel } => {
-                        let sagitta_pt = bdl.m - bdl.n * bdl.len * sag_rel.value;
+                        let sagitta_pt = bdl.m() - bdl.n() * bdl.len() * sag_rel.value;
                         circle_from_three_points(v, sagitta_pt, v_next).and_then(
                             |(center, _radius)| {
                                 let n_v = (v - center).normalize()
-                                    * (sagitta_pt - v).cross(bdl.u).signum();
+                                    * (sagitta_pt - v).cross(bdl.u()).signum();
                                 let n_v_next = (v_next - center).normalize()
-                                    * (sagitta_pt - v_next).cross(bdl.u).signum();
+                                    * (sagitta_pt - v_next).cross(bdl.u()).signum();
                                 self.hes.get_mut(0).set_vertex_pos(v + n_v * width.value);
                                 self.hes
                                     .get_mut(1)
@@ -422,7 +426,7 @@ impl Shape for ShapePolygon {
     fn path_elements(&self, _tolerance: f64) -> PolygonIter {
         let mut iter = vec![];
         let paths = self.get_paths_and_patterns(&Size::ZERO, (Rect::ZERO, 0., Vec2::ZERO));
-        for (bez_path, _) in paths.iter() {
+        for (bez_path, ..) in paths.iter() {
             for el in bez_path.elements() {
                 iter.push(*el);
             }
@@ -696,8 +700,8 @@ impl ObjectsFuncs for ShapePolygon {
                                         if let Some((hes_prim, width)) = self.hes_prim.as_mut() {
                                             let v = hes_prim.get(0).get_vertex().pos;
                                             let v_next = hes_prim.get(1).get_vertex().pos;
-                                            if let Some(bdl) = get_seg_bdle(v, v_next) {
-                                                let dpos_proj = pointer.dpos().dot(bdl.n);
+                                            if let Some(bdl) = SegBundle::new(v, v_next) {
+                                                let dpos_proj = pointer.dpos().dot(bdl.n());
                                                 width.value = if idx_he == 0 {
                                                     width.saved_val - dpos_proj
                                                 } else {
@@ -720,9 +724,10 @@ impl ObjectsFuncs for ShapePolygon {
                     Arc { sag_rel } => {
                         let v = self.hes.get(idx_he).get_vertex().pos;
                         let v_next = self.hes.get(idx_he + 1).get_vertex().pos;
-                        if let Some(sb) = get_seg_bdle(v, v_next) {
+                        if let Some(sb) = SegBundle::new(v, v_next) {
                             let mut new_sag_rel = Value::new(
-                                (sb.len * sag_rel.saved_val - pointer.dpos().dot(sb.n)) / sb.len,
+                                (sb.len() * sag_rel.saved_val - pointer.dpos().dot(sb.n()))
+                                    / sb.len(),
                             );
                             new_sag_rel.saved_val = sag_rel.saved_val;
                             self.hes.get_mut(idx_he).set_edge_kind(Arc {
@@ -778,10 +783,10 @@ impl ObjectsFuncs for ShapePolygon {
                             Arc { sag_rel } => {
                                 let v = hes_prim.get(idx_he).get_vertex().pos;
                                 let v_next = hes_prim.get(idx_he + 1).get_vertex().pos;
-                                if let Some(sb) = get_seg_bdle(v, v_next) {
+                                if let Some(sb) = SegBundle::new(v, v_next) {
                                     let mut new_sag_rel = Value::new(
-                                        (sb.len * sag_rel.saved_val - pointer.dpos().dot(sb.n))
-                                            / sb.len,
+                                        (sb.len() * sag_rel.saved_val - pointer.dpos().dot(sb.n()))
+                                            / sb.len(),
                                     );
                                     new_sag_rel.saved_val = sag_rel.saved_val;
                                     hes_prim.get_mut(idx_he).set_edge_kind(Arc {
@@ -809,17 +814,17 @@ impl ObjectsFuncs for ShapePolygon {
         &self,
         _das: &Size,
         canvas_infos: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
-        use HS::*;
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         let scale = canvas_infos.1;
-        let mut paths_patterns: Vec<(BezPath, Pattern)> = vec![];
+        let mut paths_patterns = vec![];
         // VERTICES
         for idx_he in 0..self.hes.len() as i64 {
             let he = self.hes.get(idx_he);
             if he.is_vertex_selectable() {
                 paths_patterns.push((
-                    modifiers_path(he.get_vertex().pos, scale),
-                    modifiers_pattern(he.get_vertex_state(Select), he.get_vertex_state(Highlight)),
+                    point_path(he.get_vertex().pos, scale),
+                    Pattern::Point,
+                    get_shapes_point_colors(he.vertex_state()),
                 ));
             }
             // // DEBUG
@@ -847,11 +852,9 @@ impl ObjectsFuncs for ShapePolygon {
                 let he = hes_prim.get(idx_he);
                 if he.is_vertex_selectable() {
                     paths_patterns.push((
-                        modifiers_path(he.get_vertex().pos, scale),
-                        modifiers_pattern(
-                            he.get_vertex_state(Select),
-                            he.get_vertex_state(Highlight),
-                        ),
+                        point_path(he.get_vertex().pos, scale),
+                        Pattern::Point,
+                        get_shapes_point_colors(he.vertex_state()),
                     ));
                 }
             }
@@ -877,29 +880,29 @@ impl ObjectsFuncs for ShapePolygon {
         // POLYGON CENTER
         paths_patterns.push((
             center_path(self.get_centroid(), scale, Self::GRAB_RADIUS),
-            modifiers_pattern(self.state.is_hs(Select), self.state.is_hs(Highlight)),
+            Pattern::Point,
+            get_shapes_point_colors(self.state),
         ));
         paths_patterns
     }
-    fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
-        use HS::*;
+    fn get_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         let mut paths_patterns = vec![];
 
         for idx_he in 0..self.hes.len() as i64 {
             let s_next = self.hes.get(idx_he + 1).get_s();
             let v_next = self.hes.get(idx_he + 1).get_vertex().pos;
             // CORNERS
-            paths_patterns.push(self.hes.get(idx_he).get_corner_paths_and_patterns(
-                self.state.is_hs(Select),
-                self.state.is_hs(Highlight),
-            ));
+            paths_patterns.push(self.hes.get(idx_he).get_corner_paths_and_patterns());
             // EDGES
-            paths_patterns.push(self.hes.get(idx_he).get_edge_paths_and_patterns(
-                s_next,
-                v_next,
-                self.state.is_hs(Select),
-                self.state.is_hs(Highlight),
-            ));
+            paths_patterns.push(
+                self.hes
+                    .get(idx_he)
+                    .get_edge_paths_and_patterns(s_next, v_next),
+            );
         }
         paths_patterns
     }
@@ -907,19 +910,17 @@ impl ObjectsFuncs for ShapePolygon {
         &self,
         _: &Size,
         _: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
-        use HS::*;
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         let mut paths_patterns = vec![];
         if let Some((hes_prim, _width)) = self.hes_prim.as_ref() {
             if hes_prim.get(0).is_edge_selectable() {
                 let s_next = hes_prim.get(1).get_s();
                 let v_next = hes_prim.get(1).get_vertex().pos;
-                paths_patterns.push(hes_prim.get(0).get_prim_edge_paths_and_patterns(
-                    s_next,
-                    v_next,
-                    self.state.is_hs(Select),
-                    self.state.is_hs(Highlight),
-                ));
+                paths_patterns.push(
+                    hes_prim
+                        .get(0)
+                        .get_prim_edge_paths_and_patterns(s_next, v_next),
+                );
             }
         };
         paths_patterns
@@ -928,7 +929,7 @@ impl ObjectsFuncs for ShapePolygon {
         &self,
         _size: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern, CanvasText)> {
+    ) -> Vec<(BezPath, Pattern, Colors, Vec<CanvasText>)> {
         use PolyKind::*;
         use HS::*;
         let mut res = vec![];
@@ -943,9 +944,9 @@ impl ObjectsFuncs for ShapePolygon {
                 (0..2).for_each(|idx| {
                     let he = self.hes.get(idx);
                     display.then(|| {
-                        get_seg_bdle(he.get_vertex().pos, self.hes.get(idx + 1).get_vertex().pos)
+                        SegBundle::new(he.get_vertex().pos, self.hes.get(idx + 1).get_vertex().pos)
                             .and_then(|bdl| {
-                                res.push(dim_linear(bdl, cinfo));
+                                res.push(dim_linear(bdl, cinfo, self.state));
                                 Some(())
                             });
                     });
@@ -960,21 +961,24 @@ impl ObjectsFuncs for ShapePolygon {
 
                 let v0 = self.hes.get(0).get_vertex().pos;
                 let v1 = self.hes.get(1).get_vertex().pos;
-                let v2 = self.hes.get(2).get_vertex().pos;
+                let _v2 = self.hes.get(2).get_vertex().pos;
                 let v3 = self.hes.get(3).get_vertex().pos;
                 display.then(|| {
-                    get_seg_bdle(v0, v1).and_then(|bdl1| {
-                        res.push(dim_linear(bdl1, cinfo));
-                        let (vm1, vm2) = if bdl1.a > -PI / 2. && bdl1.a < PI / 2. {
+                    SegBundle::new(v0, v1).and_then(|bdl1| {
+                        res.push(dim_linear(bdl1, cinfo, self.state));
+                        let (vm1, vm2) = if bdl1.a() > -PI / 2. && bdl1.a() < PI / 2. {
                             (
-                                v3 + bdl1.u * bdl1.len * 3. / 4.,
-                                v0 + bdl1.u * bdl1.len * 3. / 4.,
+                                v3 + bdl1.u() * bdl1.len() * 3. / 4.,
+                                v0 + bdl1.u() * bdl1.len() * 3. / 4.,
                             )
                         } else {
-                            (v3 + bdl1.u * bdl1.len / 4., v0 + bdl1.u * bdl1.len / 4.)
+                            (
+                                v3 + bdl1.u() * bdl1.len() / 4.,
+                                v0 + bdl1.u() * bdl1.len() / 4.,
+                            )
                         };
-                        get_seg_bdle(vm1, vm2).and_then(|bdl2| {
-                            res.push(dim_linear(bdl2, cinfo));
+                        SegBundle::new(vm1, vm2).and_then(|bdl2| {
+                            res.push(dim_linear(bdl2, cinfo, self.state));
                             Some(())
                         })
                     });
@@ -986,12 +990,12 @@ impl ObjectsFuncs for ShapePolygon {
                     let selected = he.get_vertex_state(Select) || self.state.is_hs(Select);
                     let highlighted = he.get_vertex_state(Highlight) || self.state.is_hs(Highlight);
                     (selected || highlighted).then(|| {
-                        get_seg_bdle(
+                        SegBundle::new(
                             he.get_vertex().pos,
                             self.hes.get(he_idx + 1).get_vertex().pos,
                         )
                         .and_then(|bdl| {
-                            res.push(dim_linear(bdl, cinfo));
+                            res.push(dim_linear(bdl, cinfo, self.state));
                             Some(())
                         });
                     });

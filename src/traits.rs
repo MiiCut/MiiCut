@@ -1,5 +1,5 @@
 use crate::{
-    canvas::{CanvasText, Pattern},
+    canvas::{CanvasText, Colors, Pattern},
     pools::HS,
     KeysStates, Pointer,
 };
@@ -64,20 +64,20 @@ pub trait ObjectsFuncs: Debug + Clone {
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)>;
+    ) -> Vec<(BezPath, Pattern, Colors)>;
     fn get_prim_paths_and_patterns(
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)>;
+    ) -> Vec<(BezPath, Pattern, Colors)>;
     fn get_controls_paths_and_patterns(
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)>;
+    ) -> Vec<(BezPath, Pattern, Colors)>;
     fn get_dimensions_paths_and_patterns(
         &self,
         das: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern, CanvasText)>;
+    ) -> Vec<(BezPath, Pattern, Colors, Vec<CanvasText>)>;
 }

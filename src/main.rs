@@ -21,12 +21,15 @@ use crate::dom::*;
 use crate::math::*;
 use canvas::CanvasText;
 use canvas::CanvasTextConfig;
+use canvas::Color;
+use canvas::Colors;
 use canvas::TextAlign;
 use canvas::TextPos;
 use canvas::{CanvasKind, Canvases, Pattern};
 use clipboard::*;
 use curves::half_edge::HEProps;
 use curves::half_edge::HalfEdge;
+use dimensions::dim_radius;
 use helpers::helpers::HelperKind;
 use helpers::helpers_pool::AddHelperAction;
 use helpers::helpers_pool::DeleteHelperAction;
@@ -256,6 +259,9 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
         .get_element_by_id("backgroundCanvas")
         .expect("should have backgroundCanvas on the page")
         .dyn_into::<HtmlCanvasElement>()?;
+    let color_tailwind = document
+        .get_element_by_id("color-tailwind")
+        .expect("should have color-tailwind on the page");
 
     let tooltip = document
         .get_element_by_id("tooltip")
@@ -283,11 +289,11 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
         .dyn_into()?;
 
     let canvases = Canvases::new(
-        window.clone(),
         c_back,
         c_grid,
         c_draw,
         Size::new(3000., 1500.),
+        color_tailwind,
     )?;
 
     let wa_size = canvases.get_drawing_size();
@@ -802,16 +808,19 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
         }
         Icons::IHelpers(ihelper) => match avb.mouse.get_mouse_state() {
             LeftDown(mouse_pos_down) => {
-                pointer.set_pos(snap_pt(mouse_pos_down, pointer.get_snap().val()));
-                pointer.save_pos();
-
                 if let Some(points) = &mut avb.on_creation {
                     // A. We are/were drawing a new shape
                     let start = points.get(0).get_vertex().pos;
-                    let end = pointer.pos();
                     match ihelper {
                         IconsConstruction::Circle => {
-                            if let Some(helper) = HelperKind::new_circle(start, end) {
+                            pointer.set_pos(snap_length(
+                                start,
+                                mouse_pos_down,
+                                pointer.get_snap().val(),
+                            ));
+                            pointer.save_pos();
+                            let radius_pt = pointer.pos();
+                            if let Some(helper) = HelperKind::new_circle(start, radius_pt) {
                                 avb.pools.helpers.add(helper.clone());
                                 // Push the AddHelperAction to the undo/redo system
                                 avb.undo_redo.push(Box::new(AddHelperAction { helper }));
@@ -819,7 +828,10 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                             avb.on_creation = None;
                         }
                         IconsConstruction::Line => {
-                            if let Some(helper) = HelperKind::new_line(start, end) {
+                            pointer.set_pos(snap_pt(mouse_pos_down, pointer.get_snap().val()));
+                            pointer.save_pos();
+                            let end = pointer.pos();
+                            if let Some(helper) = HelperKind::new_segment(start, end) {
                                 avb.pools.helpers.add(helper.clone());
                                 // Push the AddHelperAction to the undo/redo system
                                 avb.undo_redo.push(Box::new(AddHelperAction { helper }));
@@ -829,6 +841,8 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     };
                     avb.on_creation = None;
                 } else {
+                    pointer.set_pos(snap_pt(mouse_pos_down, pointer.get_snap().val()));
+                    pointer.save_pos();
                     // B. We start drawing a new helper, don't create the helper yet
                     avb.on_creation = Some(VecRing::from_element(HalfEdge::new(
                         pointer.pos(),
@@ -836,17 +850,41 @@ fn update(avb: &mut RefMut<'_, AppVars>) -> Result<(), MyError> {
                     )));
                 }
             }
-            LeftDownMove(mouse_pos_down, mouse_pos) => {
-                pointer.set_pos(snap_pt(mouse_pos, pointer.get_snap().val()));
-            }
             LeftUp(mouse_pos_up) => {
                 pointer.set_pos(mouse_pos_up);
                 pointer.save_pos();
                 // User has finished drawing the objects, create the helper new magnet points
                 avb.pools.helpers.create_magnet_points();
             }
-            LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
-                pointer.set_pos(snap_pt(mouse_pos, pointer.get_snap().val()));
+            LeftDownMove(mouse_pos_down_up, mouse_pos)
+            | LeftUpMove(mouse_pos_down_up, mouse_pos)
+            | RightUpMove(mouse_pos_down_up, mouse_pos) => {
+                if let Some(points) = &mut avb.on_creation {
+                    // A. We are drawing a new shape
+                    let start = points.get(0).get_vertex().pos;
+                    match ihelper {
+                        IconsConstruction::Circle => {
+                            pointer.set_pos(snap_length(
+                                start,
+                                mouse_pos,
+                                pointer.get_snap().val(),
+                            ));
+                        }
+                        IconsConstruction::Line => {
+                            pointer.set_pos(snap_pt(mouse_pos, pointer.get_snap().val()));
+                        }
+                    }
+                } else {
+                    pointer.set_pos(mouse_pos);
+                    avb.pools
+                        .helpers
+                        .magnet_to_points(&mut pointer, keys_states);
+                    if !pointer.is_magnetized() {
+                        pointer.set_pos(snap_pt(mouse_pos, pointer.get_snap().val()));
+                    } else {
+                        pointer.set_pos(pointer.pos());
+                    }
+                }
             }
             RightDown(mouse_pos_down) => {
                 pointer.set_pos(snap_pt(mouse_pos_down, pointer.get_snap().val()));
@@ -875,7 +913,7 @@ fn update_informations(avb: &mut RefMut<'_, AppVars>) {
         &CanvasText::new(
             format!("( {:.1} , {:.1} )", pos.x, pos.y),
             TextPos::PosCustom(Vec2::new(c_size.width - 10., c_size.height - 10.)),
-            CanvasTextConfig::new(Pattern::Rules, 0., TextAlign::Right, 20, 0.4),
+            CanvasTextConfig::new(Color::Rules, 0., TextAlign::Right, 20, 0.4),
         ),
     );
     avb.canvases.direct_text(
@@ -887,7 +925,7 @@ fn update_informations(avb: &mut RefMut<'_, AppVars>) {
                 avb.pointer.get_snap().val()
             ),
             TextPos::Pos1(c_size.height),
-            CanvasTextConfig::new(Pattern::Rules, 0., TextAlign::Left, 20, 0.4),
+            CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
         ),
     );
 }
@@ -1072,7 +1110,7 @@ fn on_modal_backdrop_click(av: RefAV, _event: Event) {
 ///////////////
 // Window events
 fn resize_canvases(av: RefAV) {
-    log!("resize called");
+    log!("resize--called");
     let mut pam = av.borrow_mut();
     let window_width = pam
         .window
@@ -1289,36 +1327,40 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     avb.canvases.draw_closed_path(
         &CanvasKind::Draw,
         full_segs,
-        Pattern::ComposedNormal(true),
+        Pattern::Composed(true),
+        Color::Black65Opacity,
+        Color::Gray,
         vec![],
     );
 
-    // SHAPES: Draw the outline of every shape
+    // SHAPES: Draw the outlines
     for shape in avb.pools.shapes.values() {
         shape
             .get_kind()
             .get_paths_and_patterns(das, cinfo)
             .iter()
-            .for_each(|(path, pattern)| {
+            .for_each(|(path, pattern, colors)| {
                 avb.canvases
-                    .draw_path(&CanvasKind::Draw, (path.clone(), *pattern), vec![]);
+                    .draw_path(&CanvasKind::Draw, (path.clone(), *pattern, *colors, vec![]));
             });
     }
-    // SHAPES: Draw the primitives he
+    // SHAPES: Draw the primitives
     for shape in avb.pools.shapes.values() {
         shape
             .get_kind()
             .get_prim_paths_and_patterns(das, cinfo)
             .iter()
-            .for_each(|(path, pattern)| {
+            .for_each(|(path, pattern, colors)| {
                 avb.canvases
-                    .draw_path(&CanvasKind::Draw, (path.clone(), *pattern), vec![]);
+                    .draw_path(&CanvasKind::Draw, (path.clone(), *pattern, *colors, vec![]));
             });
     }
     // SHAPES: Draw the modifiers points
     for shape in avb.pools.shapes.values() {
-        for path in shape.get_kind().get_controls_paths_and_patterns(das, cinfo) {
-            avb.canvases.draw_path(&CanvasKind::Draw, path, vec![]);
+        for (path, pattern, colors) in shape.get_kind().get_controls_paths_and_patterns(das, cinfo)
+        {
+            avb.canvases
+                .draw_path(&CanvasKind::Draw, (path, pattern, colors, vec![]));
         }
     }
     // SHAPES: Draw dimensions
@@ -1328,12 +1370,11 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
             || shape.get_kind().get_state(IsAControlHS(Select))
             || shape.get_kind().get_state(IsAControlHS(Highlight))
         {
-            for (path, pattern, text) in shape
+            for bundle in shape
                 .get_kind()
                 .get_dimensions_paths_and_patterns(das, cinfo)
             {
-                avb.canvases
-                    .draw_path(&CanvasKind::Draw, (path, pattern), vec![text]);
+                avb.canvases.draw_path(&CanvasKind::Draw, bundle);
             }
         }
     }
@@ -1344,20 +1385,21 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
             .get_kind()
             .get_paths_and_patterns(das, cinfo)
             .iter()
-            .for_each(|(path, pattern)| {
+            .for_each(|(path, pattern, colors)| {
                 avb.canvases
-                    .draw_path(&CanvasKind::Draw, (path.clone(), *pattern), vec![]);
+                    .draw_path(&CanvasKind::Draw, (path.clone(), *pattern, *colors, vec![]));
             });
     }
     // HELPERS: Draw the modifiers points
-    for helper in avb.pools.helpers.values() {
-        for path in helper
-            .get_kind()
-            .get_controls_paths_and_patterns(das, cinfo)
-        {
-            avb.canvases.draw_path(&CanvasKind::Draw, path, vec![]);
-        }
-    }
+    // for helper in avb.pools.helpers.values() {
+    //     for (path, pattern) in helper
+    //         .get_kind()
+    //         .get_controls_paths_and_patterns(das, cinfo)
+    //     {
+    //         avb.canvases
+    //             .draw_path(&CanvasKind::Draw, (path, pattern, vec![]));
+    //     }
+    // }
     // HELPERS: Draw dimensions
     for helper in avb.pools.helpers.values() {
         if helper.get_kind().get_state(IsHS(Select))
@@ -1365,12 +1407,11 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
             || helper.get_kind().get_state(IsAControlHS(Select))
             || helper.get_kind().get_state(IsAControlHS(Highlight))
         {
-            for (path, pattern, text) in helper
+            for bundle in helper
                 .get_kind()
                 .get_dimensions_paths_and_patterns(das, cinfo)
             {
-                avb.canvases
-                    .draw_path(&CanvasKind::Draw, (path, pattern), vec![text]);
+                avb.canvases.draw_path(&CanvasKind::Draw, bundle);
             }
         }
     }
@@ -1378,8 +1419,15 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
     for magnet_point in avb.pools.helpers.magnet_points() {
         avb.canvases.draw_path(
             &CanvasKind::Draw,
-            (modifiers_path(magnet_point, 1.), Pattern::HelperNormal),
-            vec![],
+            (
+                point_path(magnet_point, 1.),
+                Pattern::Helper,
+                Colors {
+                    color: Color::Yellow,
+                    fill_color: Color::Transparent,
+                },
+                vec![],
+            ),
         );
     }
 
@@ -1392,11 +1440,10 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                         .get_kind()
                         .get_paths_and_patterns(das, cinfo)
                         .iter()
-                        .for_each(|(path, pattern)| {
+                        .for_each(|(path, pattern, colors)| {
                             avb.canvases.draw_path(
                                 &CanvasKind::Draw,
-                                (path.clone(), *pattern),
-                                vec![],
+                                (path.clone(), *pattern, *colors, vec![]),
                             );
                         });
                 }
@@ -1407,11 +1454,10 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                         .get_kind()
                         .get_paths_and_patterns(das, cinfo)
                         .iter()
-                        .for_each(|(path, pattern)| {
+                        .for_each(|(path, pattern, colors)| {
                             avb.canvases.draw_path(
                                 &CanvasKind::Draw,
-                                (path.clone(), *pattern),
-                                vec![],
+                                (path.clone(), *pattern, *colors, vec![]),
                             );
                         });
                 }
@@ -1419,7 +1465,11 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
         }
     }
 
-    // Draw the on_creation vertices with lines if any
+    // Draw the data that is being created
+    let create_colors = Colors {
+        color: Color::Yellow,
+        fill_color: Color::Transparent,
+    };
     match avb.icon_selected {
         Icons::IShapes(ishape) => match ishape {
             IconsShapes::Disc => {
@@ -1432,10 +1482,11 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                     avb.canvases.draw_path(
                         &CanvasKind::Draw,
                         (
-                            modifiers_path(center, scale),
-                            modifiers_pattern(false, false),
+                            point_path(center, scale),
+                            Pattern::OnCreation,
+                            create_colors,
+                            vec![],
                         ),
-                        vec![],
                     );
                     avb.canvases.draw_path(
                         &CanvasKind::Draw,
@@ -1443,10 +1494,18 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                             Circle::new(center.to_point(), radius)
                                 .path_elements(tolerance)
                                 .collect(),
-                            Pattern::BasicNormal,
+                            Pattern::OnCreation,
+                            create_colors,
+                            vec![],
                         ),
-                        vec![],
                     );
+                    SegBundle::new(center, end).and_then(|bdl| {
+                        avb.canvases.draw_path(
+                            &CanvasKind::Draw,
+                            dim_radius(bdl, cinfo, Status::default()),
+                        );
+                        Some(())
+                    });
                 }
             }
             IconsShapes::Rectangle => {
@@ -1463,18 +1522,20 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                         avb.canvases.draw_path(
                             &CanvasKind::Draw,
                             (
-                                modifiers_path(*vs.get(idx), scale),
-                                modifiers_pattern(false, false),
+                                point_path(*vs.get(idx), scale),
+                                Pattern::OnCreation,
+                                create_colors,
+                                vec![],
                             ),
-                            vec![],
                         );
                         avb.canvases.draw_path(
                             &CanvasKind::Draw,
                             (
                                 line_path(*vs.get(idx), *vs.get(idx + 1)),
-                                Pattern::BasicNormal,
+                                Pattern::OnCreation,
+                                create_colors,
+                                vec![],
                             ),
-                            vec![],
                         );
                     }
                 }
@@ -1492,15 +1553,20 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                         avb.canvases.draw_path(
                             &CanvasKind::Draw,
                             (
-                                modifiers_path(vertex, scale),
-                                modifiers_pattern(false, false),
+                                point_path(vertex, scale),
+                                Pattern::OnCreation,
+                                create_colors,
+                                vec![],
                             ),
-                            vec![],
                         );
                         avb.canvases.draw_path(
                             &CanvasKind::Draw,
-                            (line_path(vertex, vertex_next), Pattern::BasicNormal),
-                            vec![],
+                            (
+                                line_path(vertex, vertex_next),
+                                Pattern::OnCreation,
+                                create_colors,
+                                vec![],
+                            ),
                         );
                     }
                 }
@@ -1517,10 +1583,11 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                     avb.canvases.draw_path(
                         &CanvasKind::Draw,
                         (
-                            modifiers_path(center, scale),
-                            modifiers_pattern(false, false),
+                            point_path(center, scale),
+                            Pattern::OnCreation,
+                            create_colors,
+                            vec![],
                         ),
-                        vec![],
                     );
                     avb.canvases.draw_path(
                         &CanvasKind::Draw,
@@ -1528,10 +1595,18 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                             Circle::new(center.to_point(), radius)
                                 .path_elements(tolerance)
                                 .collect(),
-                            Pattern::BasicNormal,
+                            Pattern::OnCreation,
+                            create_colors,
+                            vec![],
                         ),
-                        vec![],
                     );
+                    SegBundle::new(center, end).and_then(|bdl| {
+                        avb.canvases.draw_path(
+                            &CanvasKind::Draw,
+                            dim_radius(bdl, cinfo, Status::default()),
+                        );
+                        Some(())
+                    });
                 }
             }
             IconsConstruction::Line => {
@@ -1540,44 +1615,27 @@ fn render_drawing(avb: &mut RefMut<'_, AppVars>) {
                     let v2 = avb.pointer.pos();
                     avb.canvases.draw_path(
                         &CanvasKind::Draw,
-                        (modifiers_path(v1, scale), modifiers_pattern(false, false)),
-                        vec![],
+                        (
+                            point_path(v1, scale),
+                            Pattern::OnCreation,
+                            create_colors,
+                            vec![],
+                        ),
                     );
                     avb.canvases.draw_path(
                         &CanvasKind::Draw,
-                        (line_path(v1, v2), Pattern::BasicNormal),
-                        vec![],
+                        (
+                            line_path(v1, v2),
+                            Pattern::OnCreation,
+                            create_colors,
+                            vec![],
+                        ),
                     );
                 }
             }
         },
         _ => (),
     }
-    // if let Some(hes) = avb.on_creation.clone() {
-    //     let vlen = hes.len() as i64;
-
-    //     for idx in 0..vlen {
-    //         let corner = hes.get(idx).get_vertex().pos;
-    //         let corner_next = if idx + 1 == vlen {
-    //             avb.pointer.pos()
-    //         } else {
-    //             hes.get(idx + 1).get_vertex().pos
-    //         };
-    //         avb.canvases.draw_path(
-    //             &CanvasKind::Draw,
-    //             (
-    //                 modifiers_path(corner, scale, 5.),
-    //                 modifiers_pattern(false, false),
-    //             ),
-    //             vec![],
-    //         );
-    //         avb.canvases.draw_path(
-    //             &CanvasKind::Draw,
-    //             (line_path(corner, corner_next), Pattern::BasicNormal),
-    //             vec![],
-    //         );
-    //     }
-    // }
 
     // let end_time = performance.now();
     // log!("Rendering time: {:.2} ms", end_time - start_time);

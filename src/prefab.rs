@@ -1,36 +1,11 @@
-// #![cfg(not(test))]
-// A macro to provide `println!(..)`-style syntax for `console.log` logging.
-// macro_rules! log {
-//     ( $( $t:tt )* ) => {
-//         web_sys::console::log_1(&format!( $( $t )* ).into());
-//     }
-// }
-
-use crate::canvas::Pattern;
 use kurbo::{BezPath, Circle, PathEl, Shape, Vec2};
 
-pub fn arrow_right(pos: &Vec2, size: f64) -> BezPath {
-    use PathEl::*;
-    let v: Vec<PathEl> = vec![
-        MoveTo(pos.to_point()),
-        LineTo(pos.to_point() + (size, 0.)),
-        LineTo(pos.to_point() + (size + -5., -5.)),
-        LineTo(pos.to_point() + (size + -5., 5.)),
-        LineTo(pos.to_point() + (size, 0.)),
-    ];
-    BezPath::from_vec(v)
-}
-pub fn arrow_down(pos: &Vec2, size: f64) -> BezPath {
-    use PathEl::*;
-    let v: Vec<PathEl> = vec![
-        MoveTo(pos.to_point()),
-        LineTo(pos.to_point() + (0., size)),
-        LineTo(pos.to_point() + (-5., size + -5.)),
-        LineTo(pos.to_point() + (5., size + -5.)),
-        LineTo(pos.to_point() + (0., size)),
-    ];
-    BezPath::from_vec(v)
-}
+use crate::{
+    canvas::{Color, Colors},
+    pools::HS,
+    positions::Status,
+};
+
 pub fn center_path(pos: Vec2, _scale: f64, size: f64) -> BezPath {
     use PathEl::*;
     let v: Vec<PathEl> = vec![
@@ -53,8 +28,7 @@ pub fn helper_point_path(pos: Vec2, size: f64) -> BezPath {
     v.extend(Circle::new(pos.to_point(), size).to_path(tol).to_path(tol));
     BezPath::from_vec(v)
 }
-
-pub fn modifiers_path(pos: Vec2, scale: f64) -> BezPath {
+pub fn point_path(pos: Vec2, scale: f64) -> BezPath {
     let tol = 0.01;
     let size = 5.;
     Circle::new(pos.to_point(), size / scale).to_path(tol)
@@ -65,77 +39,93 @@ pub fn line_path(pos1: Vec2, pos2: Vec2) -> BezPath {
         PathEl::LineTo(pos2.to_point()),
     ])
 }
-pub fn get_text_pattern(selected: bool, highlighted: bool) -> Pattern {
-    match (selected, highlighted) {
-        (false, false) => Pattern::DimensionTextNormal,
-        (false, true) => Pattern::DimensionTextHighlighted,
-        (true, false) => Pattern::DimensionTextSelected,
-        (true, true) => Pattern::DimensionTextSelected,
-    }
-}
-pub fn modifiers_pattern(selected: bool, highlighted: bool) -> Pattern {
-    match (selected, highlighted) {
-        (false, false) => Pattern::Modifiers,
-        (false, true) => Pattern::ModifiersHighlighted,
-        (true, false) => Pattern::ModifiersSelected,
-        (true, true) => Pattern::ModifiersSelected,
-    }
-}
-pub fn get_pattern(selected: bool, highlighted: bool) -> Pattern {
-    match (selected, highlighted) {
-        (false, false) => Pattern::BasicNormal,
-        (false, true) => Pattern::BasicHighlighted,
-        (true, false) => Pattern::BasicSelected,
-        (true, true) => Pattern::BasicSelected,
+
+pub fn get_helpers_colors(state: Status) -> Colors {
+    use HS::*;
+    match (state.is_hs(Select), state.is_hs(Highlight)) {
+        (true, _) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+        (false, false) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+        (false, true) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
     }
 }
 
-pub fn handle_modify_path(pos: Vec2, scale: f64) -> BezPath {
-    let tol = 0.01;
-    let size = 2.;
-    Circle::new(pos.to_point(), size / 2. / scale).to_path(tol)
+pub fn get_shapes_colors(state: Status) -> Colors {
+    use HS::*;
+    match (state.is_hs(Select), state.is_hs(Highlight)) {
+        (true, _) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+        (false, false) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+        (false, true) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+    }
 }
 
-pub fn cstr_hori(pos: &Vec2) -> BezPath {
-    let size = 3.;
-    use PathEl::*;
-    let pos_offset = Vec2::new(pos.x - size / 2., pos.y - size / 2.);
-    let v: Vec<PathEl> = vec![
-        MoveTo(pos_offset.to_point()),
-        LineTo(pos_offset.to_point() + (size, 0.)),
-    ];
-    BezPath::from_vec(v)
+pub fn get_shapes_point_colors(state: Status) -> Colors {
+    use HS::*;
+    match (state.is_hs(Select), state.is_hs(Highlight)) {
+        (true, _) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+        (false, false) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+        (false, true) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+    }
 }
 
-pub fn cstr_vert(pos: &Vec2) -> BezPath {
-    let size = 3.;
-    use PathEl::*;
-    let pos_offset = Vec2::new(pos.x - size / 2., pos.y - size / 2.);
-    let v: Vec<PathEl> = vec![
-        MoveTo(pos_offset.to_point()),
-        LineTo(pos_offset.to_point() + (0., size)),
-    ];
-    BezPath::from_vec(v)
+pub fn get_shapes_centroid_colors(state: Status) -> Colors {
+    use HS::*;
+    match (state.is_hs(Select), state.is_hs(Highlight)) {
+        (true, _) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+        (false, false) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+        (false, true) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+    }
 }
 
-pub fn line_45_scale_invariant(pos: &Vec2) -> BezPath {
-    let size = 10.;
-    use PathEl::*;
-    let pos_offset = Vec2::new(pos.x - size, pos.y - size / 2.);
-    let v: Vec<PathEl> = vec![
-        MoveTo(pos_offset.to_point()),
-        LineTo(pos_offset.to_point() + (size / 1.414, -size / 1.414)),
-    ];
-    BezPath::from_vec(v)
-}
-
-pub fn line_135_scale_invariant(pos: &Vec2) -> BezPath {
-    let size = 10.;
-    use PathEl::*;
-    let pos_offset = Vec2::new(pos.x + size / 2., pos.y - size);
-    let v: Vec<PathEl> = vec![
-        MoveTo(pos_offset.to_point()),
-        LineTo(pos_offset.to_point() + (size / 1.414, size / 1.414)),
-    ];
-    BezPath::from_vec(v)
+pub fn get_dim_colors(state: Status) -> Colors {
+    use HS::*;
+    match (state.is_hs(Select), state.is_hs(Highlight)) {
+        (true, _) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+        (false, false) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+        (false, true) => Colors {
+            color: Color::Gray,
+            fill_color: Color::Gray,
+        },
+    }
 }

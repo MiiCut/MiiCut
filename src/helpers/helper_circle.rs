@@ -1,7 +1,10 @@
 use super::helpers::HelperKind;
 use super::helpers::HelperKindvars;
 use crate::canvas::CanvasText;
+use crate::canvas::Color;
+use crate::canvas::Colors;
 use crate::canvas::Pattern;
+use crate::dimensions::dim_radius;
 use crate::math::*;
 use crate::pools::HS;
 use crate::positions::Status;
@@ -10,10 +13,8 @@ use crate::GetEntityState;
 use crate::KeysStates;
 use crate::ObjectsFuncs;
 use crate::Pointer;
-use crate::Position;
 use crate::SetEntityState;
 use crate::SetEntityStateFromPos;
-use crate::Value;
 use kurbo::BezPath;
 use kurbo::Circle;
 use kurbo::Rect;
@@ -25,33 +26,31 @@ use std::fmt::Display;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HelperCircle {
-    center: Position,
-    radius: Value,
+    bdl: SegBundle,
+    bdl_saved: SegBundle,
     radius_state: Status,
-
     state: Status,
 }
 impl HelperCircle {
     const MIN_RADIUS: f64 = 10.;
 
-    pub fn new(center: Vec2, pos2: Vec2) -> Option<HelperKind> {
-        if (center - pos2).hypot() < EPSILON {
-            return None;
-        }
-        Some(HelperKind::Circle(HelperCircle {
-            center: Position::new(center),
-            radius: Value::new((pos2 - center).hypot()),
-            radius_state: Status::default(),
-            state: Status::default(),
-        }))
+    pub fn new(center: Vec2, radius_pt: Vec2) -> Option<HelperKind> {
+        SegBundle::new(center, radius_pt).and_then(|bdl| {
+            Some(HelperKind::Circle(HelperCircle {
+                bdl,
+                bdl_saved: bdl,
+                radius_state: Status::default(),
+                state: Status::default(),
+            }))
+        })
     }
     pub fn get_radius(&self) -> f64 {
-        self.radius.value
+        self.bdl.len()
     }
 
     fn get_circle(&self) -> Circle {
-        let center = self.center.pos;
-        let radius = self.radius.value;
+        let center = self.bdl.s();
+        let radius = self.bdl.len();
         Circle::new(center.to_point(), radius)
     }
 }
@@ -67,23 +66,19 @@ impl ObjectsFuncs for HelperCircle {
     type Kindvars = HelperKindvars;
 
     fn save_vars(&mut self) {
-        self.center.saved_pos = self.center.pos;
-        self.radius.saved_val = self.radius.value;
+        self.bdl_saved = self.bdl;
     }
     fn restore_vars(&mut self) {
-        self.center.pos = self.center.saved_pos;
-        self.radius.value = self.radius.saved_val;
+        self.bdl = self.bdl_saved;
     }
     fn get_vars(&self) -> HelperKindvars {
-        HelperKindvars::Line(self.center, self.radius)
+        HelperKindvars::Circle(self.bdl)
     }
     fn set_vars(&mut self, vars: &HelperKindvars) {
-        if let HelperKindvars::Line(position, radius) = vars {
-            self.center = position.clone();
-            self.radius = radius.clone();
+        if let HelperKindvars::Circle(bdl) = vars {
+            self.bdl = bdl.clone();
         }
     }
-
     fn get_state(&self, get: GetEntityState) -> bool {
         use GetEntityState::*;
         match get {
@@ -109,21 +104,21 @@ impl ObjectsFuncs for HelperCircle {
         use SetEntityStateFromPos::*;
         match set {
             SetHSFromPos(hs) => {
-                let state = (pointer.pos() - self.center.pos).hypot() < Self::GRAB_RADIUS;
+                let state = (pointer.pos() - self.bdl.s()).hypot() < Self::GRAB_RADIUS;
                 self.state.set_hs(hs, state);
                 state
             }
             SetControlHSFromPos(hs) => {
                 use HS::*;
                 // circonference
-                if ((pointer.pos() - self.center.pos).hypot() - self.radius.value).abs()
+                if ((pointer.pos() - self.bdl.s()).hypot() - self.bdl.len()).abs()
                     < Self::GRAB_RADIUS
                 {
                     self.radius_state.set_hs(hs, true);
                     if !keys_states.alt_pressed {
                         pointer.set_pos(
-                            self.center.pos
-                                + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
+                            self.bdl.s()
+                                + (pointer.pos() - self.bdl.s()).normalize() * self.bdl.len(),
                         );
                         if self.radius_state.is_hs(Select) {
                             pointer.save_pos();
@@ -142,21 +137,23 @@ impl ObjectsFuncs for HelperCircle {
     }
 
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
-        self.center.pos = snap_pt(
-            self.center.saved_pos + pointer.dpos(),
+        let mut set = self.bdl.try_set_s(snap_pt(
+            self.bdl_saved.s() + pointer.dpos(),
             pointer.get_snap().val(),
-        );
-        true
+        ));
+        set |= self.bdl.try_set_e(snap_pt(
+            self.bdl_saved.e() + pointer.dpos(),
+            pointer.get_snap().val(),
+        ));
+        set
     }
     fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
         use HS::*;
         if self.radius_state.is_hs(Select) {
-            let radius = snap_val(
-                (pointer.pos() - self.center.pos).hypot(),
-                pointer.get_snap().val(),
-            );
-            if radius >= HelperCircle::MIN_RADIUS {
-                self.radius.value = radius;
+            let radius_pt = snap_length(self.bdl.s(), pointer.pos(), pointer.get_snap().val());
+            if (radius_pt - self.bdl.s()).hypot() >= HelperCircle::MIN_RADIUS {
+                self.bdl
+                    .try_set_e(snap_pt(radius_pt, pointer.get_snap().val()));
             }
             true
         } else {
@@ -164,59 +161,45 @@ impl ObjectsFuncs for HelperCircle {
         }
     }
     fn get_position(&self) -> Vec2 {
-        self.center.pos
+        self.bdl.s()
     }
 
     fn get_controls_paths_and_patterns(
         &self,
         _: &Size,
         _: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
-        use HS::*;
-        let pattern_circle = match (
-            self.radius_state.is_hs(Select),
-            self.radius_state.is_hs(Highlight),
-        ) {
-            (false, false) => Pattern::HelperNormalCircle,
-            (false, true) => Pattern::HelperHighlightedCircle,
-            (true, false) => Pattern::HelperSelectedCircle,
-            (true, true) => Pattern::HelperSelectedCircle,
-        };
-        vec![((self.get_circle().to_path(Self::TOLERANCE), pattern_circle))]
+    ) -> Vec<(BezPath, Pattern, Colors)> {
+        vec![
+            ((
+                self.get_circle().to_path(Self::TOLERANCE),
+                Pattern::Helper,
+                get_helpers_colors(self.state),
+            )),
+        ]
     }
     fn get_dimensions_paths_and_patterns(
         &self,
         _: &Size,
         cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern, CanvasText)> {
-        let mut res = vec![];
-        let r = self.radius.value / 2_f64.sqrt();
-        let end = Vec2::new(r, r) + self.center.pos;
-        let start = self.center.pos;
-        // Dimension::new(DimKind::Linear, end, start, cinfo).and_then(|dim| {
-        //     res.push(dim.get_path_and_pattern());
-        //     Some(())
-        // });
-        res
+    ) -> Vec<(BezPath, Pattern, Colors, Vec<CanvasText>)> {
+        vec![dim_radius(self.bdl, cinfo, self.radius_state)]
     }
-    fn get_paths_and_patterns(&self, _: &Size, _: (Rect, f64, Vec2)) -> Vec<(BezPath, Pattern)> {
-        use HS::*;
-        let pattern_center = match (self.state.is_hs(Select), self.state.is_hs(Highlight)) {
-            (false, false) => Pattern::HelperNormal,
-            (false, true) => Pattern::HelperHighlighted,
-            (true, false) => Pattern::HelperSelected,
-            (true, true) => Pattern::HelperSelected,
-        };
+    fn get_paths_and_patterns(
+        &self,
+        _: &Size,
+        _: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         vec![(
-            center_path(self.center.pos, 1., Self::GRAB_RADIUS),
-            pattern_center,
+            center_path(self.bdl.s(), 1., Self::GRAB_RADIUS),
+            Pattern::Helper,
+            get_helpers_colors(self.state),
         )]
     }
     fn get_prim_paths_and_patterns(
         &self,
         _das: &Size,
         _cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern)> {
+    ) -> Vec<(BezPath, Pattern, Colors)> {
         vec![]
     }
 }
