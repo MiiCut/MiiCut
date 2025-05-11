@@ -1,17 +1,11 @@
-// A macro to provide `println!(..)`-style syntax for `console.log` logging.
-// macro_rules! log {
-//     ( $( $t:tt )* ) => {
-//         web_sys::console::log_1(&format!( $( $t )* ).into());
-//     }
-// }
-
 use super::shapes::ShapeKind;
 use crate::{
     canvas::{CanvasText, Colors, Pattern},
+    dimensions::dim_radius,
     math::*,
     pools::HS,
-    positions::{Position, Status, Value},
-    prefab::{center_path, get_shapes_colors, get_shapes_point_colors},
+    positions::Status,
+    prefab::{centroid_path, get_centroids_colors, get_shapes_colors},
     traits::*,
     KeysStates, Pointer,
 };
@@ -21,8 +15,8 @@ use std::fmt::Display;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeDisc {
-    center: Position,
-    radius: Value,
+    bdl: SegBundle,
+    bdl_saved: SegBundle,
     radius_state: Status,
     state: Status,
 
@@ -33,26 +27,24 @@ impl ShapeDisc {
     const MIN_RADIUS: f64 = 2.;
 
     pub fn new(center: Vec2, pos2: Vec2) -> Option<ShapeKind> {
-        let center = Position::new(center);
-        let radius = Value::new((pos2 - center.pos).hypot());
-        if radius.value < EPSILON {
-            return None;
-        }
-        let radius_state = Status::default();
-        let mut shape_disc = ShapeDisc {
-            center,
-            radius,
-            radius_state,
-            state: Status::default(),
-            segs: BezPath::new(),
-            polygon: Polygon::new(LineString::new(vec![]), vec![]),
-        };
-        shape_disc.update_geo_polygon();
-        Some(ShapeKind::KindDisc(shape_disc))
+        (center - pos2).hypot().gt(&Self::MIN_RADIUS).then(|| {
+            SegBundle::new(center, pos2).and_then(|bdl| {
+                let mut shape_disc = ShapeDisc {
+                    bdl,
+                    bdl_saved: bdl,
+                    radius_state: Status::default(),
+                    state: Status::default(),
+                    segs: BezPath::new(),
+                    polygon: Polygon::new(LineString::new(vec![]), vec![]),
+                };
+                shape_disc.update_geo_polygon();
+                Some(ShapeKind::KindDisc(shape_disc))
+            })
+        })?
     }
     fn get_circle(&self) -> Circle {
-        let center = self.center.pos;
-        let radius = self.radius.value;
+        let center = self.bdl.s();
+        let radius = self.bdl.len();
         Circle::new(center.to_point(), radius)
     }
     pub fn get_polygon(&self) -> Polygon<f64> {
@@ -61,6 +53,9 @@ impl ShapeDisc {
     pub fn update_geo_polygon(&mut self) {
         self.segs = calc_segs(self.to_path(Self::TOLERANCE));
         self.polygon = calc_polygon(&self.segs);
+    }
+    pub fn get_seg_bdl(&self) -> &SegBundle {
+        &self.bdl
     }
 }
 impl Display for ShapeDisc {
@@ -101,36 +96,38 @@ impl Shape for ShapeDisc {
 }
 impl ObjectsFuncs for ShapeDisc {
     const TOLERANCE: f64 = 0.01;
-    const GRAB_RADIUS: f64 = 5.;
+    const GRAB_RADIUS: f64 = 10.;
     type Kindvars = ShapeKind;
 
+    fn tab(&mut self) -> bool {
+        false
+    }
     fn save_vars(&mut self) {
-        self.center.saved_pos = self.center.pos;
-        self.radius.saved_val = self.radius.value;
+        self.bdl_saved = self.bdl;
     }
     fn restore_vars(&mut self) {
-        self.center.pos = self.center.saved_pos;
-        self.radius.value = self.radius.saved_val;
-        self.update_geo_polygon();
+        self.bdl = self.bdl_saved;
     }
     fn get_vars(&self) -> ShapeKind {
         ShapeKind::KindDisc(ShapeDisc {
-            center: self.center.clone(),
-            radius: self.radius.clone(),
-            radius_state: Status::default(),
+            bdl: self.bdl.clone(),
+            bdl_saved: self.bdl_saved.clone(),
+            radius_state: self.radius_state.clone(),
             state: Status::default(),
             segs: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         })
     }
-    fn set_vars(&mut self, vars: &ShapeKind) {
-        if let ShapeKind::KindDisc(shape_disc) = vars {
-            self.center = shape_disc.center;
-            self.radius = shape_disc.radius;
+    fn set_vars(&mut self, shape_kind: &ShapeKind) {
+        if let ShapeKind::KindDisc(shape_disc) = shape_kind {
+            self.bdl = shape_disc.bdl.clone();
+            self.bdl_saved = shape_disc.bdl_saved.clone();
+            self.radius_state = shape_disc.radius_state.clone();
+            self.state = Status::default();
+            self.segs = BezPath::new();
+            self.polygon = Polygon::new(LineString::new(vec![]), vec![]);
         }
-        self.update_geo_polygon();
     }
-
     fn get_state(&self, get: GetEntityState) -> bool {
         use GetEntityState::*;
         match get {
@@ -163,14 +160,14 @@ impl ObjectsFuncs for ShapeDisc {
                 self.state.set_hs(hs, false);
                 self.radius_state.set_hs(hs, false);
                 // circonference
-                if ((pointer.pos() - self.center.pos).hypot() - self.radius.value).abs()
-                    < Self::GRAB_RADIUS
+                if ((pointer.pos() - self.bdl.s()).hypot() - self.bdl.len()).abs()
+                    < Self::GRAB_RADIUS / pointer.get_draw_scale()
                 {
                     self.radius_state.set_hs(hs, true);
                     if !keys_states.alt_pressed {
                         pointer.set_pos(
-                            self.center.pos
-                                + (pointer.pos() - self.center.pos).normalize() * self.radius.value,
+                            self.bdl.s()
+                                + (pointer.pos() - self.bdl.s()).normalize() * self.bdl.len(),
                         );
                         if self.radius_state.is_hs(Select) {
                             pointer.save_pos();
@@ -188,55 +185,52 @@ impl ObjectsFuncs for ShapeDisc {
         self.contains(pointer.pos().to_point())
     }
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
-        let dpos = pointer.dpos();
-        self.center.pos = self.center.saved_pos + dpos;
+        let mut set = self.bdl.try_set_s(self.bdl_saved.s() + pointer.dpos());
+        set |= self.bdl.try_set_e(self.bdl_saved.e() + pointer.dpos());
         self.update_geo_polygon();
-        true
+        set
     }
     fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
-        let radius = if pointer.is_magnetized() {
-            (pointer.pos() - self.center.pos).hypot()
-        } else {
-            snap_val(
-                (pointer.pos() - self.center.pos).hypot(),
-                pointer.get_snap().val(),
-            )
-        };
-        if radius >= ShapeDisc::MIN_RADIUS {
-            self.radius.value = radius;
+        use HS::*;
+        if self.radius_state.is_hs(Select) {
+            let radius_pt = if !pointer.is_magnetized() {
+                snap_length(self.bdl.s(), pointer.pos(), pointer.get_snap().val())
+            } else {
+                pointer.pos()
+            };
+            if (radius_pt - self.bdl.s()).hypot() >= ShapeDisc::MIN_RADIUS {
+                self.bdl.try_set_e(radius_pt);
+            }
             self.update_geo_polygon();
-            return true;
-        };
-        false
+            true
+        } else {
+            false
+        }
     }
-
     fn get_position(&self) -> Vec2 {
-        self.center.pos
+        self.bdl.s()
     }
-
+    fn get_centroid(&self) -> Vec<Vec2> {
+        vec![self.bdl.s()]
+    }
     fn get_controls_paths_and_patterns(
         &self,
         _: &Size,
-        _: (Rect, f64, Vec2),
+        canvas_infos: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern, Colors)> {
+        let scale = canvas_infos.1;
         vec![(
-            center_path(self.center.pos, 1., ShapeDisc::GRAB_RADIUS),
+            centroid_path(self.get_centroid()[0], scale, Self::GRAB_RADIUS),
             Pattern::Point,
-            get_shapes_point_colors(self.state),
+            get_centroids_colors(self.state),
         )]
     }
     fn get_dimensions_paths_and_patterns(
         &self,
         _: &Size,
-        _cinfo: (Rect, f64, Vec2),
+        cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern, Colors, Vec<CanvasText>)> {
-        let _res = vec![];
-
-        // Dimension::new(DimKind::Linear, end, start, cinfo).and_then(|dim| {
-        //     res.push(dim.get_path_and_pattern());
-        //     Some(())
-        // });
-        _res
+        vec![dim_radius(self.bdl, cinfo, self.radius_state)]
     }
     fn get_paths_and_patterns(
         &self,

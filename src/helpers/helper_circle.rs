@@ -1,7 +1,6 @@
 use super::helpers::HelperKind;
 use super::helpers::HelperKindvars;
 use crate::canvas::CanvasText;
-use crate::canvas::Color;
 use crate::canvas::Colors;
 use crate::canvas::Pattern;
 use crate::dimensions::dim_radius;
@@ -47,11 +46,13 @@ impl HelperCircle {
     pub fn get_radius(&self) -> f64 {
         self.bdl.len()
     }
-
     fn get_circle(&self) -> Circle {
         let center = self.bdl.s();
         let radius = self.bdl.len();
         Circle::new(center.to_point(), radius)
+    }
+    pub fn get_seg_bdl(&self) -> &SegBundle {
+        &self.bdl
     }
 }
 impl Display for HelperCircle {
@@ -65,6 +66,9 @@ impl ObjectsFuncs for HelperCircle {
     const GRAB_RADIUS: f64 = 5.;
     type Kindvars = HelperKindvars;
 
+    fn tab(&mut self) -> bool {
+        false
+    }
     fn save_vars(&mut self) {
         self.bdl_saved = self.bdl;
     }
@@ -135,7 +139,6 @@ impl ObjectsFuncs for HelperCircle {
     fn contains_pointer(&self, _pointer: &Pointer) -> bool {
         false
     }
-
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         let mut set = self.bdl.try_set_s(snap_pt(
             self.bdl_saved.s() + pointer.dpos(),
@@ -150,11 +153,15 @@ impl ObjectsFuncs for HelperCircle {
     fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
         use HS::*;
         if self.radius_state.is_hs(Select) {
-            let radius_pt = snap_length(self.bdl.s(), pointer.pos(), pointer.get_snap().val());
+            let radius_pt = if !pointer.is_magnetized() {
+                snap_length(self.bdl.s(), pointer.pos(), pointer.get_snap().val())
+            } else {
+                pointer.pos()
+            };
             if (radius_pt - self.bdl.s()).hypot() >= HelperCircle::MIN_RADIUS {
-                self.bdl
-                    .try_set_e(snap_pt(radius_pt, pointer.get_snap().val()));
+                self.bdl.try_set_e(radius_pt);
             }
+
             true
         } else {
             false
@@ -163,7 +170,9 @@ impl ObjectsFuncs for HelperCircle {
     fn get_position(&self) -> Vec2 {
         self.bdl.s()
     }
-
+    fn get_centroid(&self) -> Vec<Vec2> {
+        vec![self.bdl.s()]
+    }
     fn get_controls_paths_and_patterns(
         &self,
         _: &Size,
@@ -171,9 +180,9 @@ impl ObjectsFuncs for HelperCircle {
     ) -> Vec<(BezPath, Pattern, Colors)> {
         vec![
             ((
-                self.get_circle().to_path(Self::TOLERANCE),
-                Pattern::Helper,
-                get_helpers_colors(self.state),
+                centroid_path(self.bdl.s(), 1., Self::GRAB_RADIUS),
+                Pattern::Point,
+                get_helpers_centroid_colors(self.state),
             )),
         ]
     }
@@ -190,7 +199,7 @@ impl ObjectsFuncs for HelperCircle {
         _: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern, Colors)> {
         vec![(
-            center_path(self.bdl.s(), 1., Self::GRAB_RADIUS),
+            self.get_circle().to_path(Self::TOLERANCE),
             Pattern::Helper,
             get_helpers_colors(self.state),
         )]

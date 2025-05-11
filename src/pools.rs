@@ -99,19 +99,19 @@ impl Pools {
         }
         if self
             .helpers
+            .set_states_from_pos(pointer, keys_states, SetControlHSFromPos(hs))
+        {
+            // log!("C");
+            self.shapes.set_state(SetHS(hs, false));
+            return true;
+        }
+        if self
+            .helpers
             .set_states_from_pos(pointer, keys_states, SetHSFromPos(hs))
         {
             // log!("B");
             self.shapes.set_state(SetHS(hs, false));
             self.helpers.set_state(SetAllControlsHS(hs, false));
-            return true;
-        }
-        if self
-            .helpers
-            .set_states_from_pos(pointer, keys_states, SetControlHSFromPos(hs))
-        {
-            // log!("C");
-            self.shapes.set_state(SetHS(hs, false));
             return true;
         }
         if self
@@ -147,8 +147,8 @@ impl Pools {
         }
     }
     pub fn move_objects(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
-        if let Some((shid, _)) = self.shapes.get_first_selected_modifier_vars() {
-            return self.shapes.move_modifier(shid, pointer, keys_states);
+        if let Some((shid, _)) = self.shapes.get_first_selected_control_vars() {
+            return self.shapes.move_control(shid, pointer, keys_states);
         }
 
         let shapes_selected = self.shapes.get_state(HS::Select);
@@ -179,8 +179,8 @@ impl Pools {
                 }
                 return moved;
             } else {
-                if let Some((hpid, _)) = self.helpers.get_first_selected_modifier_vars() {
-                    return self.helpers.move_modifier(hpid, pointer, keys_states);
+                if let Some((hpid, _)) = self.helpers.get_first_selected_control_vars() {
+                    return self.helpers.move_control(hpid, pointer, keys_states);
                 }
             }
         }
@@ -194,7 +194,7 @@ impl Pools {
                 shids_vars: shapes_moved,
             })));
         } else {
-            if let Some(shid_vars) = self.shapes.get_first_selected_modifier_vars() {
+            if let Some(shid_vars) = self.shapes.get_first_selected_control_vars() {
                 move_action = Some(Box::new(MoveAction::Shapes(MoveShapesAction {
                     shids_vars: vec![shid_vars],
                 })));
@@ -207,7 +207,7 @@ impl Pools {
                     dhids_vars: helpers_moved,
                 })));
             } else {
-                if let Some(dhid_vars) = self.helpers.get_first_selected_modifier_vars() {
+                if let Some(dhid_vars) = self.helpers.get_first_selected_control_vars() {
                     move_action = Some(Box::new(MoveAction::Helpers(MoveHelpersAction {
                         dhids_vars: vec![dhid_vars],
                     })));
@@ -226,6 +226,7 @@ pub trait PoolsFunctions {
 
     fn new() -> Self::Pool;
     // Methods
+    fn tab(&mut self) -> bool;
     fn duplicate(&mut self, shapes: Vec<Self::Object>) -> Vec<Self::Object>;
     fn add(&mut self, helper: Self::Object);
     fn delete(&mut self, dhid: Self::Id) -> Option<Self::Object>;
@@ -249,8 +250,7 @@ pub trait PoolsFunctions {
 
     fn get_state_if_one(&mut self, hors: HS) -> Option<Self::Id>;
     fn get_state_and_vars(&mut self, hors: HS) -> Vec<(Self::Id, Self::ObjectKindvars)>;
-
-    fn get_first_selected_modifier_vars(&mut self) -> Option<(Self::Id, Self::ObjectKindvars)>;
+    fn get_first_selected_control_vars(&mut self) -> Option<(Self::Id, Self::ObjectKindvars)>;
 
     fn move_position(
         &mut self,
@@ -258,7 +258,7 @@ pub trait PoolsFunctions {
         pointer: &mut Pointer,
         keys_states: KeysStates,
     ) -> bool;
-    fn move_modifier(
+    fn move_control(
         &mut self,
         dhid: Self::Id,
         pointer: &mut Pointer,

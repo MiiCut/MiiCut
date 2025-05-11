@@ -91,6 +91,14 @@ impl ShapeKind {
         let shid = BSid::new();
         Some(MiiShape::new(shid, shape_kind, boolean_op))
     }
+    pub fn new_rectangle_filleted(
+        positions: VecRing<HalfEdge>,
+        boolean_op: BoolOps,
+    ) -> Option<MiiShape> {
+        let shape_kind = ShapePolygon::new_rectangle_filleted(positions)?;
+        let shid = BSid::new();
+        Some(MiiShape::new(shid, shape_kind, boolean_op))
+    }
     pub fn new_custom(positions: VecRing<HalfEdge>, boolean_op: BoolOps) -> Option<MiiShape> {
         let shape_kind = ShapePolygon::new_custom(positions)?;
         let shid = BSid::new();
@@ -116,141 +124,6 @@ impl Display for ShapeKind {
         match self {
             KindDisc(sh) => write!(f, "{sh}"),
             KindPolygon(sh) => write!(f, "{sh}"),
-        }
-    }
-}
-impl ObjectsFuncs for ShapeKind {
-    const TOLERANCE: f64 = 0.01;
-    const GRAB_RADIUS: f64 = 2.;
-    type Kindvars = ShapeKind;
-
-    fn save_vars(&mut self) {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.save_vars(),
-            KindPolygon(sh) => sh.save_vars(),
-        }
-    }
-    fn restore_vars(&mut self) {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.restore_vars(),
-            KindPolygon(sh) => sh.restore_vars(),
-        }
-    }
-    fn get_vars(&self) -> ShapeKind {
-        use ShapeKind::*;
-        match &self {
-            KindDisc(sh) => sh.get_vars(),
-            KindPolygon(sh) => sh.get_vars(),
-        }
-    }
-    fn set_vars(&mut self, vars: &ShapeKind) {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.set_vars(vars),
-            KindPolygon(sh) => sh.set_vars(vars),
-        }
-    }
-
-    fn get_state(&self, get: GetEntityState) -> bool {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.get_state(get),
-            KindPolygon(sh) => sh.get_state(get),
-        }
-    }
-    fn set_state(&mut self, set: SetEntityState) {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.set_state(set),
-            KindPolygon(sh) => sh.set_state(set),
-        }
-    }
-    fn set_state_from_pos(
-        &mut self,
-        pointer: &mut Pointer,
-        keys_states: KeysStates,
-        set: SetEntityStateFromPos,
-    ) -> bool {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.set_state_from_pos(pointer, keys_states, set),
-            KindPolygon(sh) => sh.set_state_from_pos(pointer, keys_states, set),
-        }
-    }
-    fn contains_pointer(&self, pointer: &Pointer) -> bool {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.contains_pointer(pointer),
-            KindPolygon(sh) => sh.contains_pointer(pointer),
-        }
-    }
-
-    fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.move_position(pointer, keys_states),
-            KindPolygon(sh) => sh.move_position(pointer, keys_states),
-        }
-    }
-    fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.move_controls(pointer, keys_states),
-            KindPolygon(sh) => sh.move_controls(pointer, keys_states),
-        }
-    }
-    fn get_position(&self) -> Vec2 {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.get_position(),
-            KindPolygon(sh) => sh.get_position(),
-        }
-    }
-
-    fn get_paths_and_patterns(
-        &self,
-        das: &Size,
-        cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern, Colors)> {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.get_paths_and_patterns(das, cinfo),
-            KindPolygon(sh) => sh.get_paths_and_patterns(das, cinfo),
-        }
-    }
-    fn get_prim_paths_and_patterns(
-        &self,
-        das: &Size,
-        cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern, Colors)> {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.get_prim_paths_and_patterns(das, cinfo),
-            KindPolygon(sh) => sh.get_prim_paths_and_patterns(das, cinfo),
-        }
-    }
-    fn get_controls_paths_and_patterns(
-        &self,
-        das: &Size,
-        cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern, Colors)> {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
-            KindPolygon(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
-        }
-    }
-    fn get_dimensions_paths_and_patterns(
-        &self,
-        das: &Size,
-        cinfo: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern, Colors, Vec<CanvasText>)> {
-        use ShapeKind::*;
-        match self {
-            KindDisc(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
-            KindPolygon(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
         }
     }
 }
@@ -313,6 +186,153 @@ impl Shape for ShapeKind {
         }
     }
 }
+impl ObjectsFuncs for ShapeKind {
+    const TOLERANCE: f64 = 0.01;
+    const GRAB_RADIUS: f64 = 2.;
+    type Kindvars = ShapeKind;
+
+    fn tab(&mut self) -> bool {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.tab(),
+            KindPolygon(sh) => sh.tab(),
+        }
+    }
+    fn save_vars(&mut self) {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.save_vars(),
+            KindPolygon(sh) => sh.save_vars(),
+        }
+    }
+    fn restore_vars(&mut self) {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.restore_vars(),
+            KindPolygon(sh) => sh.restore_vars(),
+        }
+    }
+    fn get_vars(&self) -> ShapeKind {
+        use ShapeKind::*;
+        match &self {
+            KindDisc(sh) => sh.get_vars(),
+            KindPolygon(sh) => sh.get_vars(),
+        }
+    }
+    fn set_vars(&mut self, vars: &ShapeKind) {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.set_vars(vars),
+            KindPolygon(sh) => sh.set_vars(vars),
+        }
+    }
+    fn get_state(&self, get: GetEntityState) -> bool {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.get_state(get),
+            KindPolygon(sh) => sh.get_state(get),
+        }
+    }
+    fn set_state(&mut self, set: SetEntityState) {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.set_state(set),
+            KindPolygon(sh) => sh.set_state(set),
+        }
+    }
+    fn set_state_from_pos(
+        &mut self,
+        pointer: &mut Pointer,
+        keys_states: KeysStates,
+        set: SetEntityStateFromPos,
+    ) -> bool {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.set_state_from_pos(pointer, keys_states, set),
+            KindPolygon(sh) => sh.set_state_from_pos(pointer, keys_states, set),
+        }
+    }
+    fn contains_pointer(&self, pointer: &Pointer) -> bool {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.contains_pointer(pointer),
+            KindPolygon(sh) => sh.contains_pointer(pointer),
+        }
+    }
+    fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.move_position(pointer, keys_states),
+            KindPolygon(sh) => sh.move_position(pointer, keys_states),
+        }
+    }
+    fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.move_controls(pointer, keys_states),
+            KindPolygon(sh) => sh.move_controls(pointer, keys_states),
+        }
+    }
+    fn get_position(&self) -> Vec2 {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.get_position(),
+            KindPolygon(sh) => sh.get_position(),
+        }
+    }
+    fn get_centroid(&self) -> Vec<Vec2> {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.get_centroid(),
+            KindPolygon(sh) => sh.get_centroid(),
+        }
+    }
+    fn get_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern, Colors)> {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.get_paths_and_patterns(das, cinfo),
+            KindPolygon(sh) => sh.get_paths_and_patterns(das, cinfo),
+        }
+    }
+    fn get_prim_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern, Colors)> {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.get_prim_paths_and_patterns(das, cinfo),
+            KindPolygon(sh) => sh.get_prim_paths_and_patterns(das, cinfo),
+        }
+    }
+    fn get_controls_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern, Colors)> {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
+            KindPolygon(sh) => sh.get_controls_paths_and_patterns(das, cinfo),
+        }
+    }
+    fn get_dimensions_paths_and_patterns(
+        &self,
+        das: &Size,
+        cinfo: (Rect, f64, Vec2),
+    ) -> Vec<(BezPath, Pattern, Colors, Vec<CanvasText>)> {
+        use ShapeKind::*;
+        match self {
+            KindDisc(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
+            KindPolygon(sh) => sh.get_dimensions_paths_and_patterns(das, cinfo),
+        }
+    }
+}
+
 pub enum ShapeIter {
     DiscIter(CirclePathIter),
     CustomIter(PolygonIter),

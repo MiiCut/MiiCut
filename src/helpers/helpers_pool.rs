@@ -62,10 +62,15 @@ impl HelpersPool {
         // Find the intersection of all segments
         let mut segs = vec![];
         for helper in self.helpers.values() {
-            if let HelperKind::Segment(seg) = helper.get_kind() {
-                self.magnet_points.push(seg.get_seg_bdl().s());
-                self.magnet_points.push(seg.get_seg_bdl().e());
-                segs.push(seg);
+            match helper.get_kind() {
+                HelperKind::Segment(seg) => {
+                    self.magnet_points.push(seg.get_seg_bdl().s());
+                    self.magnet_points.push(seg.get_seg_bdl().e());
+                    segs.push(seg);
+                }
+                HelperKind::Circle(disc) => {
+                    self.magnet_points.push(disc.get_seg_bdl().s());
+                }
             }
         }
         if segs.len() > 1 {
@@ -152,6 +157,14 @@ impl PoolsFunctions for HelpersPool {
         }
     }
     // Methods
+    fn tab(&mut self) -> bool {
+        for shape in self.helpers.values_mut() {
+            if shape.get_kind_mut().tab() {
+                return true;
+            }
+        }
+        false
+    }
     fn duplicate(&mut self, shapes: Vec<Helper>) -> Vec<Helper> {
         use SetEntityState::*;
         use HS::*;
@@ -246,7 +259,7 @@ impl PoolsFunctions for HelpersPool {
         result
     }
 
-    fn get_first_selected_modifier_vars(&mut self) -> Option<(DHid, HelperKindvars)> {
+    fn get_first_selected_control_vars(&mut self) -> Option<(DHid, HelperKindvars)> {
         use GetEntityState::*;
         use HS::*;
         for helper in self.helpers.values_mut() {
@@ -268,12 +281,7 @@ impl PoolsFunctions for HelpersPool {
         }
         false
     }
-    fn move_modifier(
-        &mut self,
-        dhid: DHid,
-        pointer: &mut Pointer,
-        keys_states: KeysStates,
-    ) -> bool {
+    fn move_control(&mut self, dhid: DHid, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
         if let Some(helper) = self.helpers.get_mut(&dhid) {
             helper.get_kind_mut().move_controls(pointer, keys_states);
         }

@@ -7,7 +7,7 @@ use crate::{
     KeysStates, Pointer, Pools,
 };
 use geo::{BooleanOps, Intersects, MultiPolygon, Polygon};
-use kurbo::BezPath;
+use kurbo::{BezPath, Vec2};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt::Display,
@@ -23,11 +23,13 @@ impl Action for AddShapeAction {
     fn undo(&self, pools: &mut Pools) {
         log!("Undoing shape creation: {:?}", self.shape.get_id());
         pools.shapes.delete(self.shape.get_id());
+        pools.shapes.create_magnet_points();
     }
 
     fn redo(&self, pools: &mut Pools) {
         log!("Redoing shape creation: {:?}", self.shape.get_id());
         pools.shapes.add(self.shape.clone());
+        pools.shapes.create_magnet_points();
     }
 }
 
@@ -39,6 +41,7 @@ impl Action for DeleteShapeAction {
         log!("Undoing shapes creation");
         self.shapes.iter().for_each(|shape| {
             pools.shapes.add(shape.clone());
+            pools.shapes.create_magnet_points();
         });
     }
 
@@ -46,6 +49,7 @@ impl Action for DeleteShapeAction {
         log!("Redoing shapes creation");
         self.shapes.iter().for_each(|shape| {
             pools.shapes.delete(shape.get_id());
+            pools.shapes.create_magnet_points();
         });
     }
 }
@@ -55,8 +59,46 @@ pub struct ShapesPool {
     shapes: HashMap<BSid, MiiShape>,
     shapes_selector: ShapeSelector,
     full_segs: Vec<BezPath>,
+    magnet_points: Vec<Vec2>,
 }
 impl ShapesPool {
+    const MAGNET_RADIUS: f64 = 10.;
+
+    pub fn create_magnet_points(&mut self) {
+        self.magnet_points = vec![];
+        for shape in self.shapes.values() {
+            match shape.get_kind() {
+                ShapeKind::KindDisc(shape_disc) => {
+                    self.magnet_points.push(shape_disc.get_seg_bdl().s());
+                }
+                ShapeKind::KindPolygon(shape_poly) => {
+                    shape_poly.get_hes().iter().for_each(|he| {
+                        if he.is_vertex_magnetic() {
+                            self.magnet_points.push(he.get_vertex().pos);
+                        }
+                    });
+                    if let Some(hes_prim) = shape_poly.get_hes_prim() {
+                        hes_prim.iter().for_each(|he| {
+                            if he.is_vertex_magnetic() {
+                                self.magnet_points.push(he.get_vertex().pos);
+                            }
+                        });
+                    }
+                }
+            }
+        }
+    }
+    pub fn magnet_to_points(&self, pointer: &mut Pointer, keys_states: KeysStates) {
+        for point in self.magnet_points.iter() {
+            if (pointer.pos() - *point).hypot() < Self::MAGNET_RADIUS {
+                if !keys_states.alt_pressed {
+                    pointer.set_pos(*point);
+                    pointer.set_magnetized(true);
+                    return;
+                }
+            }
+        }
+    }
     pub fn intersection_set(&self, shid: BSid) -> HashSet<BSid> {
         let mut result = HashSet::new();
         if let Some(shape) = self.shapes.get(&shid) {
@@ -185,10 +227,19 @@ impl PoolsFunctions for ShapesPool {
         ShapesPool {
             shapes: HashMap::new(),
             shapes_selector: ShapeSelector::new(),
-            full_segs: Vec::new(),
+            full_segs: vec![],
+            magnet_points: vec![],
         }
     }
     // Methods
+    fn tab(&mut self) -> bool {
+        for shape in self.shapes.values_mut() {
+            if shape.get_kind_mut().tab() {
+                return true;
+            }
+        }
+        false
+    }
     fn duplicate(&mut self, shapes: Vec<MiiShape>) -> Vec<MiiShape> {
         use SetEntityState::*;
         let mut new_shapes = vec![];
@@ -332,7 +383,7 @@ impl PoolsFunctions for ShapesPool {
         result
     }
 
-    fn get_first_selected_modifier_vars(&mut self) -> Option<(BSid, ShapeKind)> {
+    fn get_first_selected_control_vars(&mut self) -> Option<(BSid, ShapeKind)> {
         use GetEntityState::*;
         use HS::*;
         for shape in self.shapes.values_mut() {
@@ -354,12 +405,7 @@ impl PoolsFunctions for ShapesPool {
         }
         false
     }
-    fn move_modifier(
-        &mut self,
-        shid: BSid,
-        pointer: &mut Pointer,
-        keys_states: KeysStates,
-    ) -> bool {
+    fn move_control(&mut self, shid: BSid, pointer: &mut Pointer, keys_states: KeysStates) -> bool {
         if let Some(shape) = self.shapes.get_mut(&shid) {
             return shape.get_kind_mut().move_controls(pointer, keys_states);
         }

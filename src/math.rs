@@ -1300,7 +1300,11 @@ pub fn snap_length(start: Vec2, pos: Vec2, snap: f64) -> Vec2 {
         })
         .unwrap_or(pos)
 }
-
+pub fn snap_xy(start: Vec2, pos: Vec2, snap: f64) -> Vec2 {
+    let px = snap_val(pos.x - start.x, snap);
+    let py = snap_val(pos.y - start.y, snap);
+    Vec2::new(start.x + px, start.y + py)
+}
 pub fn snap_angle_hv(angle: f64) -> f64 {
     let angle = angle % (2. * PI);
     if angle.abs_diff_eq(&0., THREAS_ANGLE) {
@@ -1316,6 +1320,30 @@ pub fn snap_angle_hv(angle: f64) -> f64 {
         return -FRAC_PI_2;
     }
     angle
+}
+
+pub fn snap_length_and_angle(center: Vec2, pos: Vec2, snap: f64, snap_angle: f64) -> Vec2 {
+    // Vector from center to pointer
+    let dx = pos.x - center.x;
+    let dy = pos.y - center.y;
+
+    // Length (already being snapped)
+    let raw_length = (dx * dx + dy * dy).sqrt();
+    let snapped_length = snap_val(raw_length, snap);
+    // Angle of the vector
+    let angle = dy.atan2(dx); // in radians
+
+    // Snap angle to nearest increment
+    let angle_step = snap_angle.to_radians(); // snap_angle in degrees
+    let snapped_angle = (angle / angle_step).round() * angle_step;
+
+    // Compute new point at snapped angle and length
+    let radius_pt = center
+        + Vec2::new(
+            snapped_length * snapped_angle.cos(),
+            snapped_length * snapped_angle.sin(),
+        );
+    radius_pt
 }
 
 pub fn angle_from(v1: Vec2, v2: Vec2) -> f64 {
@@ -1965,38 +1993,6 @@ fn find_arc_circle_intersections(
     }
 }
 
-pub fn move_vertex_with_2v_snapping(a: Vec2, b: Vec2, dpos: Vec2, snap: f64) -> Option<Vec2> {
-    // Apply the small displacement to the apex (B)
-    let new_b = b + dpos;
-
-    // Compute the current distance from the new apex to point a
-    let ab = (new_b - a).hypot();
-
-    // Snap this distance to the nearest multiple of 'snap'
-    let snap_ab = (ab / snap).round() * snap;
-
-    // Find the intersection of the circle centered at 'a' with radius 'snap_ab'
-    // and the circle centered at 'b' with radius 'snap'
-    match circle_circle_intersection(a, snap_ab, new_b, snap) {
-        // If there's a single intersection, return it.
-        Some((i1, None)) => Some(i1),
-        // If there are two intersections, choose the one closest to the new_b position.
-        Some((i1, Some(i2))) => {
-            let dist1 = (i1 - new_b).hypot();
-            let dist2 = (i2 - new_b).hypot();
-            if dist1 < dist2 {
-                Some(i1)
-            } else {
-                Some(i2)
-            }
-        }
-        // If no intersection is found, log a warning and return None.
-        _ => {
-            log!("WARNING: No intersection found in move_vertex_with_2v_snapping()");
-            None
-        }
-    }
-}
 /// Moves the apex point with snapping. Given points `a` and `c` (the two fixed endpoints),
 /// the original apex, and a displacement `dpos`, this function computes the new apex position
 /// by snapping the distances |AB| and |BC| to multiples of `snap` and then finding the circle‐
@@ -2233,6 +2229,22 @@ pub fn angle_between(v: Vec2, w: Vec2) -> Option<f64> {
     Some(cos_theta.acos() * v.cross(w).signum())
 }
 
+pub fn angle0_90(angle: f64) -> f64 {
+    let mut angle = angle.rem_euclid(2.0 * PI);
+    if angle > PI {
+        angle -= 2.0 * PI;
+    }
+    if angle < 0.0 {
+        angle += 2.0 * PI;
+    }
+    if angle > PI / 2.0 {
+        angle = PI - angle;
+    }
+    if angle < -PI / 2.0 {
+        angle = -angle - PI;
+    }
+    angle.abs()
+}
 /// CORRECTED VERSION WITH Y AXIS INVERTED ----
 pub fn arc_from_center_and_points(center: Vec2, start: Vec2, end: Vec2) -> Option<Arc> {
     // Compute vectors from the center to the start and end points.

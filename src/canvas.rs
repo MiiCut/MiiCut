@@ -9,7 +9,7 @@ use crate::{math::*, prefab::*};
 use js_sys::Array;
 use kurbo::{BezPath, PathEl, Point, Rect, Size, Vec2};
 use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{CanvasRenderingContext2d, Element, HtmlCanvasElement};
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextPos {
@@ -322,7 +322,6 @@ pub struct Canvases {
     c_back_ctx: CanvasRenderingContext2d,
     c_grid_ctx: CanvasRenderingContext2d,
     c_main_ctx: CanvasRenderingContext2d,
-    color_tailwind: Element,
 
     // The size (mm,mm) = (px,px) of the drawing area
     drawing_area_size: Size,
@@ -342,7 +341,6 @@ impl Canvases {
         c_grid: HtmlCanvasElement,
         c_main: HtmlCanvasElement,
         drawing_size: Size,
-        color_tailwind: Element,
     ) -> Result<Canvases, JsValue> {
         // let document = window.document().expect("should have a document on window");
 
@@ -378,7 +376,6 @@ impl Canvases {
             c_back_ctx,
             c_grid_ctx,
             c_main_ctx,
-            color_tailwind,
             drawing_area_size: drawing_size,
             drawing_offset_saved: Vec2::ZERO,
             drawing_offset: Vec2::ZERO,
@@ -475,8 +472,8 @@ impl Canvases {
         ctx.set_font(&format!("{}px Orbitron", text.config.font_size));
         ctx.set_global_alpha(text.config.opacity);
 
-        ctx.set_stroke_style_str(Color::Text.get());
-        ctx.set_fill_style_str(Color::Text.get());
+        ctx.set_stroke_style_str(text.config.color.get());
+        ctx.set_fill_style_str(text.config.color.get());
         ctx.set_text_align(match text.config.align {
             TextAlign::Left => "left",
             TextAlign::Right => "right",
@@ -758,15 +755,20 @@ pub enum Color {
     OnCreation,
 
     White40Opacity,
-    Yellow,
+
+    White80Opacity,
+    GreenA,
+
     Red55Opacity,
     Gray,
     White,
+    Purple20Opacity,
     Purple55Opacity,
     Pink30Opacity,
     Red60Opacity,
     Text,
-    Gray55Opacity,
+    Gray60Opacity,
+    Gray90Opacity,
     Olive60Opacity,
     Black65Opacity,
     Black,
@@ -783,15 +785,18 @@ impl Color {
             Rules => "rgba(208,208,208,1)",
             OnCreation => "rgba(0,119,255,1)",
             White40Opacity => "rgba(255,255,255,0.4)",
-            Yellow => "rgba(251,191,36,1)",
+            White80Opacity => "rgba(240,240,240,0.8)",
+            GreenA => "rgba(128,191,36,1)",
             Red55Opacity => "rgba(255,0,0,0.55)",
             Gray => "rgba(107,114,128,1)",
             White => "rgba(255,255,255,1)",
+            Purple20Opacity => "rgba(128,0,128,0.20)",
             Purple55Opacity => "rgba(128,0,128,0.55)",
             Pink30Opacity => "rgba(255,192,203,0.3)",
             Red60Opacity => "rgba(255,0,0,0.6)",
             Text => "rgba(128,128,0,1)",
-            Gray55Opacity => "rgba(128,128,128,0.55)",
+            Gray60Opacity => "rgba(128,128,128,0.60)",
+            Gray90Opacity => "rgba(128,128,128,0.90)",
             Olive60Opacity => "rgba(128,128,0,0.6)",
             Black65Opacity => "rgba(0,0,0,0.65)",
             Black => "rgba(0,0,0,1)",
@@ -827,7 +832,7 @@ impl Pattern {
             GridPrimary => (pattern_solid, 1., false),
             GridSecondary => (pattern_solid, 1., false),
             Rules => (pattern_solid, 1., false),
-            OnCreation => (pattern_dashed, 1., false),
+            OnCreation => (pattern_dashed, 1., true),
             Point => (pattern_solid, 1., true),
             Composed(filled) => (pattern_solid, 3., *filled),
             Basic => (pattern_dashed, 1., false),

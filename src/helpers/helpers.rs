@@ -78,6 +78,13 @@ impl ObjectsFuncs for HelperKind {
     const GRAB_RADIUS: f64 = 2.;
     type Kindvars = HelperKindvars;
 
+    fn tab(&mut self) -> bool {
+        use HelperKind::*;
+        match self {
+            Segment(sh) => sh.tab(),
+            Circle(sh) => sh.tab(),
+        }
+    }
     fn save_vars(&mut self) {
         use HelperKind::*;
         match self {
@@ -161,7 +168,13 @@ impl ObjectsFuncs for HelperKind {
             Circle(sh) => sh.get_position(),
         }
     }
-
+    fn get_centroid(&self) -> Vec<Vec2> {
+        use HelperKind::*;
+        match self {
+            Segment(sh) => sh.get_centroid(),
+            Circle(sh) => sh.get_centroid(),
+        }
+    }
     fn get_paths_and_patterns(
         &self,
         das: &Size,

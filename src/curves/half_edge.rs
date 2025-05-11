@@ -1,12 +1,12 @@
 use crate::{
-    canvas::{Color, Colors, Pattern},
+    canvas::Pattern,
     math::{
-        arc_from_center_and_points, arc_from_three_points, bissector, circle_from_three_points,
-        circle_line_intersection, distance_and_projection_to_arc,
-        distance_and_projection_to_segment, nearest_circle_point, project_point_on_line, SegBundle,
+        arc_from_center_and_points, bissector, circle_from_three_points,
+        distance_and_projection_to_arc, distance_and_projection_to_segment, SegBundle,
     },
     pools::HS,
     positions::{Position, Status, Value},
+    prefab::point_path,
 };
 use kurbo::{ArcAppendIter, BezPath, CubicBezIter, LinePathIter, PathEl, QuadBezIter, Shape, Vec2};
 use std::f64::consts::PI;
@@ -46,33 +46,21 @@ pub enum KShape {
 #[derive(Copy, Debug, Clone)]
 pub struct HEProps {
     pub vertex_selectable: bool,
-    pub vertex_changeable: bool,
     pub vertex_movable: bool,
-    pub edge_selectable: bool,
-    pub edge_changeable: bool,
-    pub edge_movable: bool,
-    pub corner_selectable: bool,
-    pub corner_changeable: bool,
-    pub corner_movable: bool,
+    pub vertex_magnetic: bool,
 }
 impl Default for HEProps {
     fn default() -> Self {
         Self {
             vertex_selectable: true,
-            vertex_changeable: true,
             vertex_movable: true,
-            edge_selectable: true,
-            edge_changeable: true,
-            edge_movable: true,
-            corner_selectable: true,
-            corner_changeable: true,
-            corner_movable: true,
+            vertex_magnetic: true,
         }
     }
 }
 
 // sagitta_rel:
-// The corner vertex and the next corner vertex form a segment. In case the edge is an arc,
+// The vertex_kind and the next vertex_kind form a segment. In case the edge is an arc,
 // this segment is a chord of an arc. The distance beween the mid point of this segment and the mid
 // point of the arc is called the sagitta.
 // We define the sag_rel that is the sagitta divided by the segment length.
@@ -84,18 +72,18 @@ pub enum EdgeKind {
     Arc { sag_rel: Value },
 }
 impl EdgeKind {
-    pub fn next(&mut self) {
+    pub fn set_arc(&mut self) {
         use EdgeKind::*;
         match self {
             Segment { dum } => *self = Arc { sag_rel: *dum },
-            Arc { sag_rel } => *self = Segment { dum: *sag_rel },
+            _ => (),
         };
     }
-    pub fn prev(&mut self) {
+    pub fn set_segment(&mut self) {
         use EdgeKind::*;
         match self {
-            Segment { dum } => *self = Arc { sag_rel: *dum },
             Arc { sag_rel } => *self = Segment { dum: *sag_rel },
+            _ => (),
         };
     }
     pub fn save_vars(&mut self) {
@@ -113,32 +101,40 @@ impl EdgeKind {
 }
 
 #[derive(Copy, Debug, Clone, PartialEq)]
-pub enum CornerKind {
+pub enum VertexKind {
     Chamfer { length: Value },
     Fillet { radius: Value },
     Point { dummy: Value },
 }
-impl CornerKind {
+impl VertexKind {
     pub fn next(&mut self) {
-        use CornerKind::*;
+        use VertexKind::*;
         match self {
-            Point { dummy } => *self = Chamfer { length: *dummy },
+            Point { dummy } => *self = Fillet { radius: *dummy },
+            Fillet { radius } => *self = Chamfer { length: *radius },
+            Chamfer { length } => *self = Point { dummy: *length },
+        };
+    }
+    pub fn next2(&mut self) {
+        use VertexKind::*;
+        match self {
+            Fillet { radius } => *self = Chamfer { length: *radius },
             Chamfer { length } => *self = Fillet { radius: *length },
-            Fillet { radius } => *self = Point { dummy: *radius },
+            _ => (),
         };
     }
     pub fn save_vars(&mut self) {
         match self {
-            CornerKind::Point { dummy } => dummy.saved_val = dummy.value,
-            CornerKind::Chamfer { length } => length.saved_val = length.value,
-            CornerKind::Fillet { radius } => radius.saved_val = radius.value,
+            VertexKind::Point { dummy } => dummy.saved_val = dummy.value,
+            VertexKind::Chamfer { length } => length.saved_val = length.value,
+            VertexKind::Fillet { radius } => radius.saved_val = radius.value,
         }
     }
     pub fn restore_vars(&mut self) {
         match self {
-            CornerKind::Point { dummy } => dummy.value = dummy.saved_val,
-            CornerKind::Chamfer { length } => length.value = length.saved_val,
-            CornerKind::Fillet { radius } => radius.value = radius.saved_val,
+            VertexKind::Point { dummy } => dummy.value = dummy.saved_val,
+            VertexKind::Chamfer { length } => length.value = length.saved_val,
+            VertexKind::Fillet { radius } => radius.value = radius.saved_val,
         }
     }
 }
@@ -149,55 +145,43 @@ pub struct HalfEdge {
     saved_props: HEProps,
     vertex: Position,
     vertex_state: Status,
-    corner: CornerKind,
-    corner_state: Status,
+    vertex_kind: VertexKind,
     edge: EdgeKind,
-    edge_state: Status,
     // Calculated data
     s: Vec2,
     e: Vec2,
-    c: Vec2,
+    c: Option<Vec2>,
+    c_state: Status,
 }
 impl HalfEdge {
     const ANGLE_GUARD: f64 = 0.02;
     const VERTEX_GUARD: f64 = 2.;
     // const GRAB: f64 = 5.;
     const TOLERANCE: f64 = 0.01;
-    const MIN_FILLET_RADIUS: f64 = 2.;
+    pub const MIN_FILLET_RADIUS: f64 = 2.;
 
     pub fn new(v: Vec2, props: HEProps) -> Self {
-        // By default the corner is a point and the edge is a line segment
+        // By default the vertex_kind is a point and the edge is a line segment
         Self {
             props,
             saved_props: props,
             vertex: Position::new(v),
             vertex_state: Status::default(),
-            corner: CornerKind::Point {
+            vertex_kind: VertexKind::Point {
                 dummy: Value::new(10. * Self::MIN_FILLET_RADIUS),
             },
-            corner_state: Status::default(),
             edge: EdgeKind::Segment {
                 dum: Value::new(0.5), // The sagitta is half the segment length
             },
-            edge_state: Status::default(),
             s: v,
             e: v,
-            c: v,
+            c: None,
+            c_state: Status::default(),
         }
     }
     pub fn set_vertex_state(&mut self, hs: HS, value: bool) {
         if self.props.vertex_selectable {
             self.vertex_state.set_hs(hs, value);
-        }
-    }
-    pub fn set_corner_state(&mut self, hs: HS, value: bool) {
-        if self.props.corner_selectable {
-            self.corner_state.set_hs(hs, value);
-        }
-    }
-    pub fn set_edge_state(&mut self, hs: HS, value: bool) {
-        if self.props.edge_selectable {
-            self.edge_state.set_hs(hs, value);
         }
     }
     pub fn get_vertex_state(&self, hs: HS) -> bool {
@@ -206,55 +190,37 @@ impl HalfEdge {
     pub fn vertex_state(&self) -> Status {
         self.vertex_state
     }
-    pub fn get_corner_state(&self, hs: HS) -> bool {
-        self.corner_state.is_hs(hs)
+
+    pub fn set_c_state(&mut self, hs: HS, value: bool) {
+        self.c_state.set_hs(hs, value);
     }
-    pub fn get_edge_state(&self, hs: HS) -> bool {
-        self.edge_state.is_hs(hs)
+    pub fn get_c_state(&self, hs: HS) -> bool {
+        self.c_state.is_hs(hs)
     }
-    pub fn edge_state(&self) -> Status {
-        self.edge_state
+    pub fn c_state(&self) -> Status {
+        self.c_state
     }
 
     pub fn is_vertex_selectable(&self) -> bool {
         self.props.vertex_selectable
     }
-    pub fn is_vertex_changeable(&self) -> bool {
-        self.props.vertex_changeable
-    }
     pub fn is_vertex_movable(&self) -> bool {
         self.props.vertex_movable
     }
-
-    pub fn is_edge_selectable(&self) -> bool {
-        self.props.edge_selectable
+    pub fn is_vertex_magnetic(&self) -> bool {
+        self.props.vertex_magnetic
     }
-    pub fn is_edge_changeable(&self) -> bool {
-        self.props.edge_changeable
+    pub fn vertex_next_kind(&mut self) {
+        self.vertex_kind.next();
     }
-    pub fn is_edge_movable(&self) -> bool {
-        self.props.edge_movable
+    pub fn vertex_next_kind2(&mut self) {
+        self.vertex_kind.next2();
     }
-
-    pub fn is_corner_selectable(&self) -> bool {
-        self.props.corner_selectable
+    pub fn edge_set_arc(&mut self) {
+        self.edge.set_arc();
     }
-    pub fn is_corner_changeable(&self) -> bool {
-        self.props.corner_changeable
-    }
-    pub fn is_corner_movable(&self) -> bool {
-        self.props.corner_movable
-    }
-
-    pub fn corner_next_kind(&mut self) {
-        if self.props.corner_changeable {
-            self.corner.next();
-        }
-    }
-    pub fn edge_next_kind(&mut self) {
-        if self.props.edge_changeable {
-            self.edge.next();
-        }
+    pub fn edge_set_segment(&mut self) {
+        self.edge.set_segment();
     }
     pub fn get_edge_kind(&self) -> &EdgeKind {
         &self.edge
@@ -268,13 +234,13 @@ impl HalfEdge {
 
     pub fn save_vars(&mut self) {
         self.saved_props = self.props;
-        self.corner.save_vars();
+        self.vertex_kind.save_vars();
         self.edge.save_vars();
         self.vertex.saved_pos = self.vertex.pos;
     }
     pub fn restore_vars(&mut self) {
         self.props = self.saved_props;
-        self.corner.restore_vars();
+        self.vertex_kind.restore_vars();
         self.edge.restore_vars();
         self.vertex.pos = self.vertex.saved_pos;
     }
@@ -284,36 +250,31 @@ impl HalfEdge {
     pub fn get_e(&self) -> Vec2 {
         self.e
     }
-    pub fn get_c(&self) -> Vec2 {
+    pub fn get_c(&self) -> Option<Vec2> {
         self.c
     }
 
     // Update s, e, c data
     pub fn update_data(&mut self, vertex_prev: Vec2, edge_prev: EdgeKind, vertex_next: Vec2) {
-        use CornerKind::*;
         use EdgeKind::*;
-        match self.corner {
+        use VertexKind::*;
+        match self.vertex_kind {
             Point { dummy: _ } => {
                 self.s = self.vertex.pos;
                 self.e = self.vertex.pos;
-                self.c = self.vertex.pos;
+                self.c = None;
             }
             Chamfer { length } => match (edge_prev, self.edge) {
                 (Segment { dum: _ }, Segment { dum: _ }) => {
                     bissector(vertex_prev, self.vertex.pos, vertex_next).map(
-                        |(_b_dir, angle2, u_p, u_n)| {
+                        |(b_dir, angle2, u_p, u_n)| {
                             self.e = self.vertex.pos + u_n * length.value / 2. / angle2.sin();
                             self.s = self.vertex.pos + u_p * length.value / 2. / angle2.sin();
+                            self.c = Some(self.vertex.pos + b_dir * length.value / angle2.sin());
                         },
                     );
                 }
-                (Segment { dum: _ }, Arc { sag_rel: _ })
-                | (Arc { sag_rel: _ }, Segment { dum: _ })
-                | (Arc { sag_rel: _ }, Arc { sag_rel: _ }) => {
-                    self.s = self.vertex.pos;
-                    self.e = self.vertex.pos;
-                    self.c = self.vertex.pos;
-                }
+                _ => (),
             },
             Fillet { radius } => match (edge_prev, self.edge) {
                 (Segment { dum: _ }, Segment { dum: _ }) => {
@@ -321,39 +282,40 @@ impl HalfEdge {
                         |(b_dir, angle2, u_p, u_n)| {
                             self.e = self.vertex.pos + u_n * radius.value / angle2.tan();
                             self.s = self.vertex.pos + u_p * radius.value / angle2.tan();
-                            self.c = self.vertex.pos + b_dir * radius.value / angle2.sin();
+                            self.c = Some(self.vertex.pos + b_dir * radius.value / angle2.sin());
                         },
                     );
                 }
-                (Segment { dum: _ }, Arc { sag_rel: _ })
-                | (Arc { sag_rel: _ }, Segment { dum: _ })
-                | (Arc { sag_rel: _ }, Arc { sag_rel: _ }) => {
-                    self.s = self.vertex.pos;
-                    self.e = self.vertex.pos;
-                    self.c = self.vertex.pos;
-                }
+                _ => (),
             },
         }
     }
     pub fn get_vertex(&self) -> &Position {
         &self.vertex
     }
-    pub fn get_corner(&self) -> &CornerKind {
-        &self.corner
+    pub fn get_vertex_kind(&self) -> &VertexKind {
+        &self.vertex_kind
+    }
+    pub fn get_vertex_kind_mut(&mut self) -> &mut VertexKind {
+        &mut self.vertex_kind
     }
     pub fn get_edge(&self) -> &EdgeKind {
         &self.edge
     }
 
-    pub fn get_k_corner(&self) -> KShape {
-        use CornerKind::*;
-        match self.corner {
+    pub fn get_k_vertex_kind(&self) -> KShape {
+        use VertexKind::*;
+        match self.vertex_kind {
             Point { dummy: _ } => KShape::KPoint(self.vertex.pos.to_point()),
             Chamfer { length: _ } => {
                 KShape::KLine(kurbo::Line::new(self.s.to_point(), self.e.to_point()))
             }
-            Fillet { radius: _ } => arc_from_center_and_points(self.c, self.s, self.e)
-                .and_then(|arc| Some(KShape::KArc(arc)))
+            Fillet { radius: _ } => self
+                .c
+                .and_then(|c| {
+                    arc_from_center_and_points(c, self.s, self.e)
+                        .and_then(|arc| Some(KShape::KArc(arc)))
+                })
                 .unwrap_or(KShape::KPoint(self.vertex.pos.to_point())),
         }
     }
@@ -417,17 +379,10 @@ impl HalfEdge {
             )))
     }
     pub fn get_distance_to_vertex(&self, pos: Vec2) -> (f64, Vec2) {
-        ((self.get_vertex().pos - pos).hypot(), self.get_vertex().pos)
+        ((self.vertex.pos - pos).hypot(), self.get_vertex().pos)
     }
-    pub fn get_distance_to_corner(&self, pos: Vec2) -> Option<(f64, Vec2)> {
-        use KShape::*;
-        match self.get_k_corner() {
-            KPoint(_) => None,
-            KLine(line) => {
-                distance_and_projection_to_segment(line.p0.to_vec2(), line.p1.to_vec2(), pos, 0.)
-            }
-            KArc(arc) => distance_and_projection_to_arc(&arc, pos, Self::ANGLE_GUARD),
-        }
+    pub fn get_distance_to_c(&self, pos: Vec2) -> Option<(f64, Vec2)> {
+        self.c.and_then(|c| Some(((c - pos).hypot(), c)))
     }
     pub fn get_distance_to_edge(
         &self,
@@ -452,52 +407,62 @@ impl HalfEdge {
     pub fn set_vertex_pos(&mut self, pos: Vec2) {
         self.vertex.pos = pos;
     }
-    pub fn move_corner(&mut self, dpos: Vec2) {
-        use CornerKind::*;
-        match &mut self.corner {
-            Point { dummy: _ } => (),
-            Chamfer { length } => {
-                if let Some(sb) = SegBundle::new(self.s, self.e) {
-                    let dpos_proj: f64 = dpos.dot(sb.n());
-                    let mut new_length = length.saved_val + dpos_proj;
-                    if new_length < Self::MIN_FILLET_RADIUS {
-                        new_length = Self::MIN_FILLET_RADIUS;
-                    }
-                    length.value = new_length;
-                } else {
-                    return;
-                }
-            }
-            Fillet { radius } => {
-                if let Some(sb) = SegBundle::new(self.s, self.e) {
-                    let dpos_proj: f64 = dpos.dot(sb.n());
-                    let mut new_radius = radius.saved_val + dpos_proj;
-                    if new_radius < Self::MIN_FILLET_RADIUS {
-                        new_radius = Self::MIN_FILLET_RADIUS;
-                    }
-                    radius.value = new_radius;
-                } else {
-                    return;
-                }
-            }
-        };
-    }
 
-    fn corner_path_elements(&self) -> PrimitiveKindIter {
-        use KShape::*;
-        use PrimitiveKindIter::*;
-        match self.get_k_corner() {
-            KLine(line) => PLine(line.path_elements(Self::TOLERANCE)),
-            KArc(arc) => PArc(arc.path_elements(Self::TOLERANCE)),
-            KPoint(_) => PNone,
+    // pub fn move_vertex_kind(&mut self, dpos: Vec2) {
+    //     use VertexKind::*;
+    //     match &mut self.vertex_kind {
+    //         Point { dummy: _ } => (),
+    //         Chamfer { length } => {
+    //             if let Some(sb) = SegBundle::new(self.s, self.e) {
+    //                 let dpos_proj: f64 = dpos.dot(sb.n());
+    //                 let mut new_length = length.saved_val + dpos_proj;
+    //                 if new_length < Self::MIN_FILLET_RADIUS {
+    //                     new_length = Self::MIN_FILLET_RADIUS;
+    //                 }
+    //                 length.value = new_length;
+    //             } else {
+    //                 return;
+    //             }
+    //         }
+    //         Fillet { radius } => {
+    //             if let Some(sb) = SegBundle::new(self.s, self.e) {
+    //                 let dpos_proj: f64 = dpos.dot(sb.n());
+    //                 let mut new_radius = radius.saved_val + dpos_proj;
+    //                 if new_radius < Self::MIN_FILLET_RADIUS {
+    //                     new_radius = Self::MIN_FILLET_RADIUS;
+    //                 }
+    //                 radius.value = new_radius;
+    //             } else {
+    //                 return;
+    //             }
+    //         }
+    //     };
+    // }
+
+    pub fn get_c_control_paths_and_patterns(&self, scale: f64) -> (BezPath, Pattern) {
+        use VertexKind::*;
+        match self.vertex_kind {
+            Chamfer { length: _ } | Fillet { radius: _ } => self
+                .c
+                .and_then(|c| Some((point_path(c, scale), Pattern::Point)))
+                .unwrap_or((BezPath::new(), Pattern::Basic)),
+            Point { dummy: _ } => (BezPath::new(), Pattern::Basic),
         }
     }
-    pub fn get_corner_paths_and_patterns(&self) -> (BezPath, Pattern, Colors) {
-        (
-            self.corner_path_elements().collect(),
-            Pattern::Basic,
-            self.get_colors(self.corner_state),
-        )
+    pub fn get_vertex_kind_paths_and_patterns(&self) -> (BezPath, Pattern) {
+        use KShape::*;
+        use PrimitiveKindIter::*;
+        match self.get_k_vertex_kind() {
+            KLine(line) => (
+                PLine(line.path_elements(Self::TOLERANCE)).collect(),
+                Pattern::Basic,
+            ),
+            KArc(arc) => (
+                PArc(arc.path_elements(Self::TOLERANCE)).collect(),
+                Pattern::Basic,
+            ),
+            KPoint(_) => (PNone.collect(), Pattern::Basic),
+        }
     }
     fn edge_path_elements(&self, s_next: Vec2, v_next: Vec2) -> PrimitiveKindIter {
         use KShape::*;
@@ -508,43 +473,20 @@ impl HalfEdge {
             KPoint(_) => PNone,
         }
     }
-    pub fn get_edge_paths_and_patterns(
-        &self,
-        s_next: Vec2,
-        v_next: Vec2,
-    ) -> (BezPath, Pattern, Colors) {
+    pub fn get_edge_paths_and_patterns(&self, s_next: Vec2, v_next: Vec2) -> (BezPath, Pattern) {
         (
             self.edge_path_elements(s_next, v_next).collect(),
             Pattern::Basic,
-            self.get_colors(self.edge_state),
         )
     }
     pub fn get_prim_edge_paths_and_patterns(
         &self,
         s_next: Vec2,
         v_next: Vec2,
-    ) -> (BezPath, Pattern, Colors) {
+    ) -> (BezPath, Pattern) {
         (
             self.edge_path_elements(s_next, v_next).collect(),
             Pattern::Basic,
-            self.get_colors(self.edge_state),
         )
-    }
-    fn get_colors(&self, state: Status) -> Colors {
-        use HS::*;
-        match (state.is_hs(Select), state.is_hs(Highlight)) {
-            (true, _) => Colors {
-                color: Color::Gray,
-                fill_color: Color::Gray,
-            },
-            (false, false) => Colors {
-                color: Color::Gray,
-                fill_color: Color::Gray,
-            },
-            (false, true) => Colors {
-                color: Color::Gray,
-                fill_color: Color::Gray,
-            },
-        }
     }
 }

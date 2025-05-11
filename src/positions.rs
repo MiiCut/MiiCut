@@ -32,6 +32,7 @@ pub struct Pointer {
     pos: Vec2,
 
     snap: SnapValue,
+    snap_angle: SnapAngleValue,
     draw_scale: f64,
     active: bool,
     magnetized: bool,
@@ -43,6 +44,7 @@ impl Pointer {
             pos: Vec2::new(0., 0.),
 
             snap: SnapValue::Snap10,
+            snap_angle: SnapAngleValue::Snap5,
             draw_scale: 1.,
             active: false,
             magnetized: false,
@@ -77,6 +79,12 @@ impl Pointer {
     }
     pub fn get_snap(&self) -> SnapValue {
         self.snap
+    }
+    pub fn set_snap_angle(&mut self, snap_angle: SnapAngleValue) {
+        self.snap_angle = snap_angle;
+    }
+    pub fn get_snap_angle(&self) -> SnapAngleValue {
+        self.snap_angle
     }
     pub fn set_active(&mut self, active: bool) {
         self.active = active;
@@ -175,6 +183,22 @@ impl SnapValue {
             SnapValue::Snap1 => 1.,
             SnapValue::Snap5 => 5.,
             SnapValue::Snap10 => 10.,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum SnapAngleValue {
+    Snap1,
+    Snap5,
+    Snap10,
+}
+impl SnapAngleValue {
+    pub fn val(&self) -> f64 {
+        match self {
+            SnapAngleValue::Snap1 => 1.,
+            SnapAngleValue::Snap5 => 5.,
+            SnapAngleValue::Snap10 => 10.,
         }
     }
 }

@@ -3,7 +3,7 @@ use super::helpers::HelperKindvars;
 use crate::canvas::CanvasText;
 use crate::canvas::Colors;
 use crate::canvas::Pattern;
-use crate::dimensions::dim_linear;
+use crate::dimensions::dim_linear_angle;
 use crate::math::*;
 use crate::pools::HS;
 use crate::positions::Status;
@@ -53,6 +53,9 @@ impl ObjectsFuncs for HelperSegment {
     const GRAB_RADIUS: f64 = 5.;
     type Kindvars = HelperKindvars;
 
+    fn tab(&mut self) -> bool {
+        false
+    }
     fn save_vars(&mut self) {
         self.bdl_saved = self.bdl;
     }
@@ -121,7 +124,6 @@ impl ObjectsFuncs for HelperSegment {
     fn contains_pointer(&self, _pointer: &Pointer) -> bool {
         false
     }
-
     fn move_position(&mut self, pointer: &mut Pointer, _keys_states: KeysStates) -> bool {
         let mut set = self.bdl.try_set_s(snap_pt(
             self.bdl_saved.s() + pointer.dpos(),
@@ -134,9 +136,11 @@ impl ObjectsFuncs for HelperSegment {
         set
     }
     fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
+        let snap = pointer.get_snap().val();
+        let snap_angle = pointer.get_snap_angle().val();
         if self.state_start.is_hs(HS::Select) {
             if !pointer.is_magnetized() {
-                let s = snap_length(self.bdl.e(), pointer.pos(), pointer.get_snap().val());
+                let s = snap_length_and_angle(self.bdl.e(), pointer.pos(), snap, snap_angle);
                 return self.bdl.try_set_s(s);
             } else {
                 return self.bdl.try_set_s(pointer.pos());
@@ -144,7 +148,7 @@ impl ObjectsFuncs for HelperSegment {
         }
         if self.state_end.is_hs(HS::Select) {
             if !pointer.is_magnetized() {
-                let e = snap_length(self.bdl.s(), pointer.pos(), pointer.get_snap().val());
+                let e = snap_length_and_angle(self.bdl.s(), pointer.pos(), snap, snap_angle);
                 return self.bdl.try_set_e(e);
             } else {
                 return self.bdl.try_set_e(pointer.pos());
@@ -152,11 +156,12 @@ impl ObjectsFuncs for HelperSegment {
         }
         false
     }
-
     fn get_position(&self) -> Vec2 {
         self.bdl.m()
     }
-
+    fn get_centroid(&self) -> Vec<Vec2> {
+        vec![]
+    }
     fn get_controls_paths_and_patterns(
         &self,
         _das: &Size,
@@ -180,7 +185,7 @@ impl ObjectsFuncs for HelperSegment {
         _: &Size,
         cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern, Colors, Vec<CanvasText>)> {
-        vec![dim_linear(self.bdl, cinfo, self.state)]
+        vec![dim_linear_angle(self.bdl, cinfo, self.state)]
     }
     fn get_paths_and_patterns(
         &self,

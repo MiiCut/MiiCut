@@ -1,9 +1,8 @@
 use crate::{
-    canvas::{CanvasText, CanvasTextConfig, Color, Colors, Pattern, TextAlign, TextPos},
+    canvas::{CanvasText, CanvasTextConfig, Colors, Pattern, TextAlign, TextPos},
     math::*,
-    pools::HS,
     positions::Status,
-    prefab::get_dim_colors,
+    prefab::{get_dim_colors, get_dim_text_colors},
 };
 use kurbo::{BezPath, Rect, Vec2};
 use std::f64::consts::PI;
@@ -14,7 +13,7 @@ pub fn dim_linear(
     state: Status,
 ) -> (BezPath, Pattern, Colors, Vec<CanvasText>) {
     use Pattern::*;
-    let dim_offset = 10. / cinfo.1;
+    let dim_offset = 15. / cinfo.1;
     let mut path = BezPath::new();
     let (angle, txt_off) = if bdl.a() > -PI / 2. && bdl.a() < PI / 2. {
         (bdl.a(), 1.5)
@@ -24,7 +23,13 @@ pub fn dim_linear(
     let text = CanvasText::new(
         format!("{:.1}", bdl.len()),
         TextPos::PosCustom(bdl.m() - bdl.n() * (txt_off * dim_offset)),
-        CanvasTextConfig::new(Color::Black, angle, TextAlign::Center, 14, 0.8),
+        CanvasTextConfig::new(
+            get_dim_text_colors(state).color,
+            angle,
+            TextAlign::Center,
+            14,
+            0.8,
+        ),
     );
     let s = bdl.s() - bdl.n() * dim_offset;
     let e = bdl.e() - bdl.n() * dim_offset;
@@ -32,6 +37,45 @@ pub fn dim_linear(
     line(&mut path, s, e);
     arrow(&mut path, e, -bdl.u(), dim_offset);
     (path, Dim, get_dim_colors(state), vec![text])
+}
+
+pub fn dim_linear_angle(
+    bdl: SegBundle,
+    cinfo: (Rect, f64, Vec2),
+    state: Status,
+) -> (BezPath, Pattern, Colors, Vec<CanvasText>) {
+    use Pattern::*;
+    let dim_offset = 15. / cinfo.1;
+    let mut path = BezPath::new();
+    let (angle, txt_off) = if bdl.a() >= -PI / 2. && bdl.a() < PI / 2. {
+        (bdl.a(), 1.5)
+    } else {
+        (bdl.a() - PI, 2.5)
+    };
+    let angle_clip90 = angle0_90(bdl.a());
+    let text = if angle_clip90 < EPSILON || (angle_clip90 - PI / 2.).abs() < EPSILON {
+        format!("{:.1}mm", bdl.len())
+    } else {
+        format!("{:.0}° - {:.1}mm", angle_clip90 / PI * 180., bdl.len())
+    };
+
+    let canvas_text = CanvasText::new(
+        text,
+        TextPos::PosCustom(bdl.m() - bdl.n() * (txt_off * dim_offset)),
+        CanvasTextConfig::new(
+            get_dim_text_colors(state).color,
+            angle,
+            TextAlign::Center,
+            14,
+            0.8,
+        ),
+    );
+    let s = bdl.s() - bdl.n() * dim_offset;
+    let e = bdl.e() - bdl.n() * dim_offset;
+    arrow(&mut path, s, bdl.u(), dim_offset);
+    line(&mut path, s, e);
+    arrow(&mut path, e, -bdl.u(), dim_offset);
+    (path, Dim, get_dim_colors(state), vec![canvas_text])
 }
 
 pub fn dim_radius(
@@ -50,7 +94,13 @@ pub fn dim_radius(
     let text = CanvasText::new(
         format!("R: {:.1}", bdl.len()),
         TextPos::PosCustom(bdl.m() - bdl.n() * (txt_off * dim_offset)),
-        CanvasTextConfig::new(Color::Black, angle, TextAlign::Center, 14, 0.8),
+        CanvasTextConfig::new(
+            get_dim_text_colors(state).color,
+            angle,
+            TextAlign::Center,
+            14,
+            0.8,
+        ),
     );
     let s = bdl.s(); // - bdl.n * dim_offset;
     let e = bdl.e(); // - bdl.n * dim_offset;

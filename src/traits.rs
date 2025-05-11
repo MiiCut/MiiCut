@@ -43,6 +43,7 @@ pub trait ObjectsFuncs: Debug + Clone {
     const GRAB_RADIUS: f64;
     type Kindvars;
 
+    fn tab(&mut self) -> bool;
     fn save_vars(&mut self);
     fn restore_vars(&mut self);
     fn get_vars(&self) -> Self::Kindvars;
@@ -56,10 +57,10 @@ pub trait ObjectsFuncs: Debug + Clone {
         set: SetEntityStateFromPos,
     ) -> bool;
     fn contains_pointer(&self, pointer: &Pointer) -> bool;
-
     fn move_position(&mut self, pointer: &mut Pointer, keys_states: KeysStates) -> bool;
     fn move_controls(&mut self, pointer: &Pointer, keys_states: KeysStates) -> bool;
     fn get_position(&self) -> Vec2;
+    fn get_centroid(&self) -> Vec<Vec2>;
     fn get_paths_and_patterns(
         &self,
         das: &Size,

@@ -8,17 +8,19 @@ use web_sys::{window, Document, Element, Event, EventTarget, HtmlElement, MouseE
 pub enum IconsShapes {
     Disc,
     Rectangle,
+    RectangleFillet,
     Custom,
-    Tube,
+    Oblong,
 }
 impl IconsShapes {
     pub fn id(&self) -> &'static str {
         use IconsShapes::*;
         match self {
             Disc => "icon-circle",
-            Rectangle => "icon-rectangle-rounded",
+            Rectangle => "icon-rectangle",
+            RectangleFillet => "icon-rectangle-fillet",
             Custom => "icon-custom",
-            Tube => "icon-tube",
+            Oblong => "icon-oblong",
         }
     }
 }
@@ -40,8 +42,6 @@ impl IconsConstruction {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Icons {
     Arrow,
-    Selection,
-    Scissors,
     IShapes(IconsShapes),
     IHelpers(IconsConstruction),
 }
@@ -50,8 +50,6 @@ impl Icons {
         use Icons::*;
         match self {
             Arrow => "icon-arrow",
-            Selection => "icon-selection",
-            Scissors => "icon-scissors",
             IShapes(ishape) => ishape.id(),
             IHelpers(iconstruct) => iconstruct.id(),
         }
@@ -302,6 +300,10 @@ pub enum Keys {
     Backspace,
     Enter,
     Escape,
+    #[strum(serialize = "a")]
+    ALower,
+    #[strum(serialize = "A")]
+    AUpper,
     #[strum(serialize = "c")]
     CLower,
     #[strum(serialize = "v")]
