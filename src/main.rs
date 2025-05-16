@@ -5,6 +5,13 @@ macro_rules! log {
         web_sys::console::log_1(&format!( $( $t )* ).into())
     }
 }
+macro_rules! init_element {
+    ($doc:expr, $id:expr, $ty:ty) => {{
+        $doc.get_element_by_id($id)
+            .expect(concat!("missing ", $id))
+            .dyn_into::<$ty>()?
+    }};
+}
 pub mod canvas;
 pub mod clipboard;
 pub mod curves;
@@ -96,12 +103,6 @@ struct AppVars {
     canvases: Canvases,
     user_icons: HashSet<Icons>,
     tooltip: HtmlElement,
-    settings_panel: HtmlElement,
-    modal_backdrop: HtmlElement,
-    apply_settings_button: HtmlElement,
-    settings_width_input: HtmlInputElement,
-    settings_height_input: HtmlInputElement,
-
     icon_selected: Icons,
     keys_states: KeysStates,
     mouse: Mouse,
@@ -253,48 +254,15 @@ impl AppVars {
 fn create_app_vars(window: Window) -> Result<(), JsValue> {
     log!("Creating application variables");
     let document = window.document().expect("should have a document on window");
-    let c_draw = document
-        .get_element_by_id("mainCanvas")
-        .expect("should have mainCanvas on the page")
-        .dyn_into::<HtmlCanvasElement>()?;
-    let c_grid = document
-        .get_element_by_id("gridCanvas")
-        .expect("should have gridCanvas on the page")
-        .dyn_into::<HtmlCanvasElement>()?;
-    let c_back = document
-        .get_element_by_id("backgroundCanvas")
-        .expect("should have backgroundCanvas on the page")
-        .dyn_into::<HtmlCanvasElement>()?;
-    let tooltip = document
-        .get_element_by_id("tooltip")
-        .expect("should have tooltip on the page")
-        .dyn_into::<HtmlElement>()?;
-    let settings_panel = document
-        .get_element_by_id("settingsPanel")
-        .expect("should have settingsPanel on the page")
-        .dyn_into::<HtmlElement>()?;
-    let modal_backdrop = document
-        .get_element_by_id("modalBackdrop")
-        .expect("should have modalBackdrop on the page")
-        .dyn_into::<HtmlElement>()?;
-    let apply_settings_button = document
-        .get_element_by_id("applyWorksheetSettings")
-        .expect("should have applyWorksheetSettings on settingsPanel")
-        .dyn_into::<HtmlElement>()?;
-    let settings_width_input: HtmlInputElement = document
-        .get_element_by_id("worksheetWidthInput")
-        .expect("should have settings_width_input on settingsPanel")
-        .dyn_into()?;
-    let settings_height_input: HtmlInputElement = document
-        .get_element_by_id("worksheetHeightInput")
-        .expect("should have settings_height_input on settingsPanel")
-        .dyn_into()?;
-
+    let c_draw: HtmlCanvasElement = init_element!(document, "mainCanvas", HtmlCanvasElement);
+    let c_grid: HtmlCanvasElement = init_element!(document, "gridCanvas", HtmlCanvasElement);
+    let c_back: HtmlCanvasElement = init_element!(document, "backgroundCanvas", HtmlCanvasElement);
+    let tooltip: HtmlElement = init_element!(document, "tooltip", HtmlElement);
+    let settings_panel: HtmlElement = init_element!(document, "settingsPanel", HtmlElement);
+    let modal_backdrop: HtmlElement = init_element!(document, "modalBackdrop", HtmlElement);
+    let left_panel: HtmlElement = init_element!(document, "left-panel", HtmlElement);
+    let top_menu: HtmlElement = init_element!(document, "top-menu", HtmlElement);
     let canvases = Canvases::new(c_back, c_grid, c_draw, Size::new(3000., 1500.))?;
-
-    let wa_size = canvases.get_drawing_size();
-    settings_width_input.set_value(&wa_size.width.to_string());
-    settings_height_input.set_value(&wa_size.height.to_string());
 
     let mut user_icons: HashSet<Icons> = HashSet::new();
     use Icons::*;
@@ -307,12 +275,6 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     user_icons.insert(IShapes(Custom));
     user_icons.insert(IHelpers(IconsConstruction::Line));
     user_icons.insert(IHelpers(IconsConstruction::Circle));
-
-    let left_panel = document
-        .get_element_by_id("left-panel")
-        .unwrap()
-        .dyn_into()?;
-    let top_menu = document.get_element_by_id("top-menu").unwrap().dyn_into()?;
 
     let app_vars = Rc::new(RefCell::new(AppVars {
         pools: Pools::new(),
@@ -327,12 +289,6 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
         //
         user_icons,
         tooltip,
-        settings_panel,
-        modal_backdrop,
-        apply_settings_button,
-        settings_width_input,
-        settings_height_input,
-
         icon_selected: Icons::Arrow,
         keys_states: KeysStates::default(),
         mouse: Mouse::new(),
@@ -342,7 +298,6 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     init_menu(app_vars.clone())?;
     // init_context_menu(app_vars.clone())?;
     init_icons(app_vars.clone())?;
-    init_settings_panel(app_vars.clone())?;
     init_status(app_vars.clone())?;
     init_canvas(app_vars.clone())?;
     init_window(app_vars.clone())?;
@@ -412,22 +367,7 @@ fn init_window(av: RefAV) -> Result<(), JsValue> {
 
     Ok(())
 }
-fn init_settings_panel(av: RefAV) -> Result<(), JsValue> {
-    let pam = av.borrow_mut();
-    set_callback(
-        av.clone(),
-        "click".into(),
-        &pam.apply_settings_button,
-        Box::new(on_apply_settings_click),
-    )?;
-    set_callback(
-        av.clone(),
-        "click".into(),
-        &pam.modal_backdrop,
-        Box::new(on_modal_backdrop_click),
-    )?;
-    Ok(())
-}
+
 fn init_icons(av: RefAV) -> Result<(), JsValue> {
     let avb = av.borrow_mut();
     for icon in avb.user_icons.iter() {
@@ -1187,42 +1127,6 @@ fn on_context_menu(_av: RefAV, event: Event) {
 //     // Add a click listener to the new item
 //     add_click_listener(&new_item, callback);
 // }
-
-///////////////
-/// Settings panel events
-fn on_apply_settings_click(av: RefAV, _event: Event) {
-    let mut pam = av.borrow_mut();
-    let width_str = pam.settings_width_input.value();
-    let height_str = pam.settings_height_input.value();
-    let _width: f64 = width_str.parse().unwrap_or(0.0);
-    let _height: f64 = height_str.parse().unwrap_or(0.0);
-    pam.settings_panel
-        .style()
-        .set_property("display", "none")
-        .unwrap();
-    pam.modal_backdrop
-        .style()
-        .set_property("display", "none")
-        .unwrap();
-
-    render_drawing(&mut pam);
-    drop(pam);
-}
-fn on_modal_backdrop_click(av: RefAV, _event: Event) {
-    let pam = av.borrow_mut();
-    pam.settings_panel
-        .style()
-        .set_property("display", "none")
-        .unwrap();
-    pam.modal_backdrop
-        .style()
-        .set_property("display", "none")
-        .unwrap();
-    pam.settings_width_input
-        .set_value(&pam.canvases.get_drawing_size().width.to_string());
-    pam.settings_height_input
-        .set_value(&pam.canvases.get_drawing_size().height.to_string());
-}
 
 ///////////////
 // Window events
