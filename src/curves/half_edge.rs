@@ -4,9 +4,8 @@ use crate::{
         arc_from_center_and_points, bissector, circle_from_three_points,
         distance_and_projection_to_arc, distance_and_projection_to_segment, SegBundle,
     },
-    pools::HS,
-    positions::{Position, Status, Value},
     prefab::point_path,
+    types::{Position, Status, Value, HS},
 };
 use kurbo::{ArcAppendIter, BezPath, CubicBezIter, LinePathIter, PathEl, QuadBezIter, Shape, Vec2};
 use std::f64::consts::PI;

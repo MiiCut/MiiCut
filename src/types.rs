@@ -1,5 +1,43 @@
-use crate::pools::HS;
 use kurbo::Vec2;
+
+#[derive(Debug, Clone)]
+pub struct VecRing<T> {
+    pub vec: Vec<T>,
+}
+impl<T> VecRing<T> {
+    pub fn from_element(e: T) -> Self {
+        Self { vec: vec![e] }
+    }
+    pub fn get(&self, idx: i64) -> &T {
+        let len = self.vec.len() as i64;
+        let i = idx.rem_euclid(len) as usize;
+        &self.vec[i]
+    }
+    pub fn get_mut(&mut self, idx: i64) -> &mut T {
+        let len = self.vec.len() as i64;
+        let i = idx.rem_euclid(len) as usize;
+        &mut self.vec[i]
+    }
+    pub fn push(&mut self, e: T) {
+        self.vec.push(e);
+    }
+    pub fn replace_first(&mut self, e: T) {
+        self.vec[0] = e;
+    }
+    pub fn last_mut(&mut self) -> &mut T {
+        let len1 = self.vec.len() - 1;
+        &mut self.vec[len1]
+    }
+    pub fn len(&self) -> usize {
+        self.vec.len()
+    }
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+        self.vec.iter()
+    }
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
+        self.vec.iter_mut()
+    }
+}
 
 #[derive(Copy, Debug, Clone)]
 pub struct Minimum {
@@ -26,78 +64,9 @@ impl Minimum {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Pointer {
-    // Pointer position
-    pos_saved: Vec2,
-    pos: Vec2,
-
-    snap: SnapValue,
-    snap_angle: SnapAngleValue,
-    draw_scale: f64,
-    active: bool,
-    magnetized: bool,
-}
-impl Pointer {
-    pub fn new() -> Self {
-        Self {
-            pos_saved: Vec2::new(0., 0.),
-            pos: Vec2::new(0., 0.),
-
-            snap: SnapValue::Snap10,
-            snap_angle: SnapAngleValue::Snap5,
-            draw_scale: 1.,
-            active: false,
-            magnetized: false,
-        }
-    }
-    pub fn dpos(&self) -> Vec2 {
-        self.pos - self.pos_saved
-    }
-    pub fn pos(&self) -> Vec2 {
-        self.pos
-    }
-    pub fn pos_saved(&self) -> Vec2 {
-        self.pos_saved
-    }
-    pub fn set_pos(&mut self, pos: Vec2) {
-        self.pos = pos;
-    }
-    pub fn set_pos_rel(&mut self, dpos: Vec2) {
-        self.pos = self.pos_saved + dpos;
-    }
-    pub fn save_pos(&mut self) {
-        self.pos_saved = self.pos;
-    }
-    pub fn set_draw_scale(&mut self, scale: f64) {
-        self.draw_scale = scale;
-    }
-    pub fn get_draw_scale(&self) -> f64 {
-        self.draw_scale
-    }
-    pub fn set_snap(&mut self, snap: SnapValue) {
-        self.snap = snap;
-    }
-    pub fn get_snap(&self) -> SnapValue {
-        self.snap
-    }
-    pub fn set_snap_angle(&mut self, snap_angle: SnapAngleValue) {
-        self.snap_angle = snap_angle;
-    }
-    pub fn get_snap_angle(&self) -> SnapAngleValue {
-        self.snap_angle
-    }
-    pub fn set_active(&mut self, active: bool) {
-        self.active = active;
-    }
-    pub fn is_active(&self) -> bool {
-        self.active
-    }
-    pub fn set_magnetized(&mut self, magnetized: bool) {
-        self.magnetized = magnetized;
-    }
-    pub fn is_magnetized(&self) -> bool {
-        self.magnetized
-    }
+pub enum HS {
+    Highlight,
+    Select,
 }
 
 #[derive(Default, Copy, Clone, Debug, PartialEq)]

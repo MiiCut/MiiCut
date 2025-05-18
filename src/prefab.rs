@@ -1,7 +1,6 @@
 use crate::{
     canvas::{Color, Colors},
-    pools::HS,
-    positions::Status,
+    types::{Status, HS},
 };
 use kurbo::{BezPath, Circle, PathEl, Shape, Vec2};
 

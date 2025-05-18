@@ -1,8 +1,8 @@
 use crate::{
     canvas::{CanvasText, CanvasTextConfig, Colors, Pattern, TextAlign, TextPos},
     math::*,
-    positions::Status,
     prefab::{get_dim_colors, get_dim_text_colors},
+    types::Status,
 };
 use kurbo::{BezPath, Rect, Vec2};
 use std::f64::consts::PI;

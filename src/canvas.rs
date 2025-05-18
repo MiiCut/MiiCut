@@ -692,9 +692,6 @@ impl Canvases {
             self.drawing_offset,
         );
     }
-    pub fn get_drawing_offset_saved(&mut self) -> Vec2 {
-        self.drawing_offset_saved
-    }
     pub fn save_drawing_offset(&mut self) {
         self.drawing_offset_saved = self.drawing_offset
     }

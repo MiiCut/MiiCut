@@ -1,56 +1,18 @@
-use super::shapes::ShapeKind;
 use crate::{
     canvas::{CanvasText, Colors, Pattern},
     curves::half_edge::{EdgeKind, HEProps, HalfEdge, VertexKind},
     dimensions::{dim_linear, dim_linear_angle},
     math::*,
-    pools::HS,
-    positions::{Status, Value},
     prefab::*,
-    GetEntityState, KeysStates, ObjectsFuncs, Pointer, SetEntityState, SetEntityStateFromPos,
+    shapes::drawable::HS,
+    types::{Status, Value, VecRing},
+    KeysStates, Pointer,
 };
 use geo::{LineString, Polygon};
 use kurbo::{BezPath, PathEl, Point, Rect, Shape, Size, Vec2};
 use std::{fmt::Display, vec};
 
-#[derive(Debug, Clone)]
-pub struct VecRing<T> {
-    vec: Vec<T>,
-}
-impl<T> VecRing<T> {
-    pub fn from_element(e: T) -> Self {
-        Self { vec: vec![e] }
-    }
-    pub fn get(&self, idx: i64) -> &T {
-        let len = self.vec.len() as i64;
-        let i = idx.rem_euclid(len) as usize;
-        &self.vec[i]
-    }
-    pub fn get_mut(&mut self, idx: i64) -> &mut T {
-        let len = self.vec.len() as i64;
-        let i = idx.rem_euclid(len) as usize;
-        &mut self.vec[i]
-    }
-    pub fn push(&mut self, e: T) {
-        self.vec.push(e);
-    }
-    pub fn replace_first(&mut self, e: T) {
-        self.vec[0] = e;
-    }
-    pub fn last_mut(&mut self) -> &mut T {
-        let len1 = self.vec.len() - 1;
-        &mut self.vec[len1]
-    }
-    pub fn len(&self) -> usize {
-        self.vec.len()
-    }
-    pub fn iter(&self) -> std::slice::Iter<'_, T> {
-        self.vec.iter()
-    }
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
-        self.vec.iter_mut()
-    }
-}
+use super::drawable::Drawable;
 
 #[derive(Debug, Clone)]
 enum PolyKind {
@@ -73,8 +35,7 @@ impl ShapePolygon {
     pub const MIN_OBLONG_WIDTH: f64 = 2.;
     pub const START_OBLONG_WIDTH: f64 = 40.;
 
-    pub fn new_rectangle(hes_prim: VecRing<HalfEdge>) -> Option<ShapeKind> {
-        use ShapeKind::*;
+    pub fn new_rectangle(hes_prim: VecRing<HalfEdge>) -> Option<ShapePolygon> {
         (hes_prim.len() == 2).then(|| {
             let tmp1 = hes_prim.get(0).get_vertex().pos;
             let tmp2 = hes_prim.get(1).get_vertex().pos;
@@ -99,11 +60,10 @@ impl ShapePolygon {
             shape_polygon.update_all();
             log!("area: {}", shape_polygon.area());
             log!("new_rectangle");
-            KindPolygon(shape_polygon)
+            shape_polygon
         })
     }
-    pub fn new_rectangle_filleted(hes_prim: VecRing<HalfEdge>) -> Option<ShapeKind> {
-        use ShapeKind::*;
+    pub fn new_rectangle_filleted(hes_prim: VecRing<HalfEdge>) -> Option<ShapePolygon> {
         (hes_prim.len() == 2).then(|| {
             let tmp1 = hes_prim.get(0).get_vertex().pos;
             let tmp2 = hes_prim.get(1).get_vertex().pos;
@@ -128,11 +88,10 @@ impl ShapePolygon {
             shape_polygon.update_all();
             log!("area: {}", shape_polygon.area());
             log!("new_rectangle filleted");
-            KindPolygon(shape_polygon)
+            shape_polygon
         })
     }
-    pub fn new_oblong(mut hes_prim: VecRing<HalfEdge>) -> Option<ShapeKind> {
-        use ShapeKind::*;
+    pub fn new_oblong(mut hes_prim: VecRing<HalfEdge>) -> Option<ShapePolygon> {
         hes_prim.len().eq(&2).then(|| {
             // Create the width control
             SegBundle::new(
@@ -175,12 +134,11 @@ impl ShapePolygon {
                 shape_polygon.update_all();
                 log!("area: {}", shape_polygon.area());
                 log!("new_oblong");
-                KindPolygon(shape_polygon)
+                shape_polygon
             })
         })?
     }
-    pub fn new_custom(mut hes: VecRing<HalfEdge>) -> Option<ShapeKind> {
-        use ShapeKind::*;
+    pub fn new_custom(mut hes: VecRing<HalfEdge>) -> Option<ShapePolygon> {
         if hes.len() < 3 {
             return None;
         }
@@ -199,7 +157,7 @@ impl ShapePolygon {
         };
         log!("area: {}", shape_polygon.area());
         shape_polygon.update_all();
-        Some(KindPolygon(shape_polygon))
+        Some(shape_polygon)
     }
 
     fn update_oblong_edges(&mut self) -> bool {
@@ -391,11 +349,14 @@ impl ShapePolygon {
         self.polygon.clone()
     }
 }
+
 impl Display for ShapePolygon {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Polygon")
     }
 }
+impl Drawable for ShapePolygon {}
+
 impl Shape for ShapePolygon {
     type PathElementsIter<'iter> = PolygonIter;
 
@@ -462,7 +423,7 @@ impl Shape for ShapePolygon {
 impl ObjectsFuncs for ShapePolygon {
     const TOLERANCE: f64 = 0.01;
     const GRAB_RADIUS: f64 = 10.;
-    type Kindvars = ShapeKind;
+    type Kindvars = ShapePolygon;
 
     fn tab(&mut self) -> bool {
         log!("tab");
@@ -501,26 +462,23 @@ impl ObjectsFuncs for ShapePolygon {
             }
         }
     }
-    fn get_vars(&self) -> ShapeKind {
-        ShapeKind::KindPolygon(ShapePolygon {
+    fn get_vars(&self) -> ShapePolygon {
+        ShapePolygon {
             kind: self.kind.clone(),
             hes_prim: self.hes_prim.clone(),
             hes: self.hes.clone(),
             state: Status::default(),
             segs: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
-        })
-    }
-    fn set_vars(&mut self, shape_kind: &ShapeKind) {
-        if let ShapeKind::KindPolygon(shape_polygon) = shape_kind {
-            self.kind = shape_polygon.kind.clone();
-            self.hes = shape_polygon.hes.clone();
-            self.hes_prim = shape_polygon.hes_prim.clone();
         }
+    }
+    fn set_vars(&mut self, polygon: &ShapePolygon) {
+        self.kind = polygon.kind.clone();
+        self.hes = polygon.hes.clone();
+        self.hes_prim = polygon.hes_prim.clone();
     }
 
     fn get_state(&self, get: GetEntityState) -> bool {
-        use GetEntityState::*;
         match get {
             IsHS(hs) => self.state.is_hs(hs),
             IsAControlHS(hs) => {
@@ -544,7 +502,6 @@ impl ObjectsFuncs for ShapePolygon {
         }
     }
     fn set_state(&mut self, set: SetEntityState) {
-        use SetEntityState::*;
         match set {
             SetHS(hs, value) => self.state.set_hs(hs, value),
             SetAllControlsHS(hs, state) => {
@@ -566,7 +523,6 @@ impl ObjectsFuncs for ShapePolygon {
         keys_states: KeysStates,
         set: SetEntityStateFromPos,
     ) -> bool {
-        use SetEntityStateFromPos::*;
         match set {
             SetHSFromPos(hs) => {
                 let state = self.contains(pointer.pos().to_point());
@@ -618,7 +574,7 @@ impl ObjectsFuncs for ShapePolygon {
     }
     fn move_controls(&mut self, pointer: &Pointer, _keys_states: KeysStates) -> bool {
         use PolyKind::*;
-        use HS::*;
+
         let snap = pointer.get_snap().val();
         let snap_angle = pointer.get_snap_angle().val();
         /*
@@ -927,7 +883,6 @@ impl ObjectsFuncs for ShapePolygon {
         _size: &Size,
         cinfo: (Rect, f64, Vec2),
     ) -> Vec<(BezPath, Pattern, Colors, Vec<CanvasText>)> {
-        use GetEntityState::*;
         use PolyKind::*;
         use HS::*;
         let mut res = vec![];

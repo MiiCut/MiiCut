@@ -1,6 +1,11 @@
+macro_rules! log {
+    ( $( $t:tt )* ) => {
+        web_sys::console::log_1(&format!( $( $t )* ).into())
+    }
+}
 use crate::curves::half_edge::HalfEdge;
-use crate::shapes::shape_polygon::VecRing;
-use crate::shapes::shapes_pool::BSid;
+use crate::nodes::NodUId;
+use crate::types::VecRing;
 use approx::*;
 use geo::{LineString, Polygon};
 use kurbo::{
@@ -43,7 +48,7 @@ const THREAS_ANGLE: f64 = 2. / 180. * PI;
 #[derive(Debug)]
 pub enum MyError {
     NoShapeSelected,
-    NoClosedShapeForCShid(BSid),
+    NoClosedShapeForCShid(NodUId),
     Inconsistent,
     Impossible,
     ShapesFull,
