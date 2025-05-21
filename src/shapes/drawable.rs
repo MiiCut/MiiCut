@@ -6,7 +6,7 @@
 // }
 use crate::{math::EPSILON, types::Value};
 use geo::Polygon;
-use kurbo::{BezPath, Vec2};
+use kurbo::{BezPath, Shape, Vec2};
 use std::{
     fmt::{Debug, Display},
     sync::atomic::{AtomicUsize, Ordering},
@@ -14,11 +14,14 @@ use std::{
 };
 
 pub trait Drawable: Clone + 'static {
+    const TOLERANCE: f64;
+
     fn op_next(&mut self);
     fn op_union(&mut self);
     fn op_force_union(&mut self);
     fn op_difference(&mut self);
     fn move_vertex(&mut self, value_uid: ValueUId, delta: Vec2) -> Vec<ValueUId>;
+    fn get_paths_and_patterns(&self) -> BezPath;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -72,6 +75,8 @@ pub struct Shapes {
     polygon: Polygon<f64>,
 }
 impl Drawable for Shapes {
+    const TOLERANCE: f64 = 0.01;
+
     fn op_next(&mut self) {
         self.operation.next();
     }
@@ -202,6 +207,30 @@ impl Drawable for Shapes {
                 };
                 self.vertices[idx].1.add(delta);
                 return vec![self.vertices[idx].0];
+            }
+        }
+    }
+    fn get_paths_and_patterns(&self) -> BezPath {
+        match self.shape_type {
+            ShapeType::Disc => {
+                let center = self.vertices[0].1.curr;
+                let radius = (self.vertices[1].1.curr - center).hypot();
+                kurbo::Circle::new(center.to_point(), radius).to_path(Self::TOLERANCE)
+            }
+            ShapeType::Rectangle | ShapeType::Polygon => {
+                let mut path = BezPath::new();
+                for (i, (uid, value)) in self.vertices.iter().enumerate() {
+                    if i == 0 {
+                        path.move_to(value.curr.to_point());
+                    } else {
+                        path.line_to(value.curr.to_point());
+                    }
+                }
+                path.close_path();
+                path
+            }
+            ShapeType::Oblong => {
+                //
             }
         }
     }

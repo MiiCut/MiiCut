@@ -107,7 +107,7 @@ impl<E: Drawable> AppVars<E> {
     }
     fn tab_pressed(&mut self) {
         if let Icons::Arrow = self.icon_selected.clone() {
-            for id in self.set.nodes_state.get_selected_nodes().iter() {
+            for id in self.set.nodes_selected.clone().iter() {
                 if let Some(node) = self.set.get_mut(*id) {
                     node.element.op_next();
                 }
@@ -757,8 +757,8 @@ fn on_icon_click<E: Drawable>(av: RefAV<E>, event: Event) {
                 if let Some(icon) = avb.user_icons.iter().find(|&&k| k.id() == id).cloned() {
                     avb.icon_selected = icon;
                     avb.on_creation = None;
-                    avb.set.nodes_state.clr_all_highlighted();
-                    avb.set.nodes_state.clr_all_selected();
+                    avb.set.nodes_highlighted.clear();
+                    avb.set.nodes_selected.clear();
                     avb.user_icons
                         .iter()
                         .for_each(|icon| avb.html_deselect_icons(*icon));
@@ -819,7 +819,8 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     // Get the Performance API
     // let performance = window().unwrap().performance().unwrap();
     // let start_time = performance.now();
-    avb.set.recalc_full_segs();
+
+    // avb.set.recalc_full_segs();
 
     let scale = avb.canvases.get_drawing_scale();
     avb.canvases.clear_main_canvas();
@@ -831,19 +832,19 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
         avb.canvases.draw_pointer(avb.userui.pointer.curr);
     }
 
-    // SHAPES: Draw the final contour
-    let full_segs = avb.set.shapes.get_full_segs();
-    avb.canvases.draw_closed_path(
-        &CanvasKind::Draw,
-        full_segs,
-        Pattern::Composed(true),
-        get_final_contour_colors(Status::default()).color,
-        get_final_contour_colors(Status::default()).fill_color,
-        vec![],
-    );
+    // Draw the final contour
+    // let full_segs = avb.set.shapes.get_full_segs();
+    // avb.canvases.draw_closed_path(
+    //     &CanvasKind::Draw,
+    //     full_segs,
+    //     Pattern::Composed(true),
+    //     get_final_contour_colors(Status::default()).color,
+    //     get_final_contour_colors(Status::default()).fill_color,
+    //     vec![],
+    // );
     // SHAPES: Draw the outlines
-    for e in avb.set.elements() {
-        e.get_kind()
+    for e in avb.set.nodes.values() {
+        e.element
             .get_paths_and_patterns(das, cinfo)
             .iter()
             .for_each(|(path, pattern, colors)| {
@@ -851,40 +852,31 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
                     .draw_path(&CanvasKind::Draw, (path.clone(), *pattern, *colors, vec![]));
             });
     }
-    // SHAPES: Draw the primitives
-    for e in avb.set.elements() {
-        e.get_kind()
-            .get_prim_paths_and_patterns(das, cinfo)
-            .iter()
-            .for_each(|(path, pattern, colors)| {
-                avb.canvases
-                    .draw_path(&CanvasKind::Draw, (path.clone(), *pattern, *colors, vec![]));
-            });
-    }
-    // SHAPES: Draw the controls points
-    for e in avb.set.elements() {
-        for (path, pattern, colors) in e.get_kind().get_controls_paths_and_patterns(das, cinfo) {
-            avb.canvases
-                .draw_path(&CanvasKind::Draw, (path, pattern, colors, vec![]));
-        }
-    }
-    // SHAPES: Draw dimensions
-    for e in avb.set.elements() {
-        if e.get_kind().get_state(IsHS(Select))
-            || e.get_kind().get_state(IsHS(Highlight))
-            || e.get_kind().get_state(IsAControlHS(Select))
-            || e.get_kind().get_state(IsAControlHS(Highlight))
-        {
-            for bundle in e.get_kind().get_dimensions_paths_and_patterns(das, cinfo) {
-                avb.canvases.draw_path(&CanvasKind::Draw, bundle);
-            }
-        }
-    }
+
+    // Draw the controls points
+    // for e in avb.set.elements() {
+    //     for (path, pattern, colors) in e.get_kind().get_controls_paths_and_patterns(das, cinfo) {
+    //         avb.canvases
+    //             .draw_path(&CanvasKind::Draw, (path, pattern, colors, vec![]));
+    //     }
+    // }
+    // // SHAPES: Draw dimensions
+    // for e in avb.set.elements() {
+    //     if e.get_kind().get_state(IsHS(Select))
+    //         || e.get_kind().get_state(IsHS(Highlight))
+    //         || e.get_kind().get_state(IsAControlHS(Select))
+    //         || e.get_kind().get_state(IsAControlHS(Highlight))
+    //     {
+    //         for bundle in e.get_kind().get_dimensions_paths_and_patterns(das, cinfo) {
+    //             avb.canvases.draw_path(&CanvasKind::Draw, bundle);
+    //         }
+    //     }
+    // }
 
     // CLIPBOARD
-    if let Some(item) = avb.clipboard.get_paste() {
-        match item {}
-    }
+    // if let Some(item) = avb.clipboard.get_paste() {
+    //     match item {}
+    // }
 
     // Draw the data that is being created
     let create_colors = get_on_creation_colors(Status::default());

@@ -7,7 +7,7 @@ edition = "2021"
 # kurbo = { git = "https://github.com/linebender/kurbo" }
 ttf-parser = "0.25.1"
 svg = "0.18.0"
-kurbo = "0.11.1"
+kurbo = "0.11.2"
 geo = "0.29.3"
 approx = "0.5.1"
 console_error_panic_hook = "0.1.7"
