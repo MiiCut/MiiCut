@@ -41,7 +41,7 @@ use std::{
 // ));
 //
 
-pub const EPSILON: f64 = 1e-9;
+pub const EPSILON: f64 = 1e-6;
 // Snap the angle to horizontal or vertical
 const THREAS_ANGLE: f64 = 2. / 180. * PI;
 
@@ -2049,8 +2049,8 @@ pub fn area_from_hes(pts: &VecRing<HalfEdge>) -> f64 {
     let len = pts.len();
     let mut area = 0.0;
     for idx in 0..len as i64 {
-        let vi = pts.get(idx).get_vertex().pos;
-        let vj = pts.get((idx + 1) % len as i64).get_vertex().pos;
+        let vi = pts.get(idx).get_vertex().curr;
+        let vj = pts.get((idx + 1) % len as i64).get_vertex().curr;
         area += vi.x * vj.y - vj.x * vi.y;
     }
     area * 0.5

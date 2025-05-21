@@ -3,14 +3,12 @@ use crate::{
     dimensions::dim_radius,
     math::*,
     prefab::{centroid_path, get_centroids_colors, get_shapes_colors},
-    types::Status,
-    KeysStates, Pointer,
+    types::{Status, HS},
+    KeysStates,
 };
 use geo::{LineString, Polygon};
 use kurbo::{BezPath, Circle, CirclePathIter, Point, Rect, Shape, Size, Vec2};
 use std::fmt::Display;
-
-use super::drawable::Drawable;
 
 #[derive(Debug, Clone)]
 pub struct ShapeDisc {
@@ -18,9 +16,6 @@ pub struct ShapeDisc {
     bdl_saved: SegBundle,
     radius_state: Status,
     state: Status,
-
-    segs: BezPath,
-    polygon: Polygon<f64>,
 }
 
 impl ShapeDisc {
@@ -68,11 +63,10 @@ impl Display for ShapeDisc {
         write!(f, "Circle")
     }
 }
-impl Drawable for ShapeDisc {}
-impl ObjectsFuncs for ShapeDisc {
+
+impl ShapeDisc {
     const TOLERANCE: f64 = 0.01;
     const GRAB_RADIUS: f64 = 10.;
-    type Kindvars = ShapeDisc;
 
     fn tab(&mut self) -> bool {
         false
@@ -204,11 +198,7 @@ impl ObjectsFuncs for ShapeDisc {
         vec![dim_radius(self.bdl, cinfo, self.radius_state)]
     }
 
-    fn get_paths_and_patterns(
-        &self,
-        _: &Size,
-        _: (Rect, f64, Vec2),
-    ) -> Vec<(BezPath, Pattern, Colors)> {
+    fn get_paths_and_patterns(&self) -> Vec<(BezPath, Pattern, Colors)> {
         vec![(
             self.to_path(Self::TOLERANCE),
             Pattern::Basic,

@@ -1,11 +1,13 @@
+use kurbo::Vec2;
+
 use crate::nodes::Nod;
 use crate::shapes::drawable::Drawable;
-use crate::Pointer;
+use crate::types::Value;
 
 #[derive(Clone, Debug)]
 pub struct Clipboard<E: Drawable> {
-    item_copy: Option<(Nod<E>, Pointer)>,
-    item_paste: Option<(Nod<E>, Pointer)>,
+    item_copy: Option<(Nod<E>, Value<Vec2>)>,
+    item_paste: Option<(Nod<E>, Value<Vec2>)>,
 }
 impl<E: Drawable> Clipboard<E> {
     pub fn new() -> Self {
@@ -15,18 +17,18 @@ impl<E: Drawable> Clipboard<E> {
         }
     }
 
-    pub fn copy(&mut self, nodes: Nod<E>, pointer_copy: Pointer) {
+    pub fn copy(&mut self, nodes: Nod<E>, pointer_copy: Value<Vec2>) {
         self.item_copy = Some((nodes, pointer_copy));
         self.item_paste = None;
     }
 
-    pub fn paste(&mut self, pointer: Pointer) {
+    pub fn paste(&mut self, pointer: Value<Vec2>) {
         if let Some(item_copy) = &self.item_copy {
             self.item_paste = Some((item_copy.0.clone(), pointer));
         }
     }
 
-    pub fn move_paste(&mut self, pointer_paste: &mut Pointer) {
+    pub fn move_paste(&mut self, pointer_paste: &mut Value<Vec2>) {
         if let Some(item_paste) = self.item_paste.as_mut() {
             item_paste.1 = pointer_paste.clone();
         }

@@ -1,4 +1,5 @@
 use kurbo::Vec2;
+use std::{fmt::Debug, ops::AddAssign};
 
 #[derive(Debug, Clone)]
 pub struct VecRing<T> {
@@ -89,85 +90,76 @@ impl Status {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Default)]
-pub struct Value {
-    pub saved_val: f64,
-    pub last_val: f64,
-    pub value: f64,
+#[derive(Copy, Debug, Clone)]
+pub struct Value<T: Copy + Clone + Debug + AddAssign> {
+    pub saved: T,
+    pub last: T,
+    pub curr: T,
 }
-impl Value {
-    pub fn new(value: f64) -> Self {
+impl<T: Copy + Clone + Debug + AddAssign> Value<T> {
+    pub fn new(value: T) -> Self {
         Self {
-            saved_val: value,
-            last_val: value,
-            value,
+            saved: value,
+            last: value,
+            curr: value,
         }
+    }
+    pub fn save(&mut self) {
+        self.saved = self.curr;
+    }
+    pub fn add(&mut self, value: T) {
+        self.curr += value;
+    }
+    pub fn set(&mut self, value: T) {
+        self.curr = value;
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Default)]
-pub struct ValueBool {
-    pub saved_val: bool,
-    pub last_val: bool,
-    pub value: bool,
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Snap {
+    linear: SnapValue,
+    angle: SnapValue,
 }
-impl ValueBool {
-    pub fn new(value: bool) -> Self {
+impl Snap {
+    pub fn new() -> Self {
         Self {
-            saved_val: value,
-            last_val: value,
-            value,
+            linear: SnapValue::SnapMax,
+            angle: SnapValue::SnapMax,
         }
     }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Default)]
-pub struct Position {
-    pub saved_pos: Vec2,
-    pub last_pos: Vec2,
-    pub pos: Vec2,
-}
-impl Position {
-    pub fn new(pos: Vec2) -> Self {
-        Self {
-            saved_pos: pos,
-            last_pos: pos,
-            pos,
+    pub fn linear(&self) -> f64 {
+        match self.linear {
+            SnapValue::SnapMin => 1.,
+            SnapValue::SnapMed => 5.,
+            SnapValue::SnapMax => 10.,
         }
     }
-    pub fn move_pos(&mut self, dpos: Vec2) {
-        self.pos = self.saved_pos + dpos;
+    pub fn angle(&self) -> f64 {
+        match self.angle {
+            SnapValue::SnapMin => 1.,
+            SnapValue::SnapMed => 5.,
+            SnapValue::SnapMax => 10.,
+        }
+    }
+    pub fn next_linear(&mut self) {
+        match self.linear {
+            SnapValue::SnapMin => self.linear = SnapValue::SnapMed,
+            SnapValue::SnapMed => self.linear = SnapValue::SnapMax,
+            SnapValue::SnapMax => self.linear = SnapValue::SnapMin,
+        }
+    }
+    pub fn next_angle(&mut self) {
+        match self.angle {
+            SnapValue::SnapMin => self.angle = SnapValue::SnapMed,
+            SnapValue::SnapMed => self.angle = SnapValue::SnapMax,
+            SnapValue::SnapMax => self.angle = SnapValue::SnapMin,
+        }
     }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SnapValue {
-    Snap1,
-    Snap5,
-    Snap10,
-}
-impl SnapValue {
-    pub fn val(&self) -> f64 {
-        match self {
-            SnapValue::Snap1 => 1.,
-            SnapValue::Snap5 => 5.,
-            SnapValue::Snap10 => 10.,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum SnapAngleValue {
-    Snap1,
-    Snap5,
-    Snap10,
-}
-impl SnapAngleValue {
-    pub fn val(&self) -> f64 {
-        match self {
-            SnapAngleValue::Snap1 => 1.,
-            SnapAngleValue::Snap5 => 5.,
-            SnapAngleValue::Snap10 => 10.,
-        }
-    }
+    SnapMin,
+    SnapMed,
+    SnapMax,
 }

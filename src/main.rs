@@ -30,14 +30,13 @@ use canvas::{
     CanvasKind, CanvasText, CanvasTextConfig, Canvases, Color, Pattern, TextAlign, TextPos,
 };
 use clipboard::*;
-use curves::half_edge::HEProps;
 use curves::half_edge::HalfEdge;
 use dimensions::*;
 use inputs::Keys;
 use inputs::SystemMouse;
 use inputs::*;
 use kurbo::{BezPath, Circle, PathEl, Shape, Size, Vec2};
-use nodes::Tree;
+use nodes::Set;
 use prefab::*;
 use shapes::drawable::Drawable;
 use shapes::drawable::Shapes;
@@ -67,8 +66,8 @@ fn main() {
     create_app_vars::<Shapes>(window).expect("Could not access the document");
 }
 
-struct AppVars<E: Drawable + 'static> {
-    tree: Tree<E>,
+struct AppVars<E: Drawable> {
+    set: Set<E>,
     on_creation: Option<(VecRing<HalfEdge>, Vec2)>,
 
     clipboard: Clipboard<E>,
@@ -85,39 +84,31 @@ struct AppVars<E: Drawable + 'static> {
     icon_selected: Icons,
 
     // Inputs
-    inputs: Inputs,
+    userui: UserUI,
 }
-impl<E: Drawable + 'static> AppVars<E> {
-    fn cancel_entity_creation(&mut self) {
+impl<E: Drawable> AppVars<E> {
+    fn esc_pressed(&mut self) {
         self.on_creation = None;
         self.go_to_arrow_tool();
     }
-    fn copy_entity(&mut self) {
+    fn ctrl_c_pressed(&mut self) {
         if let Icons::Arrow = self.icon_selected.clone() {}
     }
-    fn paste_entity(&mut self) {}
-    fn delete_entity(&mut self) {}
+    fn ctrl_v_pressed(&mut self) {}
+    fn del_back_pressed(&mut self) {}
     fn s_pressed(&mut self) {
-        match self.inputs.pointer.snap {
-            SnapValue::Snap1 => self.inputs.pointer.snap = SnapValue::Snap5,
-            SnapValue::Snap5 => self.inputs.pointer.snap = SnapValue::Snap10,
-            SnapValue::Snap10 => self.inputs.pointer.snap = SnapValue::Snap1,
-        };
+        self.userui.snap.next_linear();
     }
-    fn next_snap_angle(&mut self) {
-        match self.inputs.pointer.snap_angle {
-            SnapAngleValue::Snap1 => self.inputs.pointer.snap_angle = SnapAngleValue::Snap5,
-            SnapAngleValue::Snap5 => self.inputs.pointer.snap_angle = SnapAngleValue::Snap10,
-            SnapAngleValue::Snap10 => self.inputs.pointer.snap_angle = SnapAngleValue::Snap1,
-        };
+    fn a_pressed(&mut self) {
+        self.userui.snap.next_angle();
     }
-    fn toogle_boolean_op(&mut self) {
+    fn t_pressed(&mut self) {
         if let None = self.on_creation {}
     }
     fn tab_pressed(&mut self) {
         if let Icons::Arrow = self.icon_selected.clone() {
-            for id in self.tree.nodes_state.get_selected_nodes().iter() {
-                if let Some(node) = self.tree.get_mut(*id) {
+            for id in self.set.nodes_state.get_selected_nodes().iter() {
+                if let Some(node) = self.set.get_mut(*id) {
                     node.element.op_next();
                 }
             }
@@ -166,7 +157,7 @@ impl<E: Drawable + 'static> AppVars<E> {
         let drawing_scale = self.canvases.get_drawing_scale();
         let offset_start_x = get_element_width(&self.left_panel);
         let offset_start_y = get_element_height(&self.top_menu);
-        self.inputs.mouse.update_mouse(
+        self.userui.update(
             offset_start_x,
             offset_start_y,
             drawing_offset,
@@ -174,13 +165,13 @@ impl<E: Drawable + 'static> AppVars<E> {
             &event,
             sys_mouse,
         );
-        self.inputs.pointer.magnetized = false;
+        self.userui.magnetized = false;
     }
 }
 
 ///////////////
 // Initialization
-fn create_app_vars<E: Drawable + 'static>(window: Window) -> Result<(), JsValue> {
+fn create_app_vars<E: Drawable>(window: Window) -> Result<(), JsValue> {
     log!("Creating application variables");
     let document = window.document().expect("should have a document on window");
     let c_draw: HtmlCanvasElement = init_element!(document, "mainCanvas", HtmlCanvasElement);
@@ -202,7 +193,7 @@ fn create_app_vars<E: Drawable + 'static>(window: Window) -> Result<(), JsValue>
     user_icons.insert(IShapes(Custom));
 
     let app_vars = Rc::new(RefCell::new(AppVars {
-        tree: Tree::<E>::new(),
+        set: Set::<E>::new(),
         on_creation: None,
         clipboard: Clipboard::new(),
         undo_redo: UndoRedo::new(),
@@ -215,7 +206,7 @@ fn create_app_vars<E: Drawable + 'static>(window: Window) -> Result<(), JsValue>
         user_icons,
         tooltip,
         icon_selected: Icons::Arrow,
-        inputs: Inputs::new(),
+        userui: UserUI::new(),
     }));
 
     init_menu(app_vars.clone())?;
@@ -237,7 +228,7 @@ fn create_app_vars<E: Drawable + 'static>(window: Window) -> Result<(), JsValue>
     Ok(())
 }
 
-fn init_window<E: Drawable + 'static>(av: RefAV<E>) -> Result<(), JsValue> {
+fn init_window<E: Drawable>(av: RefAV<E>) -> Result<(), JsValue> {
     // Resize event
     let pa_cloneprim = av.clone();
     let pa_cloned2 = av.clone();
@@ -291,7 +282,7 @@ fn init_window<E: Drawable + 'static>(av: RefAV<E>) -> Result<(), JsValue> {
 
     Ok(())
 }
-fn init_icons<E: Drawable + 'static>(av: RefAV<E>) -> Result<(), JsValue> {
+fn init_icons<E: Drawable>(av: RefAV<E>) -> Result<(), JsValue> {
     let avb = av.borrow_mut();
     for icon in avb.user_icons.iter() {
         let element_to_set = icon.get_element();
@@ -317,7 +308,7 @@ fn init_icons<E: Drawable + 'static>(av: RefAV<E>) -> Result<(), JsValue> {
 
     Ok(())
 }
-fn init_canvas<E: Drawable + 'static>(av: RefAV<E>) -> Result<(), JsValue> {
+fn init_canvas<E: Drawable>(av: RefAV<E>) -> Result<(), JsValue> {
     log!("Initializing canvas");
     let pam = av.borrow_mut();
     let c_draw = pam.canvases.get_main_canvas();
@@ -355,7 +346,7 @@ fn init_canvas<E: Drawable + 'static>(av: RefAV<E>) -> Result<(), JsValue> {
     set_callback(av.clone(), "wheel".into(), c_draw, Box::new(on_mouse_wheel))?;
     Ok(())
 }
-fn init_menu<E: Drawable + 'static>(av: RefAV<E>) -> Result<(), JsValue> {
+fn init_menu<E: Drawable>(av: RefAV<E>) -> Result<(), JsValue> {
     let avb = av.borrow_mut();
     let document = avb.document.clone();
 
@@ -412,13 +403,13 @@ fn init_menu<E: Drawable + 'static>(av: RefAV<E>) -> Result<(), JsValue> {
     Ok(())
 }
 
-fn init_status<E: Drawable + 'static>(av: RefAV<E>) -> Result<(), JsValue> {
+fn init_status<E: Drawable>(av: RefAV<E>) -> Result<(), JsValue> {
     let pam = av.borrow_mut();
     let _document = pam.document.clone();
 
     Ok(())
 }
-fn set_callback<E: Drawable + 'static>(
+fn set_callback<E: Drawable>(
     av: RefAV<E>,
     event_str: String,
     element: &Element,
@@ -452,7 +443,7 @@ fn set_callback<E: Drawable + 'static>(
 
     Ok(())
 }
-fn convert_svg_to_shapes<E: Drawable + 'static>(_av: RefAV<E>, svg_data: String) {
+fn convert_svg_to_shapes<E: Drawable>(_av: RefAV<E>, svg_data: String) {
     // Process the SVG content using svg::read
     let mut content = svg_data;
     for event in read(&mut content).unwrap() {
@@ -485,310 +476,23 @@ fn convert_svg_to_shapes<E: Drawable + 'static>(_av: RefAV<E>, svg_data: String)
 }
 
 #[allow(unused_variables)]
-fn update<E: Drawable + 'static>(
+fn update<E: Drawable>(
     avb: &mut RefMut<'_, AppVars<E>>,
     event: Event,
     sys_mouse: SystemMouse,
 ) -> Result<(), MyError> {
-    use MouseState::*;
-    use HS::*;
-
     avb.update_inputs(event, sys_mouse);
     let icon_selected = avb.icon_selected.clone();
-    let snap = avb.inputs.pointer.snap.val();
-    let snap_angle = avb.inputs.pointer.snap_angle.val();
+    let snap = avb.userui.snap;
+    let inputs = avb.userui;
 
-    match icon_selected {
-        Icons::Arrow => match avb.inputs.mouse.get_mouse_state() {
-            LeftDown(mouse_pos_down) => {
-                inputs.pointer.set_pos(mouse_pos_down);
-                if !inputs.pointer.is_magnetized() {
-                    avb.tree.magnet_to_points(&mut inputs.pointer, keys_states);
-                }
-                if !inputs.pointer.is_magnetized() {
-                    inputs.pointer.set_pos(mouse_pos_down);
-                } else {
-                    log!("Magnetized");
-                }
-                inputs.pointer.save_pos();
-
-                if avb.clipboard.is_paste_empty() {
-                    let pointer_pos_saved = inputs.pointer.pos_saved();
-                    avb.tree.set_objects_states_in_order(
-                        &mut inputs.pointer,
-                        keys_states,
-                        HS::Select,
-                    );
-                    if inputs.keys_states.crtl_cmd_pressed {
-                        avb.tree.shapes.select_all_connected();
-                        inputs.pointer.set_pos(pointer_pos_saved);
-                    }
-                } else {
-                    // User has clicked for pasting the object on the canvas
-                    if let Some(clip_item) = avb.clipboard.get_paste().cloned() {
-                        // Add the pasted object to the pool
-                        let paste = avb.tree.paste_to_pool(clip_item);
-                        // Push the PasteAction to the undo/redo system
-                        avb.undo_redo.push(paste);
-                        avb.clipboard.clear_paste();
-                    }
-                }
-                avb.tree.helpers.save_vars();
-                avb.tree.shapes.save_vars();
-            }
-            LeftDownMove(_, mouse_pos) => {
-                inputs.pointer.set_pos(mouse_pos);
-                avb.tree
-                    .helpers
-                    .magnet_to_points(&mut inputs.pointer, keys_states);
-                if !inputs.pointer.is_magnetized() {
-                    avb.tree
-                        .shapes
-                        .magnet_to_points(&mut inputs.pointer, keys_states);
-                }
-                avb.tree.move_objects(&mut inputs.pointer, keys_states);
-            }
-            LeftUp(mouse_pos_up) => {
-                inputs.pointer.set_pos(mouse_pos_up);
-                inputs.pointer.save_pos();
-
-                // Push the MoveAction to the undo/redo system
-                if let Some(move_action) = avb.tree.get_move_action() {
-                    avb.undo_redo.push(move_action);
-                }
-                // User has finished moving the objects, create the helpers new magnet points
-                avb.tree.helpers.create_magnet_points();
-                avb.tree.shapes.create_magnet_points();
-            }
-            LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
-                inputs.pointer.set_pos(mouse_pos);
-                avb.tree
-                    .helpers
-                    .magnet_to_points(&mut inputs.pointer, keys_states);
-                if !inputs.pointer.is_magnetized() {
-                    avb.tree
-                        .shapes
-                        .magnet_to_points(&mut inputs.pointer, keys_states);
-                }
-
-                if !avb.clipboard.is_paste_empty() {
-                    avb.clipboard.move_paste(&mut inputs.pointer);
-                } else {
-                    avb.tree.set_objects_states_in_order(
-                        &mut inputs.pointer,
-                        keys_states,
-                        HS::Highlight,
-                    );
-                }
-            }
-            RightDown(_) => {
-                avb.clipboard.clear();
-                avb.tree.set_state(SetHS(Select, false));
-                avb.canvases.save_drawing_offset();
-            }
-            RightDownMove(mouse_pos_down, mouse_pos) => {
-                avb.canvases.move_drawing_offset(mouse_pos_down, mouse_pos);
-                draw_grid_and_rules(avb);
-            }
-            RightUp(mouse_pos_up) => {
-                inputs.pointer.set_pos(mouse_pos_up);
-                inputs.pointer.save_pos();
-            }
-            _ => (),
-        },
-        Icons::IShapes(ishape) => {
-            match avb.mouse.get_mouse_state() {
-                LeftDown(mouse_pos_down) => {
-                    inputs.pointer.set_pos(mouse_pos_down);
-                    avb.tree
-                        .helpers
-                        .magnet_to_points(&mut inputs.pointer, keys_states);
-                    if !inputs.pointer.is_magnetized() {
-                        avb.tree
-                            .shapes
-                            .magnet_to_points(&mut inputs.pointer, keys_states);
-                    }
-                    if !inputs.pointer.is_magnetized() {
-                        inputs.pointer.set_pos(snap_pt(mouse_pos_down, snap));
-                    }
-                    inputs.pointer.save_pos();
-
-                    if let Some(points) = &mut avb.on_creation {
-                        // A. We are/were drawing a new shape
-                        match ishape {
-                            IconsShapes::Disc => {
-                                let center = points.0.get(0).get_vertex().pos;
-                                let end = points.1;
-                                if let Some(shape) =
-                                    ShapeKind::new_disc(center, end, BoolOps::Union)
-                                {
-                                    log!("Disc created");
-                                    avb.tree.shapes.add(shape.clone());
-
-                                    // Push the AddShapeAction to the undo/redo system
-                                    avb.undo_redo.push(Box::new(AddShapeAction { shape }));
-                                }
-                                avb.on_creation = None;
-                                // User has finished drawing the objects, create the shapes new magnet points
-                                avb.tree.shapes.create_magnet_points();
-                            }
-                            IconsShapes::Rectangle => {
-                                points.0.push(HalfEdge::new(points.1, HEProps::default()));
-                                if let Some(shape) =
-                                    ShapeKind::new_rectangle(points.0.clone(), BoolOps::Union)
-                                {
-                                    log!("Rectangle created");
-                                    avb.tree.shapes.add(shape.clone());
-                                    // Push the AddShapeAction to the undo/redo system
-                                    avb.undo_redo.push(Box::new(AddShapeAction { shape }));
-                                }
-                                avb.on_creation = None;
-                                // User has finished drawing the objects, create the shapes new magnet points
-                                avb.tree.shapes.create_magnet_points();
-                            }
-                            IconsShapes::RectangleFillet => {
-                                points.0.push(HalfEdge::new(points.1, HEProps::default()));
-                                if let Some(shape) =
-                                    ShapeKind::new_rectangle(points.0.clone(), BoolOps::Union)
-                                {
-                                    log!("Rectangle created");
-                                    avb.tree.shapes.add(shape.clone());
-                                    // Push the AddShapeAction to the undo/redo system
-                                    avb.undo_redo.push(Box::new(AddShapeAction { shape }));
-                                }
-                                avb.on_creation = None;
-                                // User has finished drawing the objects, create the shapes new magnet points
-                                avb.tree.shapes.create_magnet_points();
-                            }
-                            IconsShapes::Oblong => {
-                                let start = points.0.get(0).get_vertex().pos;
-                                let end = points.1;
-                                points.0.push(HalfEdge::new(end, HEProps::default()));
-                                if let Some(shape) =
-                                    ShapeKind::new_oblong(points.0.clone(), BoolOps::Union)
-                                {
-                                    log!("Oblong created");
-                                    avb.tree.shapes.add(shape.clone());
-                                    // Push the AddShapeAction to the undo/redo system
-                                    avb.undo_redo.push(Box::new(AddShapeAction { shape }));
-                                }
-                                avb.on_creation = None;
-                                // User has finished drawing the objects, create the shapes new magnet points
-                                avb.tree.shapes.create_magnet_points();
-                            }
-                            IconsShapes::Custom => {
-                                points.0.push(HalfEdge::new(points.1, HEProps::default()))
-                            }
-                        }
-                    } else {
-                        // B. We start drawing a new shape, don't create the shape yet
-                        avb.on_creation = Some((
-                            VecRing::from_element(HalfEdge::new(
-                                inputs.pointer.pos(),
-                                HEProps::default(),
-                            )),
-                            inputs.pointer.pos(),
-                        ));
-                    }
-                }
-                LeftUpMove(mouse_pos_up, mouse_pos) | RightUpMove(mouse_pos_up, mouse_pos) => {
-                    inputs.pointer.set_pos(mouse_pos);
-                    avb.tree
-                        .helpers
-                        .magnet_to_points(&mut inputs.pointer, keys_states);
-                    if !inputs.pointer.is_magnetized() {
-                        avb.tree
-                            .shapes
-                            .magnet_to_points(&mut inputs.pointer, keys_states);
-                    }
-
-                    if let Some(points) = &mut avb.on_creation {
-                        if !inputs.pointer.is_magnetized() {
-                            // A. We are/were drawing a new shape
-                            match ishape {
-                                IconsShapes::Rectangle | IconsShapes::RectangleFillet => {
-                                    let v1 = points.0.get(0).get_vertex().pos;
-                                    points.1 = snap_xy(v1, mouse_pos, snap);
-                                    inputs.pointer.set_pos(points.1);
-                                }
-                                IconsShapes::Disc => {
-                                    let center = points.0.get(0).get_vertex().pos;
-                                    let radius_pt = snap_length(center, inputs.pointer.pos(), snap);
-                                    points.1 = radius_pt;
-                                    inputs.pointer.set_pos(points.1);
-                                }
-                                IconsShapes::Oblong => {
-                                    let start = points.0.get(0).get_vertex().pos;
-                                    let end = snap_length_and_angle(
-                                        start,
-                                        inputs.pointer.pos(),
-                                        snap,
-                                        snap_angle,
-                                    );
-                                    points.1 = end;
-                                    inputs.pointer.set_pos(points.1);
-                                }
-                                IconsShapes::Custom => {
-                                    let len = points.0.len() as i64;
-                                    let last = points.0.get(len - 1).get_vertex().pos;
-                                    let pos = snap_length_and_angle(
-                                        last,
-                                        inputs.pointer.pos(),
-                                        snap,
-                                        snap_angle,
-                                    );
-                                    points.1 = pos;
-                                    inputs.pointer.set_pos(points.1);
-                                }
-                            }
-                        } else {
-                            points.1 = inputs.pointer.pos();
-                        }
-                    } else {
-                        if !inputs.pointer.is_magnetized() {
-                            inputs.pointer.set_pos(snap_pt(mouse_pos, snap));
-                        }
-                    }
-                }
-                RightDown(mouse_pos_down) => {
-                    inputs.pointer.set_pos(mouse_pos_down);
-                    inputs.pointer.save_pos();
-
-                    if let Some(points) = avb.on_creation.clone() {
-                        match ishape {
-                            IconsShapes::Disc => log!("Disc canceled"),
-                            IconsShapes::Rectangle => log!("Rectangle canceled"),
-                            IconsShapes::RectangleFillet => log!("Rectangle rounded canceled"),
-                            IconsShapes::Oblong => log!("Oblong canceled"),
-                            IconsShapes::Custom => {
-                                if let Some(shape) = ShapeKind::new_custom(points.0, BoolOps::Union)
-                                {
-                                    log!("Polygon created");
-                                    avb.tree.shapes.add(shape.clone());
-                                    // Push the AddShapeAction to the undo/redo system
-                                    avb.undo_redo.push(Box::new(AddShapeAction { shape }));
-                                    // User has finished drawing the objects, create the shapes new magnet points
-                                    avb.tree.shapes.create_magnet_points();
-                                }
-                            }
-                        }
-                    }
-                    avb.on_creation = None;
-                    avb.go_to_arrow_tool();
-                }
-                _ => (),
-            }
-        }
-    }
-
-    avb.inputs.pointer = inputs.pointer;
     Ok(())
 }
 
-fn update_informations<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
+fn update_informations<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     avb.canvases.clear_background_canvas();
     let c_size = avb.canvases.get_canvas_size();
-    let pos = avb.inputs.pointer.pos();
+    let pos = avb.userui.pointer.curr;
     let ckind = CanvasKind::Background;
     avb.canvases.direct_text(
         &ckind,
@@ -802,16 +506,16 @@ fn update_informations<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) 
         &ckind,
         &CanvasText::new(
             format!(
-                "Snap value (PRESS S): {:.0} mm or {:.0} °",
-                avb.inputs.pointer.get_snap().val(),
-                avb.inputs.pointer.get_snap().val()
+                "Snap value (PRESS S): {:.0} mm / {:.0} °",
+                avb.userui.snap.linear(),
+                avb.userui.snap.angle()
             ),
             TextPos::Pos1(c_size.height),
             CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
         ),
     );
 }
-fn on_mouse_move<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
+fn on_mouse_move<E: Drawable>(av: RefAV<E>, event: Event) {
     let mut avb = av.borrow_mut();
     if let Some(e) = update(&mut avb, event, SystemMouse::Move).err() {
         log!("ERROR: {}", e);
@@ -820,7 +524,7 @@ fn on_mouse_move<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
     render_drawing(&mut avb);
     drop(avb);
 }
-fn on_mouse_down<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
+fn on_mouse_down<E: Drawable>(av: RefAV<E>, event: Event) {
     let mut avb = av.borrow_mut();
     // Hide the context menu when clicking elsewhere
     display_html_element(DOMElements::ContextMenuShape, false);
@@ -831,7 +535,7 @@ fn on_mouse_down<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
     render_drawing(&mut avb);
     drop(avb);
 }
-fn on_mouse_up<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
+fn on_mouse_up<E: Drawable>(av: RefAV<E>, event: Event) {
     let mut avb = av.borrow_mut();
     if let Some(e) = update(&mut avb, event, SystemMouse::Up).err() {
         log!("ERROR: {}", e);
@@ -840,7 +544,7 @@ fn on_mouse_up<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
     render_drawing(&mut avb);
     drop(avb);
 }
-fn on_mouse_wheel<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
+fn on_mouse_wheel<E: Drawable>(av: RefAV<E>, event: Event) {
     if let Ok(wheel_event) = event.dyn_into::<WheelEvent>() {
         wheel_event.prevent_default();
         let mut avb = av.borrow_mut();
@@ -856,7 +560,7 @@ fn on_mouse_wheel<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
         };
         avb.canvases.set_drawing_scale(new_scale);
 
-        let canvas_pos = avb.inputs.mouse.get_canvas_pos();
+        let canvas_pos = avb.userui.canvas_pos;
         let old_draw_offset_rel = canvas_pos - old_draw_offset;
         let new_draw_offset = canvas_pos - old_draw_offset_rel * (new_scale / old_draw_scale);
 
@@ -867,20 +571,20 @@ fn on_mouse_wheel<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
         drop(avb);
     }
 }
-fn on_mouse_enter<E: Drawable + 'static>(av: RefAV<E>, _event: Event) {
+fn on_mouse_enter<E: Drawable>(av: RefAV<E>, _event: Event) {
     let mut avb = av.borrow_mut();
-    avb.inputs.pointer.set_active(true);
+    avb.userui.active = true;
     render_drawing(&mut avb);
     drop(avb);
 }
-fn on_mouse_leave<E: Drawable + 'static>(av: RefAV<E>, _event: Event) {
+fn on_mouse_leave<E: Drawable>(av: RefAV<E>, _event: Event) {
     let mut avb = av.borrow_mut();
-    avb.inputs.pointer.set_active(false);
+    avb.userui.active = false;
     render_drawing(&mut avb);
     drop(avb);
 }
 
-fn on_context_menu<E: Drawable + 'static>(_av: RefAV<E>, event: Event) {
+fn on_context_menu<E: Drawable>(_av: RefAV<E>, event: Event) {
     // Prevent the default context menu from appearing
     event.prevent_default();
     // let mut avb = av.borrow_mut();
@@ -916,7 +620,7 @@ fn on_context_menu<E: Drawable + 'static>(_av: RefAV<E>, event: Event) {
 
 ///////////////
 // Window events
-fn resize_canvases<E: Drawable + 'static>(av: RefAV<E>) {
+fn resize_canvases<E: Drawable>(av: RefAV<E>) {
     log!("resize--called");
     let mut pam = av.borrow_mut();
     let window_width = pam
@@ -942,14 +646,14 @@ fn resize_canvases<E: Drawable + 'static>(av: RefAV<E>) {
     render_drawing(&mut pam);
     drop(pam);
 }
-fn on_window_resize<E: Drawable + 'static>(av: RefAV<E>, _event: Event) {
+fn on_window_resize<E: Drawable>(av: RefAV<E>, _event: Event) {
     resize_canvases(av.clone());
     let mut pam = av.borrow_mut();
     render_drawing(&mut pam);
     drop(pam);
 }
-fn on_window_click<E: Drawable + 'static>(_pa: RefAV<E>, _event: Event) {}
-fn on_window_keydown<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
+fn on_window_click<E: Drawable>(_pa: RefAV<E>, _event: Event) {}
+fn on_window_keydown<E: Drawable>(av: RefAV<E>, event: Event) {
     event.prevent_default();
     if let Ok(keyboard_event) = event.dyn_into::<KeyboardEvent>() {
         if let Some(key) = Keys::from_str(&keyboard_event.key()).ok() {
@@ -958,40 +662,40 @@ fn on_window_keydown<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
             match key {
                 Control | Meta => {
                     log!("control pressed");
-                    avb.inputs.keys_states.crtl_cmd_pressed = true;
+                    avb.userui.keys_states.crtl_cmd_pressed = true;
                 }
                 Shift => {
                     log!("shift pressed");
-                    avb.inputs.keys_states.shift_pressed = true;
+                    avb.userui.keys_states.shift_pressed = true;
                 }
                 Alt => {
                     log!("alt pressed");
-                    avb.inputs.keys_states.alt_pressed = true;
+                    avb.userui.keys_states.alt_pressed = true;
                 }
-                Delete | Backspace => avb.delete_entity(),
-                Escape => avb.cancel_entity_creation(),
+                Delete | Backspace => avb.del_back_pressed(),
+                Escape => avb.esc_pressed(),
                 // Copy and paste
                 CLower => {
-                    if avb.inputs.keys_states.crtl_cmd_pressed {
+                    if avb.userui.keys_states.crtl_cmd_pressed {
                         log!("ctrl-c pressed");
-                        avb.copy_entity();
+                        avb.ctrl_c_pressed();
                     }
                 }
                 VLower => {
-                    if avb.inputs.keys_states.crtl_cmd_pressed {
+                    if avb.userui.keys_states.crtl_cmd_pressed {
                         log!("ctrl-v pressed");
-                        avb.paste_entity();
+                        avb.ctrl_v_pressed();
                     }
                 }
                 // Undo and Redo
                 ZLower => {
-                    if avb.inputs.keys_states.crtl_cmd_pressed {
+                    if avb.userui.keys_states.crtl_cmd_pressed {
                         log!("ctrl-z pressed");
                         avb.undo();
                     }
                 }
                 ZUpper | YLower => {
-                    if avb.inputs.keys_states.crtl_cmd_pressed {
+                    if avb.userui.keys_states.crtl_cmd_pressed {
                         log!("ctrl-Z pressed or ctrl-y pressed");
                         avb.redo();
                     }
@@ -1002,11 +706,11 @@ fn on_window_keydown<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
                     update_informations(&mut avb);
                 }
                 ALower | AUpper => {
-                    avb.next_snap_angle();
+                    avb.a_pressed();
                     update_informations(&mut avb);
                 }
                 // Toggle boolean operation (add, substract, intersect)
-                TLower => avb.toogle_boolean_op(),
+                TLower => avb.t_pressed(),
                 // Change ShapeCustom: A) edge (line, arc,...) or B) vertex (none, fillet, chamfer)
                 Tab => avb.tab_pressed(),
                 Space => {
@@ -1020,7 +724,7 @@ fn on_window_keydown<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
         }
     }
 }
-fn on_window_keyup<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
+fn on_window_keyup<E: Drawable>(av: RefAV<E>, event: Event) {
     if let Ok(keyboard_event) = event.dyn_into::<KeyboardEvent>() {
         if let Some(key) = Keys::from_str(&keyboard_event.key()).ok() {
             let mut avb = av.borrow_mut();
@@ -1028,15 +732,15 @@ fn on_window_keyup<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
             match key {
                 Control | Meta => {
                     log!("control released");
-                    avb.inputs.keys_states.crtl_cmd_pressed = false;
+                    avb.userui.keys_states.crtl_cmd_pressed = false;
                 }
                 Shift => {
                     log!("shift released");
-                    avb.inputs.keys_states.shift_pressed = false;
+                    avb.userui.keys_states.shift_pressed = false;
                 }
                 Alt => {
                     log!("alt released");
-                    avb.inputs.keys_states.alt_pressed = false;
+                    avb.userui.keys_states.alt_pressed = false;
                 }
                 _ => (),
             }
@@ -1045,7 +749,7 @@ fn on_window_keyup<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
 }
 ///////////////
 // Icons events
-fn on_icon_click<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
+fn on_icon_click<E: Drawable>(av: RefAV<E>, event: Event) {
     let mut avb = av.borrow_mut();
     if let Some(target) = event.target() {
         if let Some(element) = wasm_bindgen::JsCast::dyn_ref::<Element>(&target) {
@@ -1053,8 +757,8 @@ fn on_icon_click<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
                 if let Some(icon) = avb.user_icons.iter().find(|&&k| k.id() == id).cloned() {
                     avb.icon_selected = icon;
                     avb.on_creation = None;
-                    avb.tree.nodes_state.clear_highlighted();
-                    avb.tree.nodes_state.clear_selected();
+                    avb.set.nodes_state.clr_all_highlighted();
+                    avb.set.nodes_state.clr_all_selected();
                     avb.user_icons
                         .iter()
                         .for_each(|icon| avb.html_deselect_icons(*icon));
@@ -1066,7 +770,7 @@ fn on_icon_click<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
     render_drawing(&mut avb);
     drop(avb);
 }
-fn on_icon_mouseover<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
+fn on_icon_mouseover<E: Drawable>(av: RefAV<E>, event: Event) {
     let pam = av.borrow_mut();
     if let Some(target) = event.target() {
         if let Some(element) = wasm_bindgen::JsCast::dyn_ref::<Element>(&target) {
@@ -1093,7 +797,7 @@ fn on_icon_mouseover<E: Drawable + 'static>(av: RefAV<E>, event: Event) {
         }
     }
 }
-fn on_icon_mouseout<E: Drawable + 'static>(av: RefAV<E>, _event: Event) {
+fn on_icon_mouseout<E: Drawable>(av: RefAV<E>, _event: Event) {
     av.borrow_mut()
         .tooltip
         .style()
@@ -1103,19 +807,19 @@ fn on_icon_mouseout<E: Drawable + 'static>(av: RefAV<E>, _event: Event) {
 
 ///////////////
 // Rendering
-fn reset_origin<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
+fn reset_origin<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     avb.canvases.reset_origin();
 }
-fn draw_grid_and_rules<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
+fn draw_grid_and_rules<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     avb.canvases.draw_origin();
 }
-fn render_drawing<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
+fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     use IconsShapes::*;
     use HS::*;
     // Get the Performance API
     // let performance = window().unwrap().performance().unwrap();
     // let start_time = performance.now();
-    avb.tree.recalc_full_segs();
+    avb.set.recalc_full_segs();
 
     let scale = avb.canvases.get_drawing_scale();
     avb.canvases.clear_main_canvas();
@@ -1123,12 +827,12 @@ fn render_drawing<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
     let cinfo = avb.canvases.get_canvas_infos();
 
     // Draw inputs.pointer
-    if avb.inputs.pointer.is_active() {
-        avb.canvases.draw_pointer(avb.inputs.pointer.pos());
+    if avb.userui.active {
+        avb.canvases.draw_pointer(avb.userui.pointer.curr);
     }
 
     // SHAPES: Draw the final contour
-    let full_segs = avb.tree.shapes.get_full_segs();
+    let full_segs = avb.set.shapes.get_full_segs();
     avb.canvases.draw_closed_path(
         &CanvasKind::Draw,
         full_segs,
@@ -1138,7 +842,7 @@ fn render_drawing<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
         vec![],
     );
     // SHAPES: Draw the outlines
-    for e in avb.tree.elements() {
+    for e in avb.set.elements() {
         e.get_kind()
             .get_paths_and_patterns(das, cinfo)
             .iter()
@@ -1148,7 +852,7 @@ fn render_drawing<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
             });
     }
     // SHAPES: Draw the primitives
-    for e in avb.tree.elements() {
+    for e in avb.set.elements() {
         e.get_kind()
             .get_prim_paths_and_patterns(das, cinfo)
             .iter()
@@ -1158,14 +862,14 @@ fn render_drawing<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
             });
     }
     // SHAPES: Draw the controls points
-    for e in avb.tree.elements() {
+    for e in avb.set.elements() {
         for (path, pattern, colors) in e.get_kind().get_controls_paths_and_patterns(das, cinfo) {
             avb.canvases
                 .draw_path(&CanvasKind::Draw, (path, pattern, colors, vec![]));
         }
     }
     // SHAPES: Draw dimensions
-    for e in avb.tree.elements() {
+    for e in avb.set.elements() {
         if e.get_kind().get_state(IsHS(Select))
             || e.get_kind().get_state(IsHS(Highlight))
             || e.get_kind().get_state(IsAControlHS(Select))
@@ -1188,7 +892,7 @@ fn render_drawing<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
         Icons::IShapes(ishape) => match ishape {
             Disc => {
                 if let Some(points) = avb.on_creation.clone() {
-                    let center = points.0.get(0).get_vertex().pos;
+                    let center = points.0.get(0).get_vertex().curr;
                     let end = points.1;
                     let radius = (end - center).length();
                     let tolerance = 0.1;
@@ -1224,7 +928,7 @@ fn render_drawing<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
             }
             Rectangle | RectangleFillet => {
                 if let Some(points) = avb.on_creation.clone() {
-                    let v1 = points.0.get(0).get_vertex().pos;
+                    let v1 = points.0.get(0).get_vertex().curr;
                     let v3 = points.1;
                     let v2 = Vec2::new(v1.x, v3.y);
                     let v4 = Vec2::new(v3.x, v1.y);
@@ -1275,7 +979,7 @@ fn render_drawing<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
             }
             Oblong => {
                 if let Some(points) = avb.on_creation.clone() {
-                    let start = points.0.get(0).get_vertex().pos;
+                    let start = points.0.get(0).get_vertex().curr;
                     let end = points.1;
                     avb.canvases.draw_path(
                         &CanvasKind::Draw,
@@ -1308,11 +1012,11 @@ fn render_drawing<E: Drawable + 'static>(avb: &mut RefMut<'_, AppVars<E>>) {
                 if let Some(points) = avb.on_creation.clone() {
                     let vlen = points.0.len() as i64;
                     for idx in 0..vlen {
-                        let vertex = points.0.get(idx).get_vertex().pos;
+                        let vertex = points.0.get(idx).get_vertex().curr;
                         let vertex_next = if idx + 1 == vlen {
                             points.1
                         } else {
-                            points.0.get(idx + 1).get_vertex().pos
+                            points.0.get(idx + 1).get_vertex().curr
                         };
                         avb.canvases.draw_path(
                             &CanvasKind::Draw,

@@ -27,6 +27,7 @@ pub struct ShapePolygon {
     hes_prim: Option<VecRing<HalfEdge>>,
     hes: VecRing<HalfEdge>,
     state: Status,
+
     segs: BezPath,
     polygon: Polygon<f64>,
 }

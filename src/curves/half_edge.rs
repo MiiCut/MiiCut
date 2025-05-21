@@ -5,7 +5,7 @@ use crate::{
         distance_and_projection_to_arc, distance_and_projection_to_segment, SegBundle,
     },
     prefab::point_path,
-    types::{Position, Status, Value, HS},
+    types::{Status, Value, HS},
 };
 use kurbo::{ArcAppendIter, BezPath, CubicBezIter, LinePathIter, PathEl, QuadBezIter, Shape, Vec2};
 use std::f64::consts::PI;
@@ -65,10 +65,10 @@ impl Default for HEProps {
 // We define the sag_rel that is the sagitta divided by the segment length.
 // A value of 0.5 means the sagitta is egual to half the segment length (hence the chord is a diameter)
 // We sign this value to indicate the side of the arc relative to the segment
-#[derive(Copy, Debug, Clone, PartialEq)]
+#[derive(Copy, Debug, Clone)]
 pub enum EdgeKind {
-    Segment { dum: Value },
-    Arc { sag_rel: Value },
+    Segment { dum: Value<f64> },
+    Arc { sag_rel: Value<f64> },
 }
 impl EdgeKind {
     pub fn set_arc(&mut self) {
@@ -87,23 +87,23 @@ impl EdgeKind {
     }
     pub fn save_vars(&mut self) {
         match self {
-            EdgeKind::Segment { dum } => dum.saved_val = dum.value,
-            EdgeKind::Arc { sag_rel } => sag_rel.saved_val = sag_rel.value,
+            EdgeKind::Segment { dum } => dum.saved = dum.curr,
+            EdgeKind::Arc { sag_rel } => sag_rel.saved = sag_rel.curr,
         }
     }
     pub fn restore_vars(&mut self) {
         match self {
-            EdgeKind::Segment { dum } => dum.value = dum.saved_val,
-            EdgeKind::Arc { sag_rel } => sag_rel.value = sag_rel.saved_val,
+            EdgeKind::Segment { dum } => dum.curr = dum.saved,
+            EdgeKind::Arc { sag_rel } => sag_rel.curr = sag_rel.saved,
         }
     }
 }
 
-#[derive(Copy, Debug, Clone, PartialEq)]
+#[derive(Copy, Debug, Clone)]
 pub enum VertexKind {
-    Chamfer { length: Value },
-    Fillet { radius: Value },
-    Point { dummy: Value },
+    Chamfer { length: Value<f64> },
+    Fillet { radius: Value<f64> },
+    Point { dummy: Value<f64> },
 }
 impl VertexKind {
     pub fn next(&mut self) {
@@ -124,16 +124,16 @@ impl VertexKind {
     }
     pub fn save_vars(&mut self) {
         match self {
-            VertexKind::Point { dummy } => dummy.saved_val = dummy.value,
-            VertexKind::Chamfer { length } => length.saved_val = length.value,
-            VertexKind::Fillet { radius } => radius.saved_val = radius.value,
+            VertexKind::Point { dummy } => dummy.saved = dummy.curr,
+            VertexKind::Chamfer { length } => length.saved = length.curr,
+            VertexKind::Fillet { radius } => radius.saved = radius.curr,
         }
     }
     pub fn restore_vars(&mut self) {
         match self {
-            VertexKind::Point { dummy } => dummy.value = dummy.saved_val,
-            VertexKind::Chamfer { length } => length.value = length.saved_val,
-            VertexKind::Fillet { radius } => radius.value = radius.saved_val,
+            VertexKind::Point { dummy } => dummy.curr = dummy.saved,
+            VertexKind::Chamfer { length } => length.curr = length.saved,
+            VertexKind::Fillet { radius } => radius.curr = radius.saved,
         }
     }
 }
@@ -142,7 +142,7 @@ impl VertexKind {
 pub struct HalfEdge {
     props: HEProps,
     saved_props: HEProps,
-    vertex: Position,
+    vertex: Value<Vec2>,
     vertex_state: Status,
     vertex_kind: VertexKind,
     edge: EdgeKind,
@@ -164,7 +164,7 @@ impl HalfEdge {
         Self {
             props,
             saved_props: props,
-            vertex: Position::new(v),
+            vertex: Value::<Vec2>::new(v),
             vertex_state: Status::default(),
             vertex_kind: VertexKind::Point {
                 dummy: Value::new(10. * Self::MIN_FILLET_RADIUS),
@@ -235,13 +235,13 @@ impl HalfEdge {
         self.saved_props = self.props;
         self.vertex_kind.save_vars();
         self.edge.save_vars();
-        self.vertex.saved_pos = self.vertex.pos;
+        self.vertex.saved = self.vertex.curr;
     }
     pub fn restore_vars(&mut self) {
         self.props = self.saved_props;
         self.vertex_kind.restore_vars();
         self.edge.restore_vars();
-        self.vertex.pos = self.vertex.saved_pos;
+        self.vertex.curr = self.vertex.saved;
     }
     pub fn get_s(&self) -> Vec2 {
         self.s
@@ -259,17 +259,17 @@ impl HalfEdge {
         use VertexKind::*;
         match self.vertex_kind {
             Point { dummy: _ } => {
-                self.s = self.vertex.pos;
-                self.e = self.vertex.pos;
+                self.s = self.vertex.curr;
+                self.e = self.vertex.curr;
                 self.c = None;
             }
             Chamfer { length } => match (edge_prev, self.edge) {
                 (Segment { dum: _ }, Segment { dum: _ }) => {
-                    bissector(vertex_prev, self.vertex.pos, vertex_next).map(
+                    bissector(vertex_prev, self.vertex.curr, vertex_next).map(
                         |(b_dir, angle2, u_p, u_n)| {
-                            self.e = self.vertex.pos + u_n * length.value / 2. / angle2.sin();
-                            self.s = self.vertex.pos + u_p * length.value / 2. / angle2.sin();
-                            self.c = Some(self.vertex.pos + b_dir * length.value / angle2.sin());
+                            self.e = self.vertex.curr + u_n * length.curr / 2. / angle2.sin();
+                            self.s = self.vertex.curr + u_p * length.curr / 2. / angle2.sin();
+                            self.c = Some(self.vertex.curr + b_dir * length.curr / angle2.sin());
                         },
                     );
                 }
@@ -277,11 +277,11 @@ impl HalfEdge {
             },
             Fillet { radius } => match (edge_prev, self.edge) {
                 (Segment { dum: _ }, Segment { dum: _ }) => {
-                    bissector(vertex_prev, self.vertex.pos, vertex_next).map(
+                    bissector(vertex_prev, self.vertex.curr, vertex_next).map(
                         |(b_dir, angle2, u_p, u_n)| {
-                            self.e = self.vertex.pos + u_n * radius.value / angle2.tan();
-                            self.s = self.vertex.pos + u_p * radius.value / angle2.tan();
-                            self.c = Some(self.vertex.pos + b_dir * radius.value / angle2.sin());
+                            self.e = self.vertex.curr + u_n * radius.curr / angle2.tan();
+                            self.s = self.vertex.curr + u_p * radius.curr / angle2.tan();
+                            self.c = Some(self.vertex.curr + b_dir * radius.curr / angle2.sin());
                         },
                     );
                 }
@@ -289,7 +289,7 @@ impl HalfEdge {
             },
         }
     }
-    pub fn get_vertex(&self) -> &Position {
+    pub fn get_vertex(&self) -> &Value<Vec2> {
         &self.vertex
     }
     pub fn get_vertex_kind(&self) -> &VertexKind {
@@ -305,7 +305,7 @@ impl HalfEdge {
     pub fn get_k_vertex_kind(&self) -> KShape {
         use VertexKind::*;
         match self.vertex_kind {
-            Point { dummy: _ } => KShape::KPoint(self.vertex.pos.to_point()),
+            Point { dummy: _ } => KShape::KPoint(self.vertex.curr.to_point()),
             Chamfer { length: _ } => {
                 KShape::KLine(kurbo::Line::new(self.s.to_point(), self.e.to_point()))
             }
@@ -315,51 +315,53 @@ impl HalfEdge {
                     arc_from_center_and_points(c, self.s, self.e)
                         .and_then(|arc| Some(KShape::KArc(arc)))
                 })
-                .unwrap_or(KShape::KPoint(self.vertex.pos.to_point())),
+                .unwrap_or(KShape::KPoint(self.vertex.curr.to_point())),
         }
     }
     pub fn get_sagitta(&self, v_next: Vec2) -> Option<Vec2> {
         use EdgeKind::*;
         match self.edge {
             Segment { dum: _ } => None,
-            Arc { sag_rel } => SegBundle::new(self.vertex.pos, v_next)
-                .and_then(|sb| Some(sb.m() - sb.n() * sb.len() * sag_rel.value)),
+            Arc { sag_rel } => SegBundle::new(self.vertex.curr, v_next)
+                .and_then(|sb| Some(sb.m() - sb.n() * sb.len() * sag_rel.curr)),
         }
     }
     pub fn get_sagitta_rel(&self) -> f64 {
         use EdgeKind::*;
         match self.edge {
-            Segment { dum: sag_rel } => sag_rel.value,
-            Arc { sag_rel } => sag_rel.value,
+            Segment { dum: sag_rel } => sag_rel.curr,
+            Arc { sag_rel } => sag_rel.curr,
         }
     }
     pub fn set_sagitta_rel(&mut self, s_rel: f64) {
         use EdgeKind::*;
         match &mut self.edge {
-            Segment { dum: sag_rel } => sag_rel.value = s_rel,
-            Arc { sag_rel } => sag_rel.value = s_rel,
+            Segment { dum: sag_rel } => sag_rel.curr = s_rel,
+            Arc { sag_rel } => sag_rel.curr = s_rel,
         }
     }
     pub fn get_k_edge(&self, s_next: Vec2, v_next: Vec2) -> KShape {
         use EdgeKind::*;
-        SegBundle::new(self.vertex.pos, v_next)
+        SegBundle::new(self.vertex.curr, v_next)
             .and_then(|sb| match self.edge {
                 Segment { dum: _ } => Some(KShape::KLine(kurbo::Line::new(
                     self.e.to_point(),
                     s_next.to_point(),
                 ))),
                 Arc { sag_rel } => {
-                    let sagitta_pt = sb.m() - sb.n() * sb.len() * sag_rel.value;
-                    circle_from_three_points(self.vertex.pos, sagitta_pt, v_next).and_then(
+                    let sagitta_pt = sb.m() - sb.n() * sb.len() * sag_rel.curr;
+                    circle_from_three_points(self.vertex.curr, sagitta_pt, v_next).and_then(
                         |(center, radius)| {
                             let start_angle = (self.e - center).atan2();
                             let end_angle = (s_next - center).atan2();
-                            let sweep_angle =
-                                if (v_next - sagitta_pt).cross(self.vertex.pos - sagitta_pt) > 0. {
-                                    (end_angle - start_angle).rem_euclid(PI * 2.)
-                                } else {
-                                    (end_angle - start_angle).rem_euclid(PI * 2.) - 2. * PI
-                                };
+                            let sweep_angle = if (v_next - sagitta_pt)
+                                .cross(self.vertex.curr - sagitta_pt)
+                                > 0.
+                            {
+                                (end_angle - start_angle).rem_euclid(PI * 2.)
+                            } else {
+                                (end_angle - start_angle).rem_euclid(PI * 2.) - 2. * PI
+                            };
                             let arc = kurbo::Arc {
                                 center: center.to_point(),
                                 radii: Vec2::new(radius, radius),
@@ -373,12 +375,12 @@ impl HalfEdge {
                 }
             })
             .unwrap_or(KShape::KLine(kurbo::Line::new(
-                self.vertex.pos.to_point(),
+                self.vertex.curr.to_point(),
                 v_next.to_point(),
             )))
     }
     pub fn get_distance_to_vertex(&self, pos: Vec2) -> (f64, Vec2) {
-        ((self.vertex.pos - pos).hypot(), self.get_vertex().pos)
+        ((self.vertex.curr - pos).hypot(), self.get_vertex().curr)
     }
     pub fn get_distance_to_c(&self, pos: Vec2) -> Option<(f64, Vec2)> {
         self.c.and_then(|c| Some(((c - pos).hypot(), c)))
@@ -401,10 +403,10 @@ impl HalfEdge {
         }
     }
     pub fn move_vertex(&mut self, dpos: Vec2) {
-        self.vertex.pos = self.vertex.saved_pos + dpos;
+        self.vertex.curr = self.vertex.saved + dpos;
     }
     pub fn set_vertex_pos(&mut self, pos: Vec2) {
-        self.vertex.pos = pos;
+        self.vertex.curr = pos;
     }
 
     // pub fn move_vertex_kind(&mut self, dpos: Vec2) {

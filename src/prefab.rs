@@ -37,23 +37,7 @@ pub fn line_path(pos1: Vec2, pos2: Vec2) -> BezPath {
         PathEl::LineTo(pos2.to_point()),
     ])
 }
-pub fn get_helpers_colors(state: Status) -> Colors {
-    use HS::*;
-    match (state.is_hs(Select), state.is_hs(Highlight)) {
-        (true, _) => Colors {
-            color: Color::Gray,
-            fill_color: Color::Gray,
-        },
-        (false, false) => Colors {
-            color: Color::Gray,
-            fill_color: Color::Gray,
-        },
-        (false, true) => Colors {
-            color: Color::Gray,
-            fill_color: Color::Gray,
-        },
-    }
-}
+
 pub fn get_shapes_colors(state: Status) -> Colors {
     use HS::*;
     match (state.is_hs(Select), state.is_hs(Highlight)) {
