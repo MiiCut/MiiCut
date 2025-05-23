@@ -165,7 +165,7 @@ impl GridRules {
         draw_rec_grid_spacing: f64,
         drawing_offset: Vec2,
         drawing_scale: f64,
-    ) -> (CanvasKind, (BezPath, Pattern, Colors, Vec<CanvasText>)) {
+    ) -> (CanvasKind, BezPath, Pattern, Colors, Vec<CanvasText>) {
         use PathEl::*;
         let mut v: Vec<PathEl> = vec![];
         let mut texts: Vec<CanvasText> = vec![];
@@ -219,15 +219,13 @@ impl GridRules {
 
         (
             CanvasKind::Grid,
-            (
-                BezPath::from_vec(v),
-                Pattern::Rules,
-                Colors {
-                    color: Color::Rules,
-                    fill_color: Color::Transparent,
-                },
-                texts,
-            ),
+            BezPath::from_vec(v),
+            Pattern::Rules,
+            Colors {
+                color: Color::Rules,
+                fill_color: Color::Transparent,
+            },
+            texts,
         )
     }
 
@@ -235,7 +233,7 @@ impl GridRules {
         &mut self,
         draw_rec_size: Size,
         draw_rec_grid_spacing: f64,
-    ) -> (CanvasKind, (BezPath, Pattern, Colors, Vec<CanvasText>)) {
+    ) -> (CanvasKind, BezPath, Pattern, Colors, Vec<CanvasText>) {
         use PathEl::*;
         let mut v: Vec<PathEl> = vec![];
         let spacing = 10. * draw_rec_grid_spacing;
@@ -261,15 +259,13 @@ impl GridRules {
 
         (
             CanvasKind::Grid,
-            (
-                BezPath::from_vec(v),
-                Pattern::GridPrimary,
-                Colors {
-                    color: Color::GridPrimary,
-                    fill_color: Color::Transparent,
-                },
-                vec![],
-            ),
+            BezPath::from_vec(v),
+            Pattern::GridPrimary,
+            Colors {
+                color: Color::GridPrimary,
+                fill_color: Color::Transparent,
+            },
+            vec![],
         )
     }
 
@@ -277,7 +273,7 @@ impl GridRules {
         &mut self,
         draw_rec_size: Size,
         draw_rec_grid_spacing: f64,
-    ) -> (CanvasKind, (BezPath, Pattern, Colors, Vec<CanvasText>)) {
+    ) -> (CanvasKind, BezPath, Pattern, Colors, Vec<CanvasText>) {
         use PathEl::*;
         let mut v: Vec<PathEl> = vec![];
 
@@ -301,15 +297,13 @@ impl GridRules {
 
         (
             CanvasKind::Grid,
-            (
-                BezPath::from_vec(v),
-                Pattern::GridSecondary,
-                Colors {
-                    color: Color::GridSecondary,
-                    fill_color: Color::Transparent,
-                },
-                vec![],
-            ),
+            BezPath::from_vec(v),
+            Pattern::GridSecondary,
+            Colors {
+                color: Color::GridSecondary,
+                fill_color: Color::Transparent,
+            },
+            vec![],
         )
     }
 }
@@ -385,6 +379,7 @@ impl Canvases {
             grid_snap: 1.,
         })
     }
+
     pub fn clear_background_canvas(&mut self) {
         self.c_back_ctx.clear_rect(
             0.,
@@ -393,6 +388,7 @@ impl Canvases {
             self.c_main.height() as f64,
         );
     }
+
     pub fn draw_grid_and_rules(&mut self) {
         self.c_grid_ctx.clear_rect(
             0.,
@@ -402,28 +398,27 @@ impl Canvases {
         );
 
         // Rules
-        let (canvas_kind, bundle) = self.grid_rules.draw_rules(
+        let (canvas_kind, path, pattern, colors, texts) = self.grid_rules.draw_rules(
             self.get_drawing_size(),
             self.get_grid_size(),
             self.drawing_offset,
             self.drawing_scale,
         );
-
-        self.draw_path(&canvas_kind, bundle);
+        self.draw_path(&canvas_kind, &path, pattern, colors, texts);
 
         // Primary grid
-        let (canvas_kind, bundle) = self
+        let (canvas_kind, path, pattern, colors, texts) = self
             .grid_rules
             .draw_grid_primary(self.get_drawing_size(), self.get_grid_size());
-
-        self.draw_path(&canvas_kind, bundle);
+        self.draw_path(&canvas_kind, &path, pattern, colors, texts);
 
         // Secondary grid
-        let (canvas_kind, bundle) = self
+        let (canvas_kind, path, pattern, colors, texts) = self
             .grid_rules
             .draw_grid_secondary(self.get_drawing_size(), self.get_grid_size());
-        self.draw_path(&canvas_kind, bundle);
+        self.draw_path(&canvas_kind, &path, pattern, colors, texts);
     }
+
     pub fn clear_main_canvas(&mut self) {
         self.c_main_ctx.clear_rect(
             0.,
@@ -442,15 +437,13 @@ impl Canvases {
         let origin = to_draw(self.drawing_offset, self.drawing_scale, self.drawing_offset);
         self.draw_path(
             &CanvasKind::Grid,
-            (
-                helper_point_path(origin, 5.),
-                Pattern::Rules,
-                Colors {
-                    color: Color::Rules,
-                    fill_color: Color::Transparent,
-                },
-                vec![],
-            ),
+            &helper_point_path(origin, 5.),
+            Pattern::Rules,
+            Colors {
+                color: Color::Rules,
+                fill_color: Color::Transparent,
+            },
+            vec![],
         );
     }
 
@@ -505,15 +498,18 @@ impl Canvases {
             .expect("Failed to draw text");
         ctx.restore();
     }
+
     pub fn draw_path(
         &self,
         canvas_kind: &CanvasKind,
-        bundle: (BezPath, Pattern, Colors, Vec<CanvasText>),
+        path: &BezPath,
+        pattern: Pattern,
+        colors: Colors,
+        texts: Vec<CanvasText>,
     ) {
         let ctx: &CanvasRenderingContext2d = self.get_context(&canvas_kind);
         let scale = self.get_drawing_scale();
         let offset = self.get_drawing_offset();
-        let (path, pattern, colors, texts) = bundle;
 
         let (stroke_style, stroke_width, filled) = pattern.get();
         ctx.set_line_dash(&stroke_style).unwrap();
@@ -557,6 +553,7 @@ impl Canvases {
             self.draw_text(canvas_kind, text);
         }
     }
+
     pub fn draw_closed_path(
         &self,
         canvas_kind: &CanvasKind,
@@ -614,6 +611,7 @@ impl Canvases {
             self.draw_text(canvas_kind, text);
         }
     }
+
     pub fn draw_pointer(&self, position: Vec2) {
         let ctx = self.get_context(&CanvasKind::Draw);
         let scale = self.get_drawing_scale();
@@ -638,6 +636,7 @@ impl Canvases {
 
         ctx.stroke();
     }
+
     pub fn get_main_canvas(&self) -> &HtmlCanvasElement {
         &self.c_main
     }

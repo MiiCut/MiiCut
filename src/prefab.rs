@@ -1,7 +1,3 @@
-use crate::{
-    canvas::{Color, Colors},
-    types::{Status, HS},
-};
 use kurbo::{BezPath, Circle, PathEl, Shape, Vec2};
 
 pub fn centroid_path(pos: Vec2, _scale: f64, size: f64) -> BezPath {
@@ -38,156 +34,156 @@ pub fn line_path(pos1: Vec2, pos2: Vec2) -> BezPath {
     ])
 }
 
-pub fn get_shapes_colors(state: Status) -> Colors {
-    use HS::*;
-    match (state.is_hs(Select), state.is_hs(Highlight)) {
-        (true, _) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Black65Opacity,
-        },
-        (false, false) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Black65Opacity,
-        },
-        (false, true) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Black65Opacity,
-        },
-    }
-}
-pub fn get_final_contour_colors(state: Status) -> Colors {
-    use HS::*;
-    match (state.is_hs(Select), state.is_hs(Highlight)) {
-        (true, _) => Colors {
-            color: Color::Black,
-            fill_color: Color::Gray90Opacity,
-        },
-        (false, false) => Colors {
-            color: Color::Black,
-            fill_color: Color::Gray90Opacity,
-        },
-        (false, true) => Colors {
-            color: Color::Black,
-            fill_color: Color::Gray90Opacity,
-        },
-    }
-}
-pub fn get_on_creation_colors(state: Status) -> Colors {
-    use HS::*;
-    match (state.is_hs(Select), state.is_hs(Highlight)) {
-        (true, _) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Gray60Opacity,
-        },
-        (false, false) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Gray60Opacity,
-        },
-        (false, true) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Gray60Opacity,
-        },
-    }
-}
-pub fn get_prims_colors(state: Status) -> Colors {
-    use HS::*;
-    match (state.is_hs(Select), state.is_hs(Highlight)) {
-        (true, _) => Colors {
-            color: Color::Purple55Opacity,
-            fill_color: Color::Purple55Opacity,
-        },
-        (false, false) => Colors {
-            color: Color::Purple55Opacity,
-            fill_color: Color::Purple55Opacity,
-        },
-        (false, true) => Colors {
-            color: Color::Purple55Opacity,
-            fill_color: Color::Purple55Opacity,
-        },
-    }
-}
-pub fn get_controls_colors(state: Status) -> Colors {
-    use HS::*;
-    match (state.is_hs(Select), state.is_hs(Highlight)) {
-        (false, false) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Transparent,
-        },
-        (false, true) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Black65Opacity,
-        },
-        (true, _) => Colors {
-            color: Color::Red,
-            fill_color: Color::Red,
-        },
-    }
-}
-pub fn get_centroids_colors(state: Status) -> Colors {
-    use HS::*;
-    match (state.is_hs(Select), state.is_hs(Highlight)) {
-        (false, false) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Transparent,
-        },
-        (false, true) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Black65Opacity,
-        },
-        (true, _) => Colors {
-            color: Color::Red,
-            fill_color: Color::Red,
-        },
-    }
-}
-pub fn get_helpers_centroid_colors(state: Status) -> Colors {
-    use HS::*;
-    match (state.is_hs(Select), state.is_hs(Highlight)) {
-        (true, _) => Colors {
-            color: Color::Gray,
-            fill_color: Color::Gray,
-        },
-        (false, false) => Colors {
-            color: Color::Gray,
-            fill_color: Color::Gray,
-        },
-        (false, true) => Colors {
-            color: Color::Gray,
-            fill_color: Color::Gray,
-        },
-    }
-}
-pub fn get_dim_colors(state: Status) -> Colors {
-    use HS::*;
-    match (state.is_hs(Select), state.is_hs(Highlight)) {
-        (true, _) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Black65Opacity,
-        },
-        (false, false) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Black65Opacity,
-        },
-        (false, true) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Black65Opacity,
-        },
-    }
-}
-pub fn get_dim_text_colors(state: Status) -> Colors {
-    use HS::*;
-    match (state.is_hs(Select), state.is_hs(Highlight)) {
-        (true, _) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Black65Opacity,
-        },
-        (false, false) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Black65Opacity,
-        },
-        (false, true) => Colors {
-            color: Color::Black65Opacity,
-            fill_color: Color::Black65Opacity,
-        },
-    }
-}
+// pub fn get_shapes_colors(state: Status) -> Colors {
+//     use HS::*;
+//     match (state.is_hs(Select), state.is_hs(Highlight)) {
+//         (true, _) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Black65Opacity,
+//         },
+//         (false, false) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Black65Opacity,
+//         },
+//         (false, true) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Black65Opacity,
+//         },
+//     }
+// }
+// pub fn get_final_contour_colors(state: Status) -> Colors {
+//     use HS::*;
+//     match (state.is_hs(Select), state.is_hs(Highlight)) {
+//         (true, _) => Colors {
+//             color: Color::Black,
+//             fill_color: Color::Gray90Opacity,
+//         },
+//         (false, false) => Colors {
+//             color: Color::Black,
+//             fill_color: Color::Gray90Opacity,
+//         },
+//         (false, true) => Colors {
+//             color: Color::Black,
+//             fill_color: Color::Gray90Opacity,
+//         },
+//     }
+// }
+// pub fn get_on_creation_colors(state: Status) -> Colors {
+//     use HS::*;
+//     match (state.is_hs(Select), state.is_hs(Highlight)) {
+//         (true, _) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Gray60Opacity,
+//         },
+//         (false, false) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Gray60Opacity,
+//         },
+//         (false, true) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Gray60Opacity,
+//         },
+//     }
+// }
+// pub fn get_prims_colors(state: Status) -> Colors {
+//     use HS::*;
+//     match (state.is_hs(Select), state.is_hs(Highlight)) {
+//         (true, _) => Colors {
+//             color: Color::Purple55Opacity,
+//             fill_color: Color::Purple55Opacity,
+//         },
+//         (false, false) => Colors {
+//             color: Color::Purple55Opacity,
+//             fill_color: Color::Purple55Opacity,
+//         },
+//         (false, true) => Colors {
+//             color: Color::Purple55Opacity,
+//             fill_color: Color::Purple55Opacity,
+//         },
+//     }
+// }
+// pub fn get_controls_colors(state: Status) -> Colors {
+//     use HS::*;
+//     match (state.is_hs(Select), state.is_hs(Highlight)) {
+//         (false, false) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Transparent,
+//         },
+//         (false, true) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Black65Opacity,
+//         },
+//         (true, _) => Colors {
+//             color: Color::Red,
+//             fill_color: Color::Red,
+//         },
+//     }
+// }
+// pub fn get_centroids_colors(state: Status) -> Colors {
+//     use HS::*;
+//     match (state.is_hs(Select), state.is_hs(Highlight)) {
+//         (false, false) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Transparent,
+//         },
+//         (false, true) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Black65Opacity,
+//         },
+//         (true, _) => Colors {
+//             color: Color::Red,
+//             fill_color: Color::Red,
+//         },
+//     }
+// }
+// pub fn get_helpers_centroid_colors(state: Status) -> Colors {
+//     use HS::*;
+//     match (state.is_hs(Select), state.is_hs(Highlight)) {
+//         (true, _) => Colors {
+//             color: Color::Gray,
+//             fill_color: Color::Gray,
+//         },
+//         (false, false) => Colors {
+//             color: Color::Gray,
+//             fill_color: Color::Gray,
+//         },
+//         (false, true) => Colors {
+//             color: Color::Gray,
+//             fill_color: Color::Gray,
+//         },
+//     }
+// }
+// pub fn get_dim_colors(state: Status) -> Colors {
+//     use HS::*;
+//     match (state.is_hs(Select), state.is_hs(Highlight)) {
+//         (true, _) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Black65Opacity,
+//         },
+//         (false, false) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Black65Opacity,
+//         },
+//         (false, true) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Black65Opacity,
+//         },
+//     }
+// }
+// pub fn get_dim_text_colors(state: Status) -> Colors {
+//     use HS::*;
+//     match (state.is_hs(Select), state.is_hs(Highlight)) {
+//         (true, _) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Black65Opacity,
+//         },
+//         (false, false) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Black65Opacity,
+//         },
+//         (false, true) => Colors {
+//             color: Color::Black65Opacity,
+//             fill_color: Color::Black65Opacity,
+//         },
+//     }
+// }

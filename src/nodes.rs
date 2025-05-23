@@ -44,6 +44,15 @@ pub struct Nod<E: Clone> {
     pub name: String,
     pub element: E,
 }
+impl<E: Clone> Nod<E> {
+    pub fn new_element(name: &str, element: E) -> Self {
+        Nod {
+            id: NodUId::new(),
+            name: name.to_string(),
+            element,
+        }
+    }
+}
 impl<E: Clone> Clone for Nod<E> {
     fn clone(&self) -> Self {
         Nod {
@@ -64,21 +73,14 @@ impl<E: Clone> PartialEq for Nod<E> {
     }
 }
 impl<E: Clone> Eq for Nod<E> {}
-impl<E: Clone> Nod<E> {
-    pub fn new_element(name: &str, element: E) -> Self {
-        Nod {
-            id: NodUId::new(),
-            name: name.to_string(),
-            element,
-        }
-    }
-}
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
 struct NodeSelector {
     selectable_nodes: Vec<NodUId>, // IDs of selectable nodes
     current_index: usize,          // Current index in the list
 }
+#[allow(dead_code)]
 impl NodeSelector {
     pub fn new() -> Self {
         Self {

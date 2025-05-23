@@ -3,9 +3,7 @@ macro_rules! log {
         web_sys::console::log_1(&format!( $( $t )* ).into())
     }
 }
-use crate::curves::half_edge::HalfEdge;
 use crate::nodes::NodUId;
-use crate::types::VecRing;
 use approx::*;
 use geo::{LineString, Polygon};
 use kurbo::{
@@ -2045,16 +2043,16 @@ pub fn move_vertex_with_3v_snapping(
     }
 }
 
-pub fn area_from_hes(pts: &VecRing<HalfEdge>) -> f64 {
-    let len = pts.len();
-    let mut area = 0.0;
-    for idx in 0..len as i64 {
-        let vi = pts.get(idx).get_vertex().curr;
-        let vj = pts.get((idx + 1) % len as i64).get_vertex().curr;
-        area += vi.x * vj.y - vj.x * vi.y;
-    }
-    area * 0.5
-}
+// pub fn area_from_hes(pts: &VecRing<HalfEdge>) -> f64 {
+//     let len = pts.len();
+//     let mut area = 0.0;
+//     for idx in 0..len as i64 {
+//         let vi = pts.get(idx).get_vertex().curr;
+//         let vj = pts.get((idx + 1) % len as i64).get_vertex().curr;
+//         area += vi.x * vj.y - vj.x * vi.y;
+//     }
+//     area * 0.5
+// }
 
 /// CORRECTED VERSION WITH Y AXIS INVERTED
 pub fn arc_intersection_with_circle(arc: Arc, r: f64, circle_from_end: bool) -> Option<Vec2> {

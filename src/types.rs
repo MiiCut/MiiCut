@@ -64,32 +64,6 @@ impl Minimum {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum HS {
-    Highlight,
-    Select,
-}
-
-#[derive(Default, Copy, Clone, Debug, PartialEq)]
-pub struct Status {
-    highlighted: bool,
-    selected: bool,
-}
-impl Status {
-    pub fn is_hs(&self, hs: HS) -> bool {
-        match hs {
-            HS::Highlight => self.highlighted,
-            HS::Select => self.selected,
-        }
-    }
-    pub fn set_hs(&mut self, hs: HS, value: bool) {
-        match hs {
-            HS::Highlight => self.highlighted = value,
-            HS::Select => self.selected = value,
-        }
-    }
-}
-
 #[derive(Copy, Debug, Clone)]
 pub struct Value<T: Copy + Clone + Debug + AddAssign> {
     pub saved: T,

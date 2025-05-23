@@ -3,37 +3,24 @@ use wasm_bindgen::prelude::*;
 use web_sys::{window, Document, Element, Event, EventTarget, HtmlElement};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum IconsShapes {
+pub enum Icons {
+    Arrow,
     Disc,
     Rectangle,
     RectangleFillet,
     Custom,
     Oblong,
 }
-impl IconsShapes {
-    pub fn id(&self) -> &'static str {
-        use IconsShapes::*;
-        match self {
-            Disc => "icon-circle",
-            Rectangle => "icon-rectangle",
-            RectangleFillet => "icon-rectangle-fillet",
-            Custom => "icon-custom",
-            Oblong => "icon-oblong",
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum Icons {
-    Arrow,
-    IShapes(IconsShapes),
-}
 impl Icons {
     pub fn id(&self) -> &'static str {
         use Icons::*;
         match self {
             Arrow => "icon-arrow",
-            IShapes(ishape) => ishape.id(),
+            Disc => "icon-circle",
+            Rectangle => "icon-rectangle",
+            RectangleFillet => "icon-rectangle-fillet",
+            Custom => "icon-custom",
+            Oblong => "icon-oblong",
         }
     }
     pub fn get_element(&self) -> Option<Element> {
