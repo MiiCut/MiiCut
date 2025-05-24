@@ -24,7 +24,6 @@ pub mod types;
 pub mod undoredo;
 use crate::dom::*;
 use crate::math::*;
-use canvas::Colors;
 use canvas::{
     CanvasKind, CanvasText, CanvasTextConfig, Canvases, Color, Pattern, TextAlign, TextPos,
 };
@@ -35,6 +34,8 @@ use inputs::*;
 use kurbo::{Size, Vec2};
 use nodes::Nod;
 use nodes::Set;
+use prefab::get_shapes_colors;
+use prefab::point_path;
 use shapes::drawable::Drawable;
 use shapes::drawable::{ClosedShapeType, ClosedShapes};
 use std::collections::HashSet;
@@ -187,9 +188,24 @@ fn create_app_vars<E: Drawable>(window: Window) -> Result<(), JsValue> {
     let bl = Vec2::new(-100., 10.);
     let tr = Vec2::new(10., -100.);
 
+    let e1 = Vec2::new(20., -100.);
+    let side = Vec2::new(-40., 0.);
+    let e2 = Vec2::new(20., 100.);
+
+    let center = Vec2::new(0., 40.);
+    let radius = Vec2::new(0., 100.);
     let sh1 = ClosedShapes::new(ClosedShapeType::Rectangle, vec![bl, tr]);
-    if let Some(sh) = sh1.clone() {
-        set.push(Nod::<ClosedShapes>::new_element("test", sh));
+    let sh2 = ClosedShapes::new(ClosedShapeType::Oblong, vec![e1, side, e2]);
+    let sh3 = ClosedShapes::new(ClosedShapeType::Disc, vec![center, radius]);
+
+    if let Some(sh) = sh1 {
+        set.push(Nod::<ClosedShapes>::new_element("rect", sh));
+    }
+    if let Some(sh) = sh2 {
+        set.push(Nod::<ClosedShapes>::new_element("oblong", sh));
+    }
+    if let Some(sh) = sh3 {
+        set.push(Nod::<ClosedShapes>::new_element("disc", sh));
     }
 
     let app_vars = Rc::new(RefCell::new(AppVars {
@@ -483,17 +499,31 @@ fn update<E: Drawable>(
     sys_mouse: SystemMouse,
 ) -> Result<(), MyError> {
     let user_action = avb.update_inputs(mouse_event, sys_mouse);
-    let curr_pointer = avb.userui.pointer.curr;
+    let pointer = avb.userui.pointer;
+    let shift_pressed = avb.userui.keys_states.shift_pressed;
     let snap = avb.userui.snap;
+
     match avb.icon_selected {
         Icons::Arrow => match user_action {
             UserAction::ClickDown(button) => {
                 if button == MouseButton::Left {
-                    avb.set.select_nodes(curr_pointer);
+                    avb.set.save_nodes_positions();
+                    if !avb.set.select_element_vertex(pointer, shift_pressed) {
+                        avb.set.select_nodes(pointer, shift_pressed);
+                    }
                 }
             }
-            UserAction::Move(moving) => {
-                //
+            UserAction::Move(btn) => {
+                if btn == ButtonLevel::Up {
+                    avb.set.highlight_nodes(pointer);
+                } else {
+                    for (_, node) in avb.set.nodes.iter_mut() {
+                        let selected = node.element.get_vertices_selected().clone();
+                        for v_id in selected.iter() {
+                            node.element.move_vertex(*v_id, pointer);
+                        }
+                    }
+                }
             }
             _ => {}
         },
@@ -849,7 +879,6 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     avb.canvases.clear_main_canvas();
     // let das = &avb.canvases.get_drawing_size();
     // let cinfo = avb.canvases.get_canvas_infos();
-
     // Draw the final contour
     // let full_segs = avb.set.shapes.get_full_segs();
     // avb.canvases.draw_closed_path(
@@ -863,21 +892,33 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
 
     // Draw the nodes elements (shapes outlines)
     for e in avb.set.nodes.values() {
-        let fill_color = if avb.set.nodes_selected.contains(&e.id) {
-            Color::Pink30Opacity
-        } else {
-            Color::Gray90Opacity
-        };
+        let colors = get_shapes_colors(
+            avb.set.nodes_selected.contains(&e.id),
+            avb.set.nodes_highlighted.contains(&e.id),
+        );
         avb.canvases.draw_path(
             &CanvasKind::Draw,
             e.element.get_bezpath(),
             Pattern::Composed(true),
-            Colors {
-                color: Color::Black,
-                fill_color,
-            },
+            colors,
             vec![],
         );
+    }
+    // Draw the elements vertices
+    for e in avb.set.nodes.values() {
+        for (v_id, vertex) in e.element.get_vertices() {
+            let colors = get_shapes_colors(
+                e.element.get_vertices_selected().contains(&v_id),
+                e.element.get_vertices_highlighted().contains(&v_id),
+            );
+            avb.canvases.draw_path(
+                &CanvasKind::Draw,
+                &point_path(vertex.curr, 1.),
+                Pattern::Point,
+                colors,
+                vec![],
+            );
+        }
     }
 
     // Draw the controls points
@@ -899,12 +940,10 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     //         }
     //     }
     // }
-
     // CLIPBOARD
     // if let Some(item) = avb.clipboard.get_paste() {
     //     match item {}
     // }
-
     // Draw the data that is being created
     // let create_colors = Colors {
     //     color: Color::Black,
@@ -918,7 +957,6 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     //                 let end = points.1;
     //                 let radius = (end - center).length();
     //                 let tolerance = 0.1;
-
     //                 avb.canvases.draw_path(
     //                     &CanvasKind::Draw,
     //                     (
@@ -1059,10 +1097,8 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     //             }
     //         }
     //     },
-
     //     _ => (),
     // }
-
     // let end_time = performance.now();
     // log!("Rendering time: {:.2} ms", end_time - start_time);
     // Draw inputs.pointer

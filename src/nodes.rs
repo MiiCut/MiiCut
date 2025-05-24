@@ -11,6 +11,7 @@ pub struct Set<E: Clone> {
     pub nodes: HashMap<NodUId, Nod<E>>,
     pub nodes_highlighted: HashSet<NodUId>,
     pub nodes_selected: HashSet<NodUId>,
+    pub node_selector: NodeSelector,
 }
 impl<E: Clone> Set<E> {
     pub fn new() -> Self {
@@ -18,6 +19,7 @@ impl<E: Clone> Set<E> {
             nodes: HashMap::new(),
             nodes_highlighted: HashSet::new(),
             nodes_selected: HashSet::new(),
+            node_selector: NodeSelector::new(),
         }
     }
     // Insert a new node into the tree
@@ -76,7 +78,7 @@ impl<E: Clone> Eq for Nod<E> {}
 
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
-struct NodeSelector {
+pub struct NodeSelector {
     selectable_nodes: Vec<NodUId>, // IDs of selectable nodes
     current_index: usize,          // Current index in the list
 }

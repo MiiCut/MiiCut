@@ -1,5 +1,10 @@
 use kurbo::Vec2;
-use std::{fmt::Debug, ops::AddAssign};
+use std::{
+    fmt::Debug,
+    ops::{Add, AddAssign},
+};
+
+use crate::math::EPSILON;
 
 #[derive(Debug, Clone)]
 pub struct VecRing<T> {
@@ -65,12 +70,12 @@ impl Minimum {
 }
 
 #[derive(Copy, Debug, Clone)]
-pub struct Value<T: Copy + Clone + Debug + AddAssign> {
+pub struct Value<T: Copy + Clone + Debug> {
     pub saved: T,
     pub last: T,
     pub curr: T,
 }
-impl<T: Copy + Clone + Debug + AddAssign> Value<T> {
+impl<T: Copy + Clone + Debug + AddAssign + Add<Output = T>> Value<T> {
     pub fn new(value: T) -> Self {
         Self {
             saved: value,
@@ -82,7 +87,7 @@ impl<T: Copy + Clone + Debug + AddAssign> Value<T> {
         self.saved = self.curr;
     }
     pub fn add(&mut self, value: T) {
-        self.curr += value;
+        self.curr = self.saved + value;
     }
     pub fn set(&mut self, value: T) {
         self.curr = value;
@@ -136,4 +141,60 @@ pub enum SnapValue {
     SnapMin,
     SnapMed,
     SnapMax,
+}
+
+#[derive(Copy, Debug, Clone, PartialEq)]
+pub struct SegBundle {
+    pub s: Vec2,
+    pub e: Vec2,
+    pub m: Vec2,
+    pub u: Vec2,
+    pub n: Vec2,
+    pub len: f64,
+    pub a: f64,
+}
+impl SegBundle {
+    pub fn new(s: Vec2, e: Vec2) -> Option<Self> {
+        let seg_len = (e - s).hypot();
+        (seg_len >= EPSILON).then(|| {
+            let mid_pt = (e + s) / 2.;
+            let u_dir = (e - s).normalize();
+            let n_dir = Vec2::new(-u_dir.y, u_dir.x);
+            let a = (e - s).atan2();
+            SegBundle {
+                s,
+                e,
+                m: mid_pt,
+                u: u_dir,
+                n: n_dir,
+                len: seg_len,
+                a,
+            }
+        })
+    }
+    pub fn try_set_s(&mut self, s: Vec2) -> bool {
+        if (s - self.e).hypot() > EPSILON {
+            self.s = s;
+            self.update_seg_bdle();
+            true
+        } else {
+            false
+        }
+    }
+    pub fn try_set_e(&mut self, e: Vec2) -> bool {
+        if (e - self.s).hypot() > EPSILON {
+            self.e = e;
+            self.update_seg_bdle();
+            true
+        } else {
+            false
+        }
+    }
+    pub fn update_seg_bdle(&mut self) {
+        self.len = (self.e - self.s).hypot();
+        self.m = (self.e + self.s) / 2.;
+        self.u = (self.e - self.s).normalize();
+        self.n = Vec2::new(-self.u.y, self.u.x);
+        self.a = (self.e - self.s).atan2();
+    }
 }

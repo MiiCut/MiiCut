@@ -1,5 +1,7 @@
 use kurbo::{BezPath, Circle, PathEl, Shape, Vec2};
 
+use crate::canvas::{Color, Colors};
+
 pub fn centroid_path(pos: Vec2, _scale: f64, size: f64) -> BezPath {
     use PathEl::*;
     let v: Vec<PathEl> = vec![
@@ -34,23 +36,26 @@ pub fn line_path(pos1: Vec2, pos2: Vec2) -> BezPath {
     ])
 }
 
-// pub fn get_shapes_colors(state: Status) -> Colors {
-//     use HS::*;
-//     match (state.is_hs(Select), state.is_hs(Highlight)) {
-//         (true, _) => Colors {
-//             color: Color::Black65Opacity,
-//             fill_color: Color::Black65Opacity,
-//         },
-//         (false, false) => Colors {
-//             color: Color::Black65Opacity,
-//             fill_color: Color::Black65Opacity,
-//         },
-//         (false, true) => Colors {
-//             color: Color::Black65Opacity,
-//             fill_color: Color::Black65Opacity,
-//         },
-//     }
-// }
+pub fn get_shapes_colors(selected: bool, highlighted: bool) -> Colors {
+    match (selected, highlighted) {
+        (false, false) => Colors {
+            color: Color::Black,
+            fill_color: Color::Gray95Opacity,
+        },
+        (false, true) => Colors {
+            color: Color::Black,
+            fill_color: Color::Pink30Opacity,
+        },
+        (true, false) => Colors {
+            color: Color::Black,
+            fill_color: Color::Red55Opacity,
+        },
+        (true, true) => Colors {
+            color: Color::Black,
+            fill_color: Color::Red60Opacity,
+        },
+    }
+}
 // pub fn get_final_contour_colors(state: Status) -> Colors {
 //     use HS::*;
 //     match (state.is_hs(Select), state.is_hs(Highlight)) {

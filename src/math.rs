@@ -4,6 +4,7 @@ macro_rules! log {
     }
 }
 use crate::nodes::NodUId;
+use crate::types::SegBundle;
 use approx::*;
 use geo::{LineString, Polygon};
 use kurbo::{
@@ -2346,83 +2347,6 @@ pub fn intersect_lines(p1: Vec2, d1: Vec2, p2: Vec2, d2: Vec2) -> Option<Vec2> {
     // Compute the cross product of the difference and d2.
     let t = (diff.x * d2.y - diff.y * d2.x) / denom;
     Some(p1 + d1 * t)
-}
-
-#[derive(Copy, Debug, Clone, PartialEq)]
-pub struct SegBundle {
-    s: Vec2,
-    e: Vec2,
-    m: Vec2,
-    u: Vec2,
-    n: Vec2,
-    len: f64,
-    a: f64,
-}
-impl SegBundle {
-    pub fn new(s: Vec2, e: Vec2) -> Option<Self> {
-        let seg_len = (e - s).hypot();
-        (seg_len >= EPSILON).then(|| {
-            let mid_pt = (e + s) / 2.;
-            let u_dir = (e - s).normalize();
-            let n_dir = Vec2::new(-u_dir.y, u_dir.x);
-            let a = (e - s).atan2();
-            SegBundle {
-                s,
-                e,
-                m: mid_pt,
-                u: u_dir,
-                n: n_dir,
-                len: seg_len,
-                a,
-            }
-        })
-    }
-    pub fn s(&self) -> Vec2 {
-        self.s
-    }
-    pub fn e(&self) -> Vec2 {
-        self.e
-    }
-    pub fn m(&self) -> Vec2 {
-        self.m
-    }
-    pub fn u(&self) -> Vec2 {
-        self.u
-    }
-    pub fn n(&self) -> Vec2 {
-        self.n
-    }
-    pub fn len(&self) -> f64 {
-        self.len
-    }
-    pub fn a(&self) -> f64 {
-        self.a
-    }
-    pub fn try_set_s(&mut self, s: Vec2) -> bool {
-        if (s - self.e).hypot() > EPSILON {
-            self.s = s;
-            self.update_seg_bdle();
-            true
-        } else {
-            false
-        }
-    }
-    pub fn try_set_e(&mut self, e: Vec2) -> bool {
-        if (e - self.s).hypot() > EPSILON {
-            self.e = e;
-            self.update_seg_bdle();
-            true
-        } else {
-            false
-        }
-    }
-    pub fn update_seg_bdle(&mut self) {
-        self.len = (self.e - self.s).hypot();
-        self.m = (self.e + self.s) / 2.;
-        self.u = (self.e - self.s).normalize();
-        self.n = Vec2::new(-self.u.y, self.u.x);
-        self.a = (self.e - self.s).atan2();
-    }
 }
 
 pub fn intersect_circles(c1: Vec2, r1: f64, c2: Vec2, r2: f64) -> Option<(Vec2, Vec2)> {

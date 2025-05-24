@@ -8,7 +8,7 @@ use web_sys::MouseEvent;
 
 pub enum UserAction {
     ClickDown(MouseButton),
-    Move(bool),
+    Move(ButtonLevel),
     ClickUp(MouseButton),
 }
 #[derive(Copy, Clone, Debug)]
@@ -78,7 +78,7 @@ impl UserUI {
         );
         self.draw_pos = to_draw(self.canvas_pos, drawing_scale, drawing_offset);
 
-        // Pointer
+        // Pointer update
         self.pointer.set(self.draw_pos);
 
         match sys_mouse {
@@ -87,11 +87,12 @@ impl UserUI {
                 self.draw_pos_down = self.draw_pos;
                 self.button_level = ButtonLevel::Down;
                 self.moving = false;
+                self.pointer.save();
                 UserAction::ClickDown(self.mouse_button)
             }
             SystemMouse::Move => {
                 self.moving = true;
-                UserAction::Move(self.moving)
+                UserAction::Move(self.button_level)
             }
             SystemMouse::Up => {
                 self.canvas_pos_ms_up = self.canvas_pos;
@@ -154,7 +155,7 @@ pub enum SystemMouse {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-enum ButtonLevel {
+pub enum ButtonLevel {
     Down,
     Up,
 }

@@ -4,10 +4,15 @@
 //         web_sys::console::log_1(&format!( $( $t )* ).into());
 //     }
 // }
-use crate::{math::EPSILON, nodes::Set, types::Value};
+use crate::{
+    math::EPSILON,
+    nodes::Set,
+    types::{SegBundle, Value},
+};
 use geo::{LineString, Polygon};
 use kurbo::{Arc, BezPath, Circle, PathEl, Shape, Vec2};
 use std::{
+    collections::HashSet,
     f64::consts::PI,
     fmt::{Debug, Display},
     sync::atomic::{AtomicUsize, Ordering},
@@ -16,12 +21,22 @@ use std::{
 
 pub trait Drawable: Clone + 'static {
     const TOLERANCE: f64;
+    const GRAB_RADIUS: f64 = 5.0;
 
     fn op_next(&mut self);
     fn op_union(&mut self);
     fn op_force_union(&mut self);
     fn op_difference(&mut self);
-    fn move_vertex(&mut self, value_uid: ValueUId, delta: Vec2) -> Vec<ValueUId>;
+
+    fn get_vertices(&self) -> &Vec<(ValueUId, Value<Vec2>)>;
+    fn get_vertices_mut(&mut self) -> &mut Vec<(ValueUId, Value<Vec2>)>;
+    fn get_vertices_highlighted(&self) -> &HashSet<ValueUId>;
+    fn get_vertices_selected(&self) -> &HashSet<ValueUId>;
+    fn clear_vertices_selected(&mut self);
+    fn select_vertex(&mut self, position: Value<Vec2>, shift_pressed: bool) -> bool;
+    fn highlight_vertex(&mut self, position: Value<Vec2>) -> bool;
+    fn move_vertex(&mut self, value_uid: ValueUId, position: Value<Vec2>) -> Vec<ValueUId>;
+    fn save_vertices_positions(&mut self);
     fn contains(&self, pos: Vec2) -> bool {
         self.get_bezpath().contains(pos.to_point())
     }
@@ -29,13 +44,70 @@ pub trait Drawable: Clone + 'static {
 }
 
 impl<E: Drawable> Set<E> {
-    pub fn select_nodes(&mut self, position: Vec2) {
-        // Select the nodes whose element contains the position
-        for (id, node) in &self.nodes {
-            self.nodes_selected.clear();
-            if node.element.contains(position) {
-                self.nodes_selected.insert(*id);
+    pub fn select_element_vertex(&mut self, position: Value<Vec2>, shift_pressed: bool) -> bool {
+        // Select element vertices next to the position
+        if !shift_pressed {
+            for (_, node) in self.nodes.iter_mut() {
+                node.element.clear_vertices_selected();
             }
+            for (_, node) in self.nodes.iter_mut() {
+                if node.element.select_vertex(position, shift_pressed) {
+                    self.nodes_selected.clear();
+                    return true;
+                }
+            }
+            return false;
+        } else {
+            let mut select = false;
+            for (_, node) in self.nodes.iter_mut() {
+                select |= node.element.select_vertex(position, shift_pressed)
+            }
+            if select {
+                self.nodes_selected.clear();
+            }
+            return select;
+        }
+    }
+    pub fn select_nodes(&mut self, position: Value<Vec2>, shift_pressed: bool) {
+        // Select the nodes whose element contains the position
+        if !shift_pressed {
+            let mut nodes_selected = HashSet::new();
+            for (id, node) in &self.nodes {
+                if node.element.contains(position.curr) {
+                    nodes_selected.insert(*id);
+                }
+            }
+            if nodes_selected.len() > 0 {
+                self.node_selector
+                    .refresh_selectable_nodes(nodes_selected.clone());
+                if let Some(id) = self.node_selector.next_selection() {
+                    self.nodes_selected.clear();
+                    self.nodes_selected.insert(id);
+                }
+            } else {
+                self.nodes_selected.clear();
+            }
+        } else {
+            // Shift pressed, add to selection
+            for (id, node) in &self.nodes {
+                if node.element.contains(position.curr) {
+                    self.nodes_selected.insert(*id);
+                }
+            }
+        }
+    }
+    pub fn highlight_nodes(&mut self, position: Value<Vec2>) {
+        // Select the nodes whose element contains the position
+        self.nodes_highlighted.clear();
+        for (id, node) in &self.nodes {
+            if node.element.contains(position.curr) {
+                self.nodes_highlighted.insert(*id);
+            }
+        }
+    }
+    pub fn save_nodes_positions(&mut self) {
+        for (_, node) in self.nodes.iter_mut() {
+            node.element.save_vertices_positions();
         }
     }
 }
@@ -85,9 +157,11 @@ pub enum ClosedShapeType {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ClosedShapes {
-    pub shape_type: ClosedShapeType,
-    pub operation: Operation,
+    shape_type: ClosedShapeType,
+    operation: Operation,
     vertices: Vec<(ValueUId, Value<Vec2>)>,
+    vertices_highlighted: HashSet<ValueUId>,
+    vertices_selected: HashSet<ValueUId>,
 
     bezpath: BezPath,
     polygon: Polygon<f64>,
@@ -135,6 +209,8 @@ impl ClosedShapes {
                 .iter()
                 .map(|v| (ValueUId::new(), Value::new(*v)))
                 .collect(),
+            vertices_highlighted: HashSet::new(),
+            vertices_selected: HashSet::new(),
             bezpath: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         };
@@ -165,11 +241,9 @@ impl ClosedShapes {
                     // Perpendicular unit vector
                     let perp = Vec2::new(-dir.y, dir.x);
                     // Two points at e1 ± perp * radius
-                    let pt1 = e1 + perp * radius;
-                    let _pt2 = e1 - perp * radius;
+                    let pt2 = e1 - perp * radius;
                     // Two points at e2 ± perp * radius
                     let pt3 = e2 + perp * radius;
-                    let _pt4 = e2 - perp * radius;
 
                     path.extend(
                         Arc::new(
@@ -181,18 +255,18 @@ impl ClosedShapes {
                         )
                         .path_elements(Self::TOLERANCE),
                     );
-                    path.push(PathEl::MoveTo(pt1.to_point()));
-                    path.extend(
-                        Arc::new(
-                            e2.to_point(),
-                            Vec2::new(radius, radius),
-                            PI / 2.,
-                            -PI,
-                            angle,
-                        )
-                        .path_elements(Self::TOLERANCE),
-                    );
-                    path.push(PathEl::MoveTo(pt3.to_point()));
+                    path.push(PathEl::LineTo(pt3.to_point()));
+                    let mut arc2 = Arc::new(
+                        e2.to_point(),
+                        Vec2::new(radius, radius),
+                        PI / 2.,
+                        -PI,
+                        angle,
+                    )
+                    .path_elements(Self::TOLERANCE);
+                    arc2.next(); // Remove the MoveTo
+                    path.extend(arc2);
+                    path.push(PathEl::LineTo(pt2.to_point()));
                     path.push(PathEl::ClosePath);
                 } else {
                     path.extend(Circle::new(e2.to_point(), radius).path_elements(Self::TOLERANCE));
@@ -231,7 +305,53 @@ impl Drawable for ClosedShapes {
     fn op_difference(&mut self) {
         self.operation.difference();
     }
-    fn move_vertex(&mut self, value_uid: ValueUId, delta: Vec2) -> Vec<ValueUId> {
+
+    fn get_vertices(&self) -> &Vec<(ValueUId, Value<Vec2>)> {
+        &self.vertices
+    }
+    fn get_vertices_mut(&mut self) -> &mut Vec<(ValueUId, Value<Vec2>)> {
+        &mut self.vertices
+    }
+    fn get_vertices_highlighted(&self) -> &HashSet<ValueUId> {
+        &self.vertices_highlighted
+    }
+    fn get_vertices_selected(&self) -> &HashSet<ValueUId> {
+        &self.vertices_selected
+    }
+    fn clear_vertices_selected(&mut self) {
+        self.vertices_selected.clear();
+    }
+    fn select_vertex(&mut self, position: Value<Vec2>, shift_pressed: bool) -> bool {
+        if !shift_pressed {
+            self.vertices_selected.clear();
+            for (uid, value) in &self.vertices {
+                if (value.curr - position.curr).hypot() < Self::GRAB_RADIUS {
+                    self.vertices_selected.insert(*uid);
+                    return true;
+                }
+            }
+            return false;
+        } else {
+            let mut select = false;
+            for (uid, value) in &self.vertices {
+                if (value.curr - position.curr).hypot() < Self::GRAB_RADIUS {
+                    self.vertices_selected.insert(*uid);
+                    log!("selecting");
+                    select = true;
+                }
+            }
+            log!(
+                "select || self.vertices_selected.len() > 0 {}",
+                select || self.vertices_selected.len() > 0
+            );
+            return select || self.vertices_selected.len() > 0;
+        }
+    }
+    fn highlight_vertex(&mut self, _position: Value<Vec2>) -> bool {
+        false
+    }
+    fn move_vertex(&mut self, value_uid: ValueUId, position: Value<Vec2>) -> Vec<ValueUId> {
+        let delta = position.curr - position.saved;
         match self.shape_type {
             ClosedShapeType::Disc => {
                 if self.vertices.len() != 2 {
@@ -256,51 +376,50 @@ impl Drawable for ClosedShapes {
                 if self.vertices.len() != 3 {
                     return vec![];
                 }
-                let mut e1 = self.vertices[0].1.curr;
-                let side = self.vertices[1].1.curr;
-                let mut e2 = self.vertices[2].1.curr;
+                if let Some(seg) = SegBundle::new(self.vertices[0].1.curr, self.vertices[2].1.curr)
+                {
+                    let side = self.vertices[1].1.curr;
+                    let signed_d = (side - seg.m).dot(seg.n);
 
-                let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
-                    Some(i) => i,
-                    None => return vec![],
-                };
-                // The side is moved, this doesn't change the pos of e1, e2
-                if idx == 1 {
-                    if (e1 - e2).length() < EPSILON {
-                        self.vertices[1].1.add(delta);
-                    } else {
-                        let dir = (e2 - e1).normalize();
-                        let proj_along = dir * delta.dot(dir);
+                    let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
+                        Some(i) => i,
+                        None => return vec![],
+                    };
+                    // The side is moved, this doesn't change the pos of e1, e2
+                    if idx == 1 {
+                        let proj_along = seg.u * delta.dot(seg.u);
                         self.vertices[1].1.add(delta - proj_along);
+                        self.set_bezpath();
+                        return vec![self.vertices[1].0];
+                    } else {
+                        // e1 or e2 is moved, this affect the position of the side
+                        // Apply the move to whichever endpoint
+                        if idx == 0 {
+                            self.vertices[0].1.add(delta);
+                        } else {
+                            self.vertices[2].1.add(delta);
+                        }
+                        if let Some(seg) =
+                            SegBundle::new(self.vertices[0].1.curr, self.vertices[2].1.curr)
+                        {
+                            self.vertices[1].1.curr = seg.m + seg.n * signed_d;
+                            self.set_bezpath();
+                            if idx == 0 {
+                                return vec![self.vertices[0].0, self.vertices[1].0];
+                            } else {
+                                return vec![self.vertices[2].0, self.vertices[1].0];
+                            }
+                        } else {
+                            if idx == 0 {
+                                self.vertices[0].1.add(-delta);
+                            } else {
+                                self.vertices[2].1.add(-delta);
+                            }
+                            return vec![];
+                        }
                     }
-                    self.set_bezpath();
-                    return vec![self.vertices[1].0];
                 } else {
-                    // e1 or e2 is moved, this affect the position of the side
-                    let mut m = (e1 + e2) * 0.5;
-                    let mut dir = (e2 - e1).normalize();
-                    let mut perp = Vec2::new(-dir.x, dir.y);
-                    let signed_d = (side - m).dot(perp);
-                    // Apply the move to whichever endpoint
-                    if idx == 0 {
-                        e1 += delta;
-                        self.vertices[0].1.set(e1);
-                    } else {
-                        e2 += delta;
-                        self.vertices[2].1.set(e2);
-                    }
-                    // recalculate perp
-                    m = (e1 + e2) * 0.5;
-                    dir = (e2 - e1).normalize();
-                    perp = Vec2::new(-dir.x, dir.y);
-                    // and update side
-                    self.vertices[1].1.set(m + perp * signed_d);
-                    self.set_bezpath();
-                    if idx == 0 {
-                        return vec![self.vertices[0].0, self.vertices[1].0];
-                    } else {
-                        return vec![self.vertices[2].0, self.vertices[1].0];
-                    }
+                    return vec![];
                 }
             }
             ClosedShapeType::Rectangle | ClosedShapeType::PolyRectangle => {
@@ -328,20 +447,20 @@ impl Drawable for ClosedShapes {
                 let len_next = (pos_next - pos_m).hypot();
                 let len_prev = (pos_prev - pos_m).hypot();
                 // 5) decompose delta
-                let d_next = delta.dot(dir_next);
-                let d_prev = delta.dot(dir_prev);
+                let d_next = position.curr.dot(dir_next);
+                let d_prev = position.curr.dot(dir_prev);
                 // 6) move main corner
-                self.vertices[idx].1.add(delta);
+                self.vertices[idx].1.curr = position.curr;
                 let mut moved = vec![self.vertices[idx].0];
                 // 7) for each axis, only slide if above threshold
                 if d_next.abs() > EPSILON {
-                    let new_1 = (pos_m + delta) + dir_next * (len_next + d_next);
+                    let new_1 = (pos_m + position.curr) + dir_next * (len_next + d_next);
                     let d1 = new_1 - pos_next;
                     self.vertices[next].1.add(d1);
                     moved.push(self.vertices[next].0);
                 }
                 if d_prev.abs() > EPSILON {
-                    let new_2 = (pos_m + delta) + dir_prev * (len_prev + d_prev);
+                    let new_2 = (pos_m + position.curr) + dir_prev * (len_prev + d_prev);
                     let d2 = new_2 - pos_prev;
                     self.vertices[prev].1.add(d2);
                     moved.push(self.vertices[prev].0);
@@ -354,10 +473,15 @@ impl Drawable for ClosedShapes {
                     Some(i) => i,
                     None => return vec![],
                 };
-                self.vertices[idx].1.add(delta);
+                self.vertices[idx].1.curr = position.curr;
                 self.set_bezpath();
                 return vec![self.vertices[idx].0];
             }
+        }
+    }
+    fn save_vertices_positions(&mut self) {
+        for (_, value) in self.get_vertices_mut() {
+            value.save();
         }
     }
     fn get_bezpath(&self) -> &BezPath {

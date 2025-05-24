@@ -1,6 +1,7 @@
 use crate::{
     canvas::{CanvasText, CanvasTextConfig, Color, Colors, Pattern, TextAlign, TextPos},
     math::*,
+    types::SegBundle,
 };
 use kurbo::{BezPath, Rect, Vec2};
 use std::f64::consts::PI;
@@ -13,26 +14,26 @@ pub fn dim_linear(
 
     let color = Colors {
         color: Color::Black,
-        fill_color: Color::Gray90Opacity,
+        fill_color: Color::Black,
     };
 
     let dim_offset = 15. / cinfo.1;
     let mut path = BezPath::new();
-    let (angle, txt_off) = if bdl.a() > -PI / 2. && bdl.a() < PI / 2. {
-        (bdl.a(), 1.5)
+    let (angle, txt_off) = if bdl.a > -PI / 2. && bdl.a < PI / 2. {
+        (bdl.a, 1.5)
     } else {
-        (bdl.a() - PI, 2.5)
+        (bdl.a - PI, 2.5)
     };
     let text = CanvasText::new(
-        format!("{:.1}", bdl.len()),
-        TextPos::PosCustom(bdl.m() - bdl.n() * (txt_off * dim_offset)),
+        format!("{:.1}", bdl.len),
+        TextPos::PosCustom(bdl.m - bdl.n * (txt_off * dim_offset)),
         CanvasTextConfig::new(color.color, angle, TextAlign::Center, 14, 0.8),
     );
-    let s = bdl.s() - bdl.n() * dim_offset;
-    let e = bdl.e() - bdl.n() * dim_offset;
-    arrow(&mut path, s, bdl.u(), dim_offset);
+    let s = bdl.s - bdl.n * dim_offset;
+    let e = bdl.e - bdl.n * dim_offset;
+    arrow(&mut path, s, bdl.u, dim_offset);
     line(&mut path, s, e);
-    arrow(&mut path, e, -bdl.u(), dim_offset);
+    arrow(&mut path, e, -bdl.u, dim_offset);
     (path, Dim, color, vec![text])
 }
 
@@ -44,33 +45,33 @@ pub fn dim_linear_angle(
 
     let color = Colors {
         color: Color::Black,
-        fill_color: Color::Gray90Opacity,
+        fill_color: Color::Black,
     };
 
     let dim_offset = 15. / cinfo.1;
     let mut path = BezPath::new();
-    let (angle, txt_off) = if bdl.a() >= -PI / 2. && bdl.a() < PI / 2. {
-        (bdl.a(), 1.5)
+    let (angle, txt_off) = if bdl.a >= -PI / 2. && bdl.a < PI / 2. {
+        (bdl.a, 1.5)
     } else {
-        (bdl.a() - PI, 2.5)
+        (bdl.a - PI, 2.5)
     };
-    let angle_clip90 = angle0_90(bdl.a());
+    let angle_clip90 = angle0_90(bdl.a);
     let text = if angle_clip90 < EPSILON || (angle_clip90 - PI / 2.).abs() < EPSILON {
-        format!("{:.1}mm", bdl.len())
+        format!("{:.1}mm", bdl.len)
     } else {
-        format!("{:.0}° - {:.1}mm", angle_clip90 / PI * 180., bdl.len())
+        format!("{:.0}° - {:.1}mm", angle_clip90 / PI * 180., bdl.len)
     };
 
     let canvas_text = CanvasText::new(
         text,
-        TextPos::PosCustom(bdl.m() - bdl.n() * (txt_off * dim_offset)),
+        TextPos::PosCustom(bdl.m - bdl.n * (txt_off * dim_offset)),
         CanvasTextConfig::new(color.color, angle, TextAlign::Center, 14, 0.8),
     );
-    let s = bdl.s() - bdl.n() * dim_offset;
-    let e = bdl.e() - bdl.n() * dim_offset;
-    arrow(&mut path, s, bdl.u(), dim_offset);
+    let s = bdl.s - bdl.n * dim_offset;
+    let e = bdl.e - bdl.n * dim_offset;
+    arrow(&mut path, s, bdl.u, dim_offset);
     line(&mut path, s, e);
-    arrow(&mut path, e, -bdl.u(), dim_offset);
+    arrow(&mut path, e, -bdl.u, dim_offset);
     (path, Dim, color, vec![canvas_text])
 }
 
@@ -82,26 +83,26 @@ pub fn dim_radius(
 
     let color = Colors {
         color: Color::Black,
-        fill_color: Color::Gray90Opacity,
+        fill_color: Color::Black,
     };
 
     let dim_offset = 10. / cinfo.1;
     let mut path = BezPath::new();
-    let (angle, txt_off) = if bdl.a() > -PI / 2. && bdl.a() < PI / 2. {
-        (bdl.a(), 1.5)
+    let (angle, txt_off) = if bdl.a > -PI / 2. && bdl.a < PI / 2. {
+        (bdl.a, 1.5)
     } else {
-        (bdl.a() - PI, 2.5)
+        (bdl.a - PI, 2.5)
     };
     let text = CanvasText::new(
-        format!("R: {:.1}", bdl.len()),
-        TextPos::PosCustom(bdl.m() - bdl.n() * (txt_off * dim_offset)),
+        format!("R: {:.1}", bdl.len),
+        TextPos::PosCustom(bdl.m - bdl.n * (txt_off * dim_offset)),
         CanvasTextConfig::new(color.color, angle, TextAlign::Center, 14, 0.8),
     );
-    let s = bdl.s(); // - bdl.n * dim_offset;
-    let e = bdl.e(); // - bdl.n * dim_offset;
-    arrow(&mut path, s, bdl.u(), dim_offset);
+    let s = bdl.s; // - bdl.n * dim_offset;
+    let e = bdl.e; // - bdl.n * dim_offset;
+    arrow(&mut path, s, bdl.u, dim_offset);
     line(&mut path, s, e);
-    arrow(&mut path, e, -bdl.u(), dim_offset);
+    arrow(&mut path, e, -bdl.u, dim_offset);
     (path, Dim, color, vec![text])
 }
 
