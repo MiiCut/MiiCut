@@ -157,16 +157,14 @@ impl SegBundle {
     pub fn new(s: Vec2, e: Vec2) -> Option<Self> {
         let seg_len = (e - s).hypot();
         (seg_len >= EPSILON).then(|| {
-            let mid_pt = (e + s) / 2.;
-            let u_dir = (e - s).normalize();
-            let n_dir = Vec2::new(-u_dir.y, u_dir.x);
+            let u = (e - s).normalize();
             let a = (e - s).atan2();
             SegBundle {
                 s,
                 e,
-                m: mid_pt,
-                u: u_dir,
-                n: n_dir,
+                m: (e + s) / 2.,
+                u,
+                n: Vec2::new(-u.y, u.x),
                 len: seg_len,
                 a,
             }

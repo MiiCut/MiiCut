@@ -336,14 +336,9 @@ impl Drawable for ClosedShapes {
             for (uid, value) in &self.vertices {
                 if (value.curr - position.curr).hypot() < Self::GRAB_RADIUS {
                     self.vertices_selected.insert(*uid);
-                    log!("selecting");
                     select = true;
                 }
             }
-            log!(
-                "select || self.vertices_selected.len() > 0 {}",
-                select || self.vertices_selected.len() > 0
-            );
             return select || self.vertices_selected.len() > 0;
         }
     }
@@ -428,45 +423,41 @@ impl Drawable for ClosedShapes {
                 if len < 4 {
                     return vec![];
                 }
-                // 1) find dragged corner index
-                let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
-                    Some(i) => i,
-                    None => return vec![],
-                };
-                // 2) compute neighbor indices
-                let next = (idx + 1) % len;
-                let prev = (idx + len - 1) % len;
-
-                // 3) grab positions
+                // 1) find indices
+                let (idx_prev, idx, idx_next) =
+                    match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
+                        Some(i) => ((i + len - 1) % len, i, (i + 1) % len),
+                        None => return vec![],
+                    };
+                // 2) grab positions and derive segments
                 let pos_m = self.vertices[idx].1.curr;
-                let pos_next = self.vertices[next].1.curr;
-                let pos_prev = self.vertices[prev].1.curr;
-                // 4) local axes and original lengths
-                let dir_next = (pos_next - pos_m).normalize();
-                let dir_prev = (pos_prev - pos_m).normalize();
-                let len_next = (pos_next - pos_m).hypot();
-                let len_prev = (pos_prev - pos_m).hypot();
-                // 5) decompose delta
-                let d_next = position.curr.dot(dir_next);
-                let d_prev = position.curr.dot(dir_prev);
-                // 6) move main corner
-                self.vertices[idx].1.curr = position.curr;
-                let mut moved = vec![self.vertices[idx].0];
-                // 7) for each axis, only slide if above threshold
-                if d_next.abs() > EPSILON {
-                    let new_1 = (pos_m + position.curr) + dir_next * (len_next + d_next);
-                    let d1 = new_1 - pos_next;
-                    self.vertices[next].1.add(d1);
-                    moved.push(self.vertices[next].0);
+                let o_seg_a = SegBundle::new(self.vertices[idx_prev].1.curr, pos_m);
+                let o_seg_b = SegBundle::new(pos_m, self.vertices[idx_next].1.curr);
+                if let Some(seg_a) = o_seg_a {
+                    if let Some(seg_b) = o_seg_b {
+                        let delta_a = delta.dot(seg_a.u);
+                        let delta_b = delta.dot(seg_b.u);
+
+                        log!("seg_a.u = {:.2},  len: {:.2}", seg_a.u, seg_a.len);
+
+                        self.vertices[idx_prev].1.add(delta_b * seg_b.u);
+                        self.vertices[idx].1.add(delta);
+                        self.vertices[idx_next].1.add(delta_a * seg_a.u);
+
+                        self.set_bezpath();
+                        vec![
+                            self.vertices[idx_prev].0,
+                            self.vertices[idx].0,
+                            self.vertices[idx_next].0,
+                        ]
+                    } else {
+                        log!("Error: Unable to create segment B");
+                        return vec![];
+                    }
+                } else {
+                    log!("Error: Unable to create segment A");
+                    return vec![];
                 }
-                if d_prev.abs() > EPSILON {
-                    let new_2 = (pos_m + position.curr) + dir_prev * (len_prev + d_prev);
-                    let d2 = new_2 - pos_prev;
-                    self.vertices[prev].1.add(d2);
-                    moved.push(self.vertices[prev].0);
-                }
-                self.set_bezpath();
-                moved
             }
             ClosedShapeType::Polygon => {
                 let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
