@@ -1,5 +1,5 @@
 use crate::shapes::drawable::{Drawable, ValueUId};
-use crate::types::{Binding, Value};
+use crate::types::Value;
 use kurbo::Vec2;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
@@ -12,7 +12,6 @@ use std::{
 #[derive(Debug)]
 pub struct Set<E: Clone> {
     pub elems: HashMap<ElemUId, Elem<E>>,
-    pub elems_binded: Binding<ElemUId>,
     pub elems_highlighted: HashSet<ElemUId>,
     pub elems_selected: HashSet<ElemUId>,
     pub elem_selector: ElemSelector,
@@ -23,7 +22,6 @@ impl<E: Clone> Set<E> {
     pub fn new() -> Self {
         Set {
             elems: HashMap::new(),
-            elems_binded: Binding::new(),
             elems_highlighted: HashSet::new(),
             elems_selected: HashSet::new(),
             elem_selector: ElemSelector::new(),

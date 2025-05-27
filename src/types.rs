@@ -2,10 +2,6 @@ use crate::math::EPSILON;
 use crate::nodes::ElemUId;
 use crate::shapes::drawable::ValueUId;
 use kurbo::Vec2;
-use std::cmp::{max, min};
-use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
 use std::{
     fmt::Debug,
     ops::{Add, AddAssign},
@@ -201,67 +197,5 @@ impl SegBundle {
         self.u = (self.e - self.s).normalize();
         self.n = Vec2::new(-self.u.y, self.u.x);
         self.a = (self.e - self.s).atan2();
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Binding<T: Copy + Clone + PartialEq + Ord + Hash> {
-    bind: HashSet<Couple<T>>,
-}
-impl<T: Copy + Clone + PartialEq + Ord + Hash> Binding<T> {
-    pub fn new() -> Self {
-        Self {
-            bind: HashSet::new(),
-        }
-    }
-    pub fn contains(&self, elem: T) -> bool {
-        self.bind.iter().any(|couple| couple.contains(&elem))
-    }
-    pub fn get_other(&self, elem: T) -> Option<T> {
-        self.bind
-            .iter()
-            .find(|couple| couple.contains(&elem))
-            .map(|couple| if couple.0 == elem { couple.1 } else { couple.0 })
-    }
-}
-impl<T> Deref for Binding<T>
-where
-    T: Copy + Clone + PartialEq + Ord + Hash,
-{
-    type Target = HashSet<Couple<T>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.bind
-    }
-}
-impl<T> DerefMut for Binding<T>
-where
-    T: Copy + Clone + PartialEq + Ord + Hash,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.bind
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Couple<T: Copy + Clone + PartialEq + Hash + Ord>(pub T, pub T);
-impl<T: Copy + Clone + Hash + PartialEq + Ord> Couple<T> {
-    pub fn contains(&self, elem: &T) -> bool {
-        self.0 == *elem || self.1 == *elem
-    }
-}
-impl<T: Copy + Clone + PartialEq + Ord + Hash> PartialEq for Couple<T> {
-    fn eq(&self, other: &Self) -> bool {
-        (self.0 == other.0 && self.1 == other.1) || (self.0 == other.1 && self.1 == other.0)
-    }
-}
-impl<T: Copy + Clone + PartialEq + Ord + Hash> Eq for Couple<T> {}
-impl<T: Copy + Clone + PartialEq + Ord + Hash> Hash for Couple<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        // sort the two IDs so (a,b) and (b,a) become the same pair
-        let a = min(self.0, self.1);
-        let b = max(self.0, self.1);
-        a.hash(state);
-        b.hash(state);
     }
 }
