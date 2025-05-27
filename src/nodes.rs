@@ -1,5 +1,4 @@
 use crate::shapes::drawable::{Drawable, ValueUId};
-use crate::types::Value;
 use kurbo::Vec2;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
@@ -45,7 +44,7 @@ impl<E: Clone> Set<E> {
     }
 }
 impl<E: Drawable> Set<E> {
-    pub fn element_select_vertex(&mut self, position: Value<Vec2>) -> bool {
+    pub fn element_select_vertex(&mut self, position: Vec2) -> bool {
         self.elem_vertex_selected = None;
         for (eid, element) in self.elems.iter_mut() {
             if let Some(vid_sel) = element.elem.select_vertex(position) {
@@ -55,7 +54,7 @@ impl<E: Drawable> Set<E> {
         }
         return self.elem_vertex_selected.is_some();
     }
-    pub fn element_highlight_vertex(&mut self, position: Value<Vec2>) -> bool {
+    pub fn element_highlight_vertex(&mut self, position: Vec2) -> bool {
         self.elem_vertex_highlighted = None;
         for (eid, element) in self.elems.iter_mut() {
             if let Some(vid_sel) = element.elem.highlight_vertex(position) {
@@ -64,12 +63,12 @@ impl<E: Drawable> Set<E> {
         }
         return self.elem_vertex_highlighted.is_some();
     }
-    pub fn select_elements(&mut self, position: Value<Vec2>, shift_pressed: bool) {
+    pub fn select_elements(&mut self, position: Vec2, shift_pressed: bool) {
         // Select the nodes whose element contains the position
         if !shift_pressed {
             let mut nodes_selected = HashSet::new();
             for (id, node) in &self.elems {
-                if node.elem.contains(position.curr) {
+                if node.elem.contains(position) {
                     nodes_selected.insert(*id);
                 }
             }
@@ -86,17 +85,17 @@ impl<E: Drawable> Set<E> {
         } else {
             // Shift pressed, add to selection
             for (id, node) in &self.elems {
-                if node.elem.contains(position.curr) {
+                if node.elem.contains(position) {
                     self.elems_selected.insert(*id);
                 }
             }
         }
     }
-    pub fn highlight_elements(&mut self, position: Value<Vec2>) {
+    pub fn highlight_elements(&mut self, position: Vec2) {
         // Select the nodes whose element contains the position
         self.elems_highlighted.clear();
         for (id, node) in &self.elems {
-            if node.elem.contains(position.curr) {
+            if node.elem.contains(position) {
                 self.elems_highlighted.insert(*id);
             }
         }
@@ -106,50 +105,44 @@ impl<E: Drawable> Set<E> {
             node.elem.save_vertices_positions();
         }
     }
-    pub fn move_elements(&mut self, position: Value<Vec2>) -> bool {
-        let delta = position.curr - position.saved;
-        let mut bind_and_sel = self.elems_selected.clone();
-        for id in &self.elems_selected {
-            if let Some(elem) = self.elems.get(id) {
-                for (_, v) in elem.elem.get_vertices() {
-                    if let Some((eid_bind, _)) = v.bind {
-                        bind_and_sel.insert(eid_bind);
-                    }
-                }
+    pub fn move_elements(&mut self, delta: Vec2) -> bool {
+        let mut moved = false;
+        let mut sel_and_bind = self.elems_selected.clone();
+        log!("START");
+        log!("len sel_and_bind: {}", sel_and_bind.len());
+        for eid in &self.elems_selected {
+            if let Some(_) = self.elems.get_mut(eid) {
+                sel_and_bind.extend(self.get_binded_elements(*eid));
             }
         }
-        let mut moved = false;
-        for id in bind_and_sel.iter() {
-            if let Some(node) = self.elems.get_mut(id) {
+        log!("len sel_and_bind: {}", sel_and_bind.len());
+        let mut other_binds: HashSet<ElemUId> = HashSet::new();
+        for eid in self.elems.keys() {
+            if let Some(s) = self.elems.get(eid) {
+                s.elem.get_binded_elements().iter().for_each(|bind_eid| {
+                    if sel_and_bind.contains(bind_eid) {
+                        other_binds.extend(s.elem.get_binded_elements().iter());
+                    }
+                });
+            }
+        }
+        log!("len other_binds: {}", other_binds.len());
+        sel_and_bind.extend(other_binds);
+        // Move all selected elements and their binded elements
+        for eid in sel_and_bind {
+            if let Some(node) = self.elems.get_mut(&eid) {
                 node.elem.move_all_vertices(delta);
                 moved = true;
             }
         }
         moved
     }
-    // pub fn move_binded_elements(&mut self, position: Value<Vec2>, elem_moved: Vec<ElemUId>) {
-    //     let delta = position.curr - position.saved;
-    //     let elem_to_move: Vec<ElemUId> = self
-    //         .elems_binded
-    //         .iter()
-    //         .filter_map(|couple| {
-    //             let contains_first = elem_moved.contains(&couple.0);
-    //             let contains_second = elem_moved.contains(&couple.1);
-    //             // If both elements are in vids, discard the couple, otherwise keep it.
-    //             match (contains_first, contains_second) {
-    //                 (true, true) => None,
-    //                 (true, false) => Some(couple.1),
-    //                 (false, true) => Some(couple.0),
-    //                 (false, false) => None,
-    //             }
-    //         })
-    //         .collect();
-    //     for id in elem_to_move {
-    //         if let Some(node) = self.elems.get_mut(&id) {
-    //             node.elem.move_all_vertices(delta);
-    //         }
-    //     }
-    // }
+    pub fn get_binded_elements(&self, eid: ElemUId) -> HashSet<ElemUId> {
+        if let Some(element) = self.get_element(eid) {
+            return element.elem.get_binded_elements();
+        }
+        HashSet::new()
+    }
 }
 
 #[derive(Debug)]

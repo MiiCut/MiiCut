@@ -48,7 +48,7 @@ pub fn get_shapes_colors(selected: bool, highlighted: bool) -> Colors {
         },
         (true, false) => Colors {
             color: Color::Black,
-            fill_color: Color::Red55Opacity,
+            fill_color: Color::Red30Opacity,
         },
         (true, true) => Colors {
             color: Color::Black,
@@ -69,12 +69,26 @@ pub fn get_vertices_colors(selected: bool, highlighted: bool) -> Colors {
         },
         (true, false) => Colors {
             color: Color::Black,
-            fill_color: Color::Red55Opacity,
+            fill_color: Color::Red30Opacity,
         },
         (true, true) => Colors {
             color: Color::Black,
             fill_color: Color::Red60Opacity,
         },
+    }
+}
+
+pub fn get_dimension_colors() -> Colors {
+    Colors {
+        color: Color::Gray20Opacity,
+        fill_color: Color::Gray,
+    }
+}
+
+pub fn get_text_colors() -> Colors {
+    Colors {
+        color: Color::Gray,
+        fill_color: Color::Olive60Opacity,
     }
 }
 

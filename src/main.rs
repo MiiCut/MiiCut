@@ -28,15 +28,20 @@ use canvas::{
     CanvasKind, CanvasText, CanvasTextConfig, Canvases, Color, Pattern, TextAlign, TextPos,
 };
 use clipboard::*;
+use dimensions::dim_hv;
+use dimensions::dim_linear;
+use dimensions::dim_radius;
 use inputs::Keys;
 use inputs::SystemMouse;
 use inputs::*;
 use kurbo::{Size, Vec2};
+use nodes::ElemUId;
 use nodes::{Elem, Set};
 use prefab::get_shapes_colors;
 use prefab::get_vertices_colors;
 use prefab::point_path;
 use shapes::drawable::Drawable;
+use shapes::drawable::ValueUId;
 use shapes::drawable::{ClosedShapeType, ClosedShapes};
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -46,7 +51,9 @@ use std::{
 };
 use svg::node::element::path::Data;
 use svg::read;
-use types::Value;
+use types::Binding;
+use types::Couple;
+use types::SegBundle;
 use undoredo::UndoRedo;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
@@ -101,7 +108,7 @@ impl<E: Drawable> AppVars<E> {
     fn a_pressed(&mut self) {
         self.userui.snap.next_angle();
     }
-    fn b_pressed(&mut self) {
+    fn one_pressed(&mut self) {
         // Extract selected and highlighted vertices
         let v_sel = self.set.elem_vertex_selected;
         let v_hig = self.set.elem_vertex_highlighted;
@@ -109,69 +116,52 @@ impl<E: Drawable> AppVars<E> {
         // Check if both selected and highlighted vertices exist
         if let Some((eid_sel, vid_sel)) = v_sel {
             if let Some((eid_hig, vid_hig)) = v_hig {
-                //
-                if eid_sel == eid_hig && vid_sel == vid_hig {
-                    // Unbind the vertex
-                    let mut other = None;
-                    if let Some(elem_sel) = self.set.get_element_mut(eid_sel) {
-                        if let Some(vertex_sel) = elem_sel.elem.get_vertex_mut(&vid_sel) {
-                            log!("Unbinding {}", vid_sel);
-                            other = vertex_sel.bind;
-                            vertex_sel.bind = None;
-                        }
-                    }
-                    if let Some((eid_other, vid_other)) = other {
-                        if let Some(elem_other) = self.set.get_element_mut(eid_other) {
-                            if let Some(vertex_other) = elem_other.elem.get_vertex_mut(&vid_other) {
-                                log!("Unbinding {}", vid_other);
-                                vertex_other.bind = None;
-                            }
-                        }
-                    }
-                    return;
-                }
                 // Ensure vertices belong to different elements
                 if eid_sel == eid_hig {
                     log!("Cannot bind vertices from the same element");
                     return;
                 }
 
-                let mut old_bind1 = None;
-                let mut old_bind2 = None;
+                let old_bind_sel = self
+                    .set
+                    .get_element(eid_sel)
+                    .and_then(|elem| elem.elem.get_vertex(&vid_sel))
+                    .map(|vertex| vertex.bind.clone())
+                    .unwrap_or_else(HashSet::new); // Default to empty HashSet if not found
 
+                let old_bind_hig = self
+                    .set
+                    .get_element(eid_hig)
+                    .and_then(|elem| elem.elem.get_vertex(&vid_hig))
+                    .map(|vertex| vertex.bind.clone())
+                    .unwrap_or_else(HashSet::new);
+
+                let unbound = if old_bind_sel.contains(&(eid_hig, vid_hig))
+                    && old_bind_hig.contains(&(eid_sel, vid_sel))
+                {
+                    true
+                } else {
+                    false
+                };
                 if let Some(elem_sel) = self.set.get_element_mut(eid_sel) {
                     if let Some(vertex_sel) = elem_sel.elem.get_vertex_mut(&vid_sel) {
-                        old_bind1 = vertex_sel.bind;
-                        vertex_sel.bind = Some((eid_hig, vid_hig));
-                        log!("Binding {} to {}", vid_hig, vid_sel);
+                        if unbound {
+                            log!("Unbind {} to {}", vid_hig, vid_sel);
+                            vertex_sel.bind.remove(&(eid_hig, vid_hig));
+                        } else {
+                            log!("Binding {} to {}", vid_hig, vid_sel);
+                            vertex_sel.bind.insert((eid_hig, vid_hig));
+                        }
                     }
                 }
                 if let Some(elem_hig) = self.set.get_element_mut(eid_hig) {
                     if let Some(vertex_hig) = elem_hig.elem.get_vertex_mut(&vid_hig) {
-                        old_bind2 = vertex_hig.bind;
-                        vertex_hig.bind = Some((eid_sel, vid_sel));
-                        log!("Binding {} to {}", vid_sel, vid_hig);
-                    }
-                }
-
-                // Unbind previous bindings if they exist
-                if let Some((eid_old, vid_old)) = old_bind1 {
-                    if let Some(elem_old) = self.set.get_element_mut(eid_old) {
-                        if let Some(vertex_old) = elem_old.elem.get_vertex_mut(&vid_old) {
-                            if vid_old != vid_hig {
-                                log!("Binding {} to None", vid_old);
-                                vertex_old.bind = None;
-                            }
-                        }
-                    }
-                }
-                if let Some((eid_old, vid_old)) = old_bind2 {
-                    if let Some(elem_old) = self.set.get_element_mut(eid_old) {
-                        if let Some(vertex_old) = elem_old.elem.get_vertex_mut(&vid_old) {
-                            if vid_old != vid_sel {
-                                log!("Binding {} to None", vid_old);
-                                vertex_old.bind = None;
-                            }
+                        if unbound {
+                            log!("Unbind {} to {}", vid_sel, vid_hig);
+                            vertex_hig.bind.remove(&(eid_sel, vid_sel));
+                        } else {
+                            log!("Binding {} to {}", vid_sel, vid_hig);
+                            vertex_hig.bind.insert((eid_sel, vid_sel));
                         }
                     }
                 }
@@ -598,7 +588,7 @@ fn update<E: Drawable>(
     sys_mouse: SystemMouse,
 ) -> Result<(), MyError> {
     let user_action = avb.update_inputs(mouse_event, sys_mouse);
-    let pointer = avb.userui.pointer;
+    let pointer = avb.userui.pointer.clone();
     let shift_pressed = avb.userui.keys_states.shift_pressed;
     let snap = avb.userui.snap;
 
@@ -607,37 +597,27 @@ fn update<E: Drawable>(
             UserAction::ClickDown(button) => {
                 if button == MouseButton::Left {
                     avb.set.save_elements_positions();
-                    if !avb.set.element_select_vertex(pointer) {
-                        avb.set.select_elements(pointer, shift_pressed);
+                    if !avb.set.element_select_vertex(pointer.curr) {
+                        avb.set.select_elements(pointer.curr, shift_pressed);
                     }
                 }
             }
             UserAction::Move(btn) => {
                 if btn == ButtonLevel::Up {
-                    if !avb.set.element_highlight_vertex(pointer) {
-                        avb.set.highlight_elements(pointer);
+                    if !avb.set.element_highlight_vertex(pointer.curr) {
+                        avb.set.highlight_elements(pointer.curr);
                     }
                 } else {
                     // Elements and vertices selection are mutual exclusive
                     // Moving is done on selected objects
                     // Move Elements
-                    if !avb.set.move_elements(pointer) {
+                    if !avb.set.move_elements(pointer.curr - pointer.saved) {
                         // Move selected vertex if no elements are moved
-                        let v_sel = avb.set.elem_vertex_selected;
-                        if let Some((eid, vid)) = v_sel {
+                        if let Some((eid, vid)) = avb.set.elem_vertex_selected {
                             // Move the selected vertex
-                            let mut vbind = None;
                             avb.set.get_element_mut(eid).map(|elem| {
-                                vbind = elem
-                                    .elem
-                                    .move_vertex(vid, Value::new(pointer.curr - pointer.saved));
+                                elem.elem.move_vertex(vid, pointer.curr - pointer.saved);
                             });
-                            // If the vertex is bound to another vertex, move it too
-                            if let Some(((eid_bind, vid_bind), delta)) = vbind {
-                                avb.set.get_element_mut(eid_bind).map(|elem| {
-                                    elem.elem.move_vertex(vid_bind, delta);
-                                });
-                            }
                         }
                     }
                 }
@@ -646,11 +626,6 @@ fn update<E: Drawable>(
         },
         _ => {}
     }
-    // log!(
-    //     "update: {},{}",
-    //     inputs.pointer.curr.x,
-    //     inputs.pointer.curr.y
-    // );
     Ok(())
 }
 
@@ -859,8 +834,8 @@ fn on_window_keydown<E: Drawable>(av: RefAV<E>, event: Event) {
                     }
                 }
                 // Bind
-                BLower => {
-                    avb.b_pressed();
+                One | Ampersand => {
+                    avb.one_pressed();
                 }
                 // Undo and Redo
                 ZLower => {
@@ -1011,24 +986,26 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     //     vec![],
     // );
 
-    // Draw the nodes elements (shapes outlines)
+    // Draw the elements (shapes outlines)
     for e in avb.set.elems.values() {
         let colors = get_shapes_colors(
             avb.set.elems_selected.contains(&e.id),
             avb.set.elems_highlighted.contains(&e.id),
         );
+        let path = e.elem.get_bezpath();
         avb.canvases.draw_path(
             &CanvasKind::Draw,
-            e.elem.get_bezpath(),
+            path,
             Pattern::Composed(true),
             colors,
             vec![],
         );
     }
-    // Draw the nodes vertices
+    // Draw the elements vertices, get the bind on the same time
+    let mut binds = Binding::<(ElemUId, ValueUId)>::new();
     let vid_sel = avb.set.elem_vertex_selected.map(|(_, vid)| vid);
     let vid_hig = avb.set.elem_vertex_highlighted.map(|(_, vid)| vid);
-    for e in avb.set.elems.values() {
+    for (eid, e) in avb.set.elems.iter() {
         for (v_id, vertex) in e.elem.get_vertices() {
             let colors = get_vertices_colors(vid_sel == Some(*v_id), vid_hig == Some(*v_id));
             avb.canvases.draw_path(
@@ -1038,6 +1015,94 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
                 colors,
                 vec![],
             );
+            // If the vertex is bound to other vertices, store the binding
+            binds.extend(vertex.bind.iter().map(|(eid2, vid2)| {
+                Couple((eid.clone(), v_id.clone()), (eid2.clone(), vid2.clone()))
+            }));
+        }
+        // Dimensions
+        use ClosedShapeType::*;
+        match e.elem.get_shape_type() {
+            Polygon | PolyRectangle => {
+                for (v1, v2) in e
+                    .elem
+                    .get_vertices()
+                    .iter()
+                    .zip(e.elem.get_vertices().iter().cycle().skip(1))
+                    .map(|(v1, v2)| (v1.1.curr, v2.1.curr))
+                {
+                    if let Some(seg) = SegBundle::new(v1, v2) {
+                        let (path, pattern, color, text) =
+                            dim_hv(seg, avb.canvases.get_canvas_infos());
+                        avb.canvases
+                            .draw_path(&CanvasKind::Draw, &path, pattern, color, text);
+                    }
+                }
+            }
+            Rectangle => {
+                for (v1, v2) in e
+                    .elem
+                    .get_vertices()
+                    .iter()
+                    .zip(e.elem.get_vertices().iter().cycle().skip(1))
+                    .take(2)
+                    .map(|(v1, v2)| (v1.1.curr, v2.1.curr))
+                {
+                    if let Some(seg) = SegBundle::new(v1, v2) {
+                        let (path, pattern, color, text) =
+                            dim_hv(seg, avb.canvases.get_canvas_infos());
+                        avb.canvases
+                            .draw_path(&CanvasKind::Draw, &path, pattern, color, text);
+                    }
+                }
+            }
+            Oblong => {
+                let v: Vec<Vec2> = e.elem.get_vertices().iter().map(|(_, v)| v.curr).collect();
+                if v.len() == 3 {
+                    if let Some(seg1) = SegBundle::new(v[0], v[2]) {
+                        // Draw the main segment
+                        let (path, pattern, color, text) =
+                            dim_linear(seg1, avb.canvases.get_canvas_infos());
+                        avb.canvases
+                            .draw_path(&CanvasKind::Draw, &path, pattern, color, text);
+                        // Draw the radius segment
+                        if let Some(seg2) = SegBundle::new(seg1.m, v[1]) {
+                            let (path, pattern, color, text) =
+                                dim_linear(seg2, avb.canvases.get_canvas_infos());
+                            avb.canvases
+                                .draw_path(&CanvasKind::Draw, &path, pattern, color, text);
+                        }
+                    }
+                }
+            }
+            Disc => {
+                let v: Vec<Vec2> = e.elem.get_vertices().iter().map(|(_, v)| v.curr).collect();
+                if v.len() == 2 {
+                    if let Some(seg) = SegBundle::new(v[0], v[1]) {
+                        // Draw the radius segment
+                        let (path, pattern, color, text) =
+                            dim_radius(seg, avb.canvases.get_canvas_infos());
+                        avb.canvases
+                            .draw_path(&CanvasKind::Draw, &path, pattern, color, text);
+                    }
+                }
+            }
+        }
+    }
+
+    // Draw the binds dimensions
+    for Couple((eid1, vid1), (eid2, vid2)) in binds.iter() {
+        // Get elements e1 and e2
+        if let (Some(e1), Some(e2)) = (avb.set.get_element(*eid1), avb.set.get_element(*eid2)) {
+            // Get vertices v1 and v2
+            if let (Some(v1), Some(v2)) = (e1.elem.get_vertex(vid1), e2.elem.get_vertex(vid2)) {
+                // Draw the binding segment
+                if let Some(seg) = SegBundle::new(v1.curr, v2.curr) {
+                    let (path, pattern, color, text) = dim_hv(seg, avb.canvases.get_canvas_infos());
+                    avb.canvases
+                        .draw_path(&CanvasKind::Draw, &path, pattern, color, text);
+                }
+            }
         }
     }
 

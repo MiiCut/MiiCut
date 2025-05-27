@@ -461,8 +461,7 @@ impl Canvases {
 
         ctx.rotate(text.config.angle)
             .expect("Failed to rotate canvas");
-        ctx.set_font("14px Orbitron");
-        ctx.set_font(&format!("{}px Orbitron", text.config.font_size));
+        ctx.set_font(&format!("{}px Ubuntu+Mono", text.config.font_size));
         ctx.set_global_alpha(text.config.opacity);
 
         ctx.set_stroke_style_str(text.config.color.get());
@@ -476,6 +475,7 @@ impl Canvases {
             .expect("Failed to draw text");
         ctx.restore();
     }
+
     pub fn direct_text(&self, canvas_kind: &CanvasKind, text: &CanvasText) {
         let ctx = self.get_context(canvas_kind);
         ctx.save();
@@ -484,7 +484,7 @@ impl Canvases {
 
         ctx.rotate(text.config.angle)
             .expect("Failed to rotate canvas");
-        ctx.set_font(&format!("{}px Orbitron", text.config.font_size));
+        ctx.set_font(&format!("{}px Ubuntu+Mono", text.config.font_size));
         ctx.set_global_alpha(text.config.opacity);
 
         ctx.set_stroke_style_str(Color::Pink30Opacity.get());
@@ -574,7 +574,6 @@ impl Canvases {
         ctx.set_fill_style_str(&fill_color.get());
         ctx.set_stroke_style_str(&color.get());
 
-        ctx.set_font("14px Orbitron");
         ctx.begin_path();
         for (_idx, path) in paths.iter().enumerate() {
             for cst in path.iter() {
@@ -623,7 +622,7 @@ impl Canvases {
         ctx.set_line_dash(&stroke_style).unwrap();
         ctx.set_line_width(stroke_width);
 
-        let color = Color::Red55Opacity.get();
+        let color = Color::Red30Opacity.get();
         ctx.set_fill_style_str(&color);
         ctx.set_stroke_style_str(&color);
 
@@ -755,7 +754,7 @@ pub enum Color {
     White80Opacity,
     GreenA,
 
-    Red55Opacity,
+    Red30Opacity,
     Gray,
     White,
     Purple20Opacity,
@@ -763,7 +762,7 @@ pub enum Color {
     Pink30Opacity,
     Red60Opacity,
     Text,
-    Gray60Opacity,
+    Gray20Opacity,
     Gray95Opacity,
     Olive60Opacity,
     Black65Opacity,
@@ -783,15 +782,15 @@ impl Color {
             White40Opacity => "rgba(255,255,255,0.4)",
             White80Opacity => "rgba(240,240,240,0.8)",
             GreenA => "rgba(128,191,36,1)",
-            Red55Opacity => "rgba(255,0,0,0.55)",
+            Red60Opacity => "rgba(255,0,0,0.55)",
             Gray => "rgba(107,114,128,1)",
             White => "rgba(255,255,255,1)",
             Purple20Opacity => "rgba(128,0,128,0.20)",
             Purple55Opacity => "rgba(128,0,128,0.55)",
             Pink30Opacity => "rgba(255,192,203,0.3)",
-            Red60Opacity => "rgba(255,0,0,0.6)",
+            Red30Opacity => "rgba(255,0,0,0.3)",
             Text => "rgba(128,128,0,1)",
-            Gray60Opacity => "rgba(128,128,128,0.60)",
+            Gray20Opacity => "rgba(128,128,128,0.20)",
             Gray95Opacity => "rgba(210, 209, 209, 0.95)",
             Olive60Opacity => "rgba(128,128,0,0.6)",
             Black65Opacity => "rgba(0,0,0,0.65)",

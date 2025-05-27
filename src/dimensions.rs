@@ -1,10 +1,15 @@
 use crate::{
     canvas::{CanvasText, CanvasTextConfig, Color, Colors, Pattern, TextAlign, TextPos},
     math::*,
+    prefab::{get_dimension_colors, get_text_colors},
     types::SegBundle,
 };
 use kurbo::{BezPath, Rect, Vec2};
-use std::f64::consts::PI;
+use std::{f64::consts::PI, vec};
+
+#[allow(dead_code)]
+const HU: Vec2 = Vec2::new(1., 0.);
+const VU: Vec2 = Vec2::new(0., 1.);
 
 pub fn dim_linear(
     bdl: SegBundle,
@@ -12,29 +17,71 @@ pub fn dim_linear(
 ) -> (BezPath, Pattern, Colors, Vec<CanvasText>) {
     use Pattern::*;
 
-    let color = Colors {
-        color: Color::Black,
-        fill_color: Color::Black,
-    };
-
+    let color = get_dimension_colors();
     let dim_offset = 15. / cinfo.1;
     let mut path = BezPath::new();
     let (angle, txt_off) = if bdl.a > -PI / 2. && bdl.a < PI / 2. {
-        (bdl.a, 1.5)
+        (bdl.a, 0.5)
     } else {
-        (bdl.a - PI, 2.5)
+        (bdl.a - PI, 1.)
     };
     let text = CanvasText::new(
         format!("{:.1}", bdl.len),
         TextPos::PosCustom(bdl.m - bdl.n * (txt_off * dim_offset)),
-        CanvasTextConfig::new(color.color, angle, TextAlign::Center, 14, 0.8),
+        CanvasTextConfig::new(get_text_colors().color, angle, TextAlign::Center, 14, 0.8),
     );
-    let s = bdl.s - bdl.n * dim_offset;
-    let e = bdl.e - bdl.n * dim_offset;
-    arrow(&mut path, s, bdl.u, dim_offset);
-    line(&mut path, s, e);
-    arrow(&mut path, e, -bdl.u, dim_offset);
+    line(&mut path, bdl.s, bdl.e);
     (path, Dim, color, vec![text])
+}
+
+pub fn dim_hv(
+    bdl: SegBundle,
+    cinfo: (Rect, f64, Vec2),
+) -> (BezPath, Pattern, Colors, Vec<CanvasText>) {
+    let color = get_dimension_colors();
+    let dim_offset = 15. / cinfo.1;
+    let mut texts = vec![];
+    match (
+        (bdl.s.x - bdl.e.x).abs() >= 0.1,
+        (bdl.s.y - bdl.e.y).abs() >= 0.1,
+    ) {
+        (true, true) => {
+            // Horizontal dimension
+            texts.push(CanvasText::new(
+                format!("H: {:7.1}", (bdl.e.x - bdl.s.x).abs()),
+                TextPos::PosCustom(bdl.m - VU / 3. * (dim_offset)),
+                CanvasTextConfig::new(get_text_colors().color, 0., TextAlign::Center, 14, 0.8),
+            ));
+            // Vertical dimension
+            texts.push(CanvasText::new(
+                format!("V: {:7.1}", (bdl.e.y - bdl.s.y).abs()),
+                TextPos::PosCustom(bdl.m + VU / 3. * (dim_offset)),
+                CanvasTextConfig::new(get_text_colors().color, 0., TextAlign::Center, 14, 0.8),
+            ));
+        }
+        (true, false) => {
+            // Horizontal dimension
+            texts.push(CanvasText::new(
+                format!("{:5.1}", (bdl.e.x - bdl.s.x).abs()),
+                TextPos::PosCustom(bdl.m - VU / 3. * (dim_offset)),
+                CanvasTextConfig::new(get_text_colors().color, 0., TextAlign::Center, 14, 0.8),
+            ));
+        }
+        (false, true) => {
+            // Vertical dimension
+            texts.push(CanvasText::new(
+                format!("{:5.1}", (bdl.e.y - bdl.s.y).abs()),
+                TextPos::PosCustom(bdl.m + VU / 3. * (dim_offset)),
+                CanvasTextConfig::new(get_text_colors().color, 0., TextAlign::Center, 14, 0.8),
+            ));
+        }
+        (false, false) => (),
+    }
+
+    let mut path = BezPath::new();
+    line(&mut path, bdl.s, bdl.e);
+
+    (path, Pattern::Dim, color, texts)
 }
 
 pub fn dim_linear_angle(
@@ -81,28 +128,20 @@ pub fn dim_radius(
 ) -> (BezPath, Pattern, Colors, Vec<CanvasText>) {
     use Pattern::*;
 
-    let color = Colors {
-        color: Color::Black,
-        fill_color: Color::Black,
-    };
-
+    let color = get_dimension_colors();
     let dim_offset = 10. / cinfo.1;
     let mut path = BezPath::new();
     let (angle, txt_off) = if bdl.a > -PI / 2. && bdl.a < PI / 2. {
-        (bdl.a, 1.5)
+        (bdl.a, 0.5)
     } else {
-        (bdl.a - PI, 2.5)
+        (bdl.a - PI, 1.)
     };
     let text = CanvasText::new(
         format!("R: {:.1}", bdl.len),
         TextPos::PosCustom(bdl.m - bdl.n * (txt_off * dim_offset)),
-        CanvasTextConfig::new(color.color, angle, TextAlign::Center, 14, 0.8),
+        CanvasTextConfig::new(get_text_colors().color, angle, TextAlign::Center, 14, 0.8),
     );
-    let s = bdl.s; // - bdl.n * dim_offset;
-    let e = bdl.e; // - bdl.n * dim_offset;
-    arrow(&mut path, s, bdl.u, dim_offset);
-    line(&mut path, s, e);
-    arrow(&mut path, e, -bdl.u, dim_offset);
+    line(&mut path, bdl.s, bdl.e);
     (path, Dim, color, vec![text])
 }
 

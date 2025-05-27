@@ -11,7 +11,7 @@ pub enum UserAction {
     Move(ButtonLevel),
     ClickUp(MouseButton),
 }
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct UserUI {
     pub pointer: Value<Vec2>,
     pub keys_states: KeysStates,
@@ -118,6 +118,10 @@ pub enum Keys {
     Backspace,
     Enter,
     Escape,
+    #[strum(serialize = "&")]
+    Ampersand,
+    #[strum(serialize = "1")]
+    One,
     #[strum(serialize = "a")]
     ALower,
     #[strum(serialize = "A")]

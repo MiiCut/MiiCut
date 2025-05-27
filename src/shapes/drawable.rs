@@ -11,7 +11,7 @@ use crate::{
 };
 use geo::{LineString, Polygon};
 use kurbo::{Arc, BezPath, Circle, PathEl, Shape, Vec2};
-use std::hash::Hash;
+use std::{collections::HashSet, hash::Hash};
 use std::{
     f64::consts::PI,
     fmt::{Debug, Display},
@@ -195,51 +195,46 @@ impl Drawable for ClosedShapes {
     fn get_vertices_mut(&mut self) -> &mut Vec<(ValueUId, Value<Vec2>)> {
         &mut self.vertices
     }
-    fn select_vertex(&mut self, position: Value<Vec2>) -> Option<ValueUId> {
+    fn select_vertex(&mut self, position: Vec2) -> Option<ValueUId> {
         for (uid, value) in &self.vertices {
-            if (value.curr - position.curr).hypot() < Self::GRAB_RADIUS {
+            if (value.curr - position).hypot() < Self::GRAB_RADIUS {
                 return Some(*uid);
             }
         }
         return None;
     }
-    fn highlight_vertex(&mut self, position: Value<Vec2>) -> Option<ValueUId> {
+    fn highlight_vertex(&mut self, position: Vec2) -> Option<ValueUId> {
         for (uid, value) in &self.vertices {
-            if (value.curr - position.curr).hypot() < Self::GRAB_RADIUS {
+            if (value.curr - position).hypot() < Self::GRAB_RADIUS {
                 return Some(*uid);
             }
         }
         return None;
     }
-    // Return the binded vertex if any and the move to apply to it
-    fn move_vertex(
-        &mut self,
-        value_uid: ValueUId,
-        delta: Value<Vec2>,
-    ) -> Option<((ElemUId, ValueUId), Value<Vec2>)> {
+    fn move_vertex(&mut self, value_uid: ValueUId, delta: Vec2) -> bool {
         match self.shape_type {
             ClosedShapeType::Disc => {
                 if self.vertices.len() != 2 {
-                    return None;
+                    return false;
                 }
                 // The first vertex is the center
                 // The second vertex is the radius
                 if self.vertices[0].0 == value_uid {
-                    self.vertices[0].1.add(delta.curr);
-                    self.vertices[1].1.add(delta.curr);
+                    self.vertices[0].1.add(delta);
+                    self.vertices[1].1.add(delta);
                     self.set_bezpath();
-                    self.vertices[0].1.bind.map(|uid| (uid, delta))
+                    true
                 } else if self.vertices[1].0 == value_uid {
-                    self.vertices[1].1.add(delta.curr);
+                    self.vertices[1].1.add(delta);
                     self.set_bezpath();
-                    self.vertices[1].1.bind.map(|uid| (uid, delta))
+                    true
                 } else {
-                    None
+                    false
                 }
             }
             ClosedShapeType::Oblong => {
                 if self.vertices.len() != 3 {
-                    return None;
+                    return false;
                 }
                 if let Some(seg) = SegBundle::new(self.vertices[0].1.curr, self.vertices[2].1.curr)
                 {
@@ -248,59 +243,52 @@ impl Drawable for ClosedShapes {
 
                     let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                         Some(i) => i,
-                        None => return None,
+                        None => return false,
                     };
                     // The side is moved, this doesn't change the pos of e1, e2
                     if idx == 1 {
-                        let proj_along = seg.u * delta.curr.dot(seg.u);
-                        self.vertices[1].1.add(delta.curr - proj_along);
+                        let proj_along = seg.u * delta.dot(seg.u);
+                        self.vertices[1].1.add(delta - proj_along);
                         self.set_bezpath();
-                        self.vertices[1]
-                            .1
-                            .bind
-                            .map(|uid| (uid, Value::new(delta.curr - proj_along)))
+                        true
                     } else {
                         // e1 or e2 is moved, this affect the position of the side
                         // Apply the move to whichever endpoint
                         if idx == 0 {
-                            self.vertices[0].1.add(delta.curr);
+                            self.vertices[0].1.add(delta);
                         } else {
-                            self.vertices[2].1.add(delta.curr);
+                            self.vertices[2].1.add(delta);
                         }
                         if let Some(seg) =
                             SegBundle::new(self.vertices[0].1.curr, self.vertices[2].1.curr)
                         {
                             self.vertices[1].1.curr = seg.m + seg.n * signed_d;
                             self.set_bezpath();
-                            if idx == 0 {
-                                self.vertices[0].1.bind.map(|uid| (uid, delta))
-                            } else {
-                                self.vertices[2].1.bind.map(|uid| (uid, delta))
-                            }
+                            true
                         } else {
                             if idx == 0 {
-                                self.vertices[0].1.add(-delta.curr);
+                                self.vertices[0].1.add(-delta);
                             } else {
-                                self.vertices[2].1.add(-delta.curr);
+                                self.vertices[2].1.add(-delta);
                             }
-                            None
+                            false
                         }
                     }
                 } else {
-                    None
+                    false
                 }
             }
             ClosedShapeType::Rectangle | ClosedShapeType::PolyRectangle => {
                 // 0) Check length
                 let len = self.vertices.len();
                 if len < 4 {
-                    return None;
+                    return false;
                 }
                 // 1) find indices
                 let (idx_prev, idx, idx_next) =
                     match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                         Some(i) => ((i + len - 1) % len, i, (i + 1) % len),
-                        None => return None,
+                        None => return false,
                     };
                 // 2) grab positions and derive segments
                 let pos_m = self.vertices[idx].1.saved;
@@ -308,12 +296,12 @@ impl Drawable for ClosedShapes {
                 let o_seg_b = SegBundle::new(pos_m, self.vertices[idx_next].1.saved);
                 if let Some(seg_a) = o_seg_a {
                     if let Some(seg_b) = o_seg_b {
-                        let delta_a = delta.curr.dot(seg_a.u);
-                        let delta_b = delta.curr.dot(seg_b.u);
+                        let delta_a = delta.dot(seg_a.u);
+                        let delta_b = delta.dot(seg_b.u);
 
                         let new_prev = self.vertices[idx_prev].1.saved + delta_b * seg_b.u;
                         let new_next = self.vertices[idx_next].1.saved + delta_a * seg_a.u;
-                        let new_m = pos_m + delta.curr;
+                        let new_m = pos_m + delta;
 
                         if (new_m - new_prev).hypot() > EPSILON
                             && (new_m - new_next).hypot() > EPSILON
@@ -322,25 +310,25 @@ impl Drawable for ClosedShapes {
                             self.vertices[idx].1.set(new_m);
                             self.vertices[idx_next].1.set(new_next);
                             self.set_bezpath();
-                            self.vertices[idx].1.bind.map(|uid| (uid, delta))
+                            true
                         } else {
-                            return None;
+                            return false;
                         }
                     } else {
-                        return None;
+                        return false;
                     }
                 } else {
-                    return None;
+                    return false;
                 }
             }
             ClosedShapeType::Polygon => {
                 let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                     Some(i) => i,
-                    None => return None,
+                    None => return false,
                 };
-                self.vertices[idx].1.add(delta.curr);
+                self.vertices[idx].1.add(delta);
                 self.set_bezpath();
-                self.vertices[idx].1.bind.map(|uid| (uid, delta))
+                true
             }
         }
     }
@@ -358,7 +346,17 @@ impl Drawable for ClosedShapes {
             value.save();
         }
     }
+    fn get_binded_elements(&self) -> HashSet<ElemUId> {
+        let mut binds = HashSet::new();
+        for (_, v) in self.get_vertices() {
+            binds.extend(v.bind.iter().map(|(eid, _)| *eid));
+        }
+        binds
+    }
 
+    fn get_shape_type(&self) -> ClosedShapeType {
+        self.shape_type
+    }
     fn get_bezpath(&self) -> &BezPath {
         &self.bezpath
     }
@@ -415,7 +413,7 @@ impl Display for Operation {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ClosedShapeType {
     Disc,
     Oblong,
@@ -437,15 +435,14 @@ pub trait Drawable: Clone + 'static {
     fn get_vertex_mut(&mut self, value_uid: &ValueUId) -> Option<&mut Value<Vec2>>;
     fn get_vertices(&self) -> &Vec<(ValueUId, Value<Vec2>)>;
     fn get_vertices_mut(&mut self) -> &mut Vec<(ValueUId, Value<Vec2>)>;
-    fn select_vertex(&mut self, position: Value<Vec2>) -> Option<ValueUId>;
-    fn highlight_vertex(&mut self, position: Value<Vec2>) -> Option<ValueUId>;
-    fn move_vertex(
-        &mut self,
-        value_uid: ValueUId,
-        delta: Value<Vec2>,
-    ) -> Option<((ElemUId, ValueUId), Value<Vec2>)>;
+    fn select_vertex(&mut self, position: Vec2) -> Option<ValueUId>;
+    fn highlight_vertex(&mut self, position: Vec2) -> Option<ValueUId>;
+    fn move_vertex(&mut self, value_uid: ValueUId, delta: Vec2) -> bool;
     fn move_all_vertices(&mut self, delta: Vec2) -> Vec<ValueUId>;
     fn save_vertices_positions(&mut self);
+    fn get_binded_elements(&self) -> HashSet<ElemUId>;
+
+    fn get_shape_type(&self) -> ClosedShapeType;
     fn contains(&self, pos: Vec2) -> bool {
         self.get_bezpath().contains(pos.to_point())
     }
