@@ -3,7 +3,7 @@ macro_rules! log {
         web_sys::console::log_1(&format!( $( $t )* ).into())
     }
 }
-use crate::nodes::NodUId;
+use crate::nodes::ElemUId;
 use crate::types::SegBundle;
 use approx::*;
 use geo::{LineString, Polygon};
@@ -47,7 +47,7 @@ const THREAS_ANGLE: f64 = 2. / 180. * PI;
 #[derive(Debug)]
 pub enum MyError {
     NoShapeSelected,
-    NoClosedShapeForCShid(NodUId),
+    NoClosedShapeForCShid(ElemUId),
     Inconsistent,
     Impossible,
     ShapesFull,

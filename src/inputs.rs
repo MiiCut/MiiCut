@@ -122,6 +122,8 @@ pub enum Keys {
     ALower,
     #[strum(serialize = "A")]
     AUpper,
+    #[strum(serialize = "b")]
+    BLower,
     #[strum(serialize = "c")]
     CLower,
     #[strum(serialize = "v")]

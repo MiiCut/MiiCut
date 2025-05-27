@@ -56,6 +56,28 @@ pub fn get_shapes_colors(selected: bool, highlighted: bool) -> Colors {
         },
     }
 }
+
+pub fn get_vertices_colors(selected: bool, highlighted: bool) -> Colors {
+    match (selected, highlighted) {
+        (false, false) => Colors {
+            color: Color::Black,
+            fill_color: Color::Gray95Opacity,
+        },
+        (false, true) => Colors {
+            color: Color::Black,
+            fill_color: Color::GreenA,
+        },
+        (true, false) => Colors {
+            color: Color::Black,
+            fill_color: Color::Red55Opacity,
+        },
+        (true, true) => Colors {
+            color: Color::Black,
+            fill_color: Color::Red60Opacity,
+        },
+    }
+}
+
 // pub fn get_final_contour_colors(state: Status) -> Colors {
 //     use HS::*;
 //     match (state.is_hs(Select), state.is_hs(Highlight)) {
@@ -107,23 +129,7 @@ pub fn get_shapes_colors(selected: bool, highlighted: bool) -> Colors {
 //         },
 //     }
 // }
-// pub fn get_controls_colors(state: Status) -> Colors {
-//     use HS::*;
-//     match (state.is_hs(Select), state.is_hs(Highlight)) {
-//         (false, false) => Colors {
-//             color: Color::Black65Opacity,
-//             fill_color: Color::Transparent,
-//         },
-//         (false, true) => Colors {
-//             color: Color::Black65Opacity,
-//             fill_color: Color::Black65Opacity,
-//         },
-//         (true, _) => Colors {
-//             color: Color::Red,
-//             fill_color: Color::Red,
-//         },
-//     }
-// }
+
 // pub fn get_centroids_colors(state: Status) -> Colors {
 //     use HS::*;
 //     match (state.is_hs(Select), state.is_hs(Highlight)) {

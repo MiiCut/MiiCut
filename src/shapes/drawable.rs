@@ -6,162 +6,25 @@
 // }
 use crate::{
     math::EPSILON,
-    nodes::Set,
+    nodes::ElemUId,
     types::{SegBundle, Value},
 };
 use geo::{LineString, Polygon};
 use kurbo::{Arc, BezPath, Circle, PathEl, Shape, Vec2};
+use std::hash::Hash;
 use std::{
-    collections::HashSet,
     f64::consts::PI,
     fmt::{Debug, Display},
     sync::atomic::{AtomicUsize, Ordering},
     vec,
 };
 
-pub trait Drawable: Clone + 'static {
-    const TOLERANCE: f64;
-    const GRAB_RADIUS: f64 = 5.0;
-
-    fn op_next(&mut self);
-    fn op_union(&mut self);
-    fn op_force_union(&mut self);
-    fn op_difference(&mut self);
-
-    fn get_vertices(&self) -> &Vec<(ValueUId, Value<Vec2>)>;
-    fn get_vertices_mut(&mut self) -> &mut Vec<(ValueUId, Value<Vec2>)>;
-    fn get_vertices_highlighted(&self) -> &HashSet<ValueUId>;
-    fn get_vertices_selected(&self) -> &HashSet<ValueUId>;
-    fn clear_vertices_selected(&mut self);
-    fn select_vertex(&mut self, position: Value<Vec2>, shift_pressed: bool) -> bool;
-    fn highlight_vertex(&mut self, position: Value<Vec2>) -> bool;
-    fn move_vertex(&mut self, value_uid: ValueUId, position: Value<Vec2>) -> Vec<ValueUId>;
-    fn save_vertices_positions(&mut self);
-    fn contains(&self, pos: Vec2) -> bool {
-        self.get_bezpath().contains(pos.to_point())
-    }
-    fn get_bezpath(&self) -> &BezPath;
-}
-
-impl<E: Drawable> Set<E> {
-    pub fn select_element_vertex(&mut self, position: Value<Vec2>, shift_pressed: bool) -> bool {
-        // Select element vertices next to the position
-        if !shift_pressed {
-            for (_, node) in self.nodes.iter_mut() {
-                node.element.clear_vertices_selected();
-            }
-            for (_, node) in self.nodes.iter_mut() {
-                if node.element.select_vertex(position, shift_pressed) {
-                    self.nodes_selected.clear();
-                    return true;
-                }
-            }
-            return false;
-        } else {
-            let mut select = false;
-            for (_, node) in self.nodes.iter_mut() {
-                select |= node.element.select_vertex(position, shift_pressed)
-            }
-            if select {
-                self.nodes_selected.clear();
-            }
-            return select;
-        }
-    }
-    pub fn select_nodes(&mut self, position: Value<Vec2>, shift_pressed: bool) {
-        // Select the nodes whose element contains the position
-        if !shift_pressed {
-            let mut nodes_selected = HashSet::new();
-            for (id, node) in &self.nodes {
-                if node.element.contains(position.curr) {
-                    nodes_selected.insert(*id);
-                }
-            }
-            if nodes_selected.len() > 0 {
-                self.node_selector
-                    .refresh_selectable_nodes(nodes_selected.clone());
-                if let Some(id) = self.node_selector.next_selection() {
-                    self.nodes_selected.clear();
-                    self.nodes_selected.insert(id);
-                }
-            } else {
-                self.nodes_selected.clear();
-            }
-        } else {
-            // Shift pressed, add to selection
-            for (id, node) in &self.nodes {
-                if node.element.contains(position.curr) {
-                    self.nodes_selected.insert(*id);
-                }
-            }
-        }
-    }
-    pub fn highlight_nodes(&mut self, position: Value<Vec2>) {
-        // Select the nodes whose element contains the position
-        self.nodes_highlighted.clear();
-        for (id, node) in &self.nodes {
-            if node.element.contains(position.curr) {
-                self.nodes_highlighted.insert(*id);
-            }
-        }
-    }
-    pub fn save_nodes_positions(&mut self) {
-        for (_, node) in self.nodes.iter_mut() {
-            node.element.save_vertices_positions();
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Operation {
-    Union,
-    UnionForced,
-    Difference,
-}
-impl Operation {
-    pub fn next(&mut self) {
-        match self {
-            Operation::Union => *self = Operation::UnionForced,
-            Operation::UnionForced => *self = Operation::Difference,
-            Operation::Difference => *self = Operation::Union,
-        }
-    }
-    pub fn union(&mut self) {
-        *self = Operation::Union;
-    }
-    pub fn force_union(&mut self) {
-        *self = Operation::UnionForced;
-    }
-    pub fn difference(&mut self) {
-        *self = Operation::Difference;
-    }
-}
-impl Display for Operation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Operation::Union => write!(f, "Add"),
-            Operation::UnionForced => write!(f, "Add to top"),
-            Operation::Difference => write!(f, "Substract"),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum ClosedShapeType {
-    Disc,
-    Oblong,
-    Rectangle,
-    PolyRectangle,
-    Polygon,
-}
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ClosedShapes {
     shape_type: ClosedShapeType,
     operation: Operation,
     vertices: Vec<(ValueUId, Value<Vec2>)>,
-    vertices_highlighted: HashSet<ValueUId>,
-    vertices_selected: HashSet<ValueUId>,
 
     bezpath: BezPath,
     polygon: Polygon<f64>,
@@ -209,8 +72,6 @@ impl ClosedShapes {
                 .iter()
                 .map(|v| (ValueUId::new(), Value::new(*v)))
                 .collect(),
-            vertices_highlighted: HashSet::new(),
-            vertices_selected: HashSet::new(),
             bezpath: BezPath::new(),
             polygon: Polygon::new(LineString::new(vec![]), vec![]),
         };
@@ -306,70 +167,79 @@ impl Drawable for ClosedShapes {
         self.operation.difference();
     }
 
+    fn get_vertex(&self, value_uid: &ValueUId) -> Option<&Value<Vec2>> {
+        self.vertices.iter().find_map(
+            |(uid, value)| {
+                if uid == value_uid {
+                    Some(value)
+                } else {
+                    None
+                }
+            },
+        )
+    }
+    fn get_vertex_mut(&mut self, value_uid: &ValueUId) -> Option<&mut Value<Vec2>> {
+        self.vertices.iter_mut().find_map(
+            |(uid, value)| {
+                if uid == value_uid {
+                    Some(value)
+                } else {
+                    None
+                }
+            },
+        )
+    }
     fn get_vertices(&self) -> &Vec<(ValueUId, Value<Vec2>)> {
         &self.vertices
     }
     fn get_vertices_mut(&mut self) -> &mut Vec<(ValueUId, Value<Vec2>)> {
         &mut self.vertices
     }
-    fn get_vertices_highlighted(&self) -> &HashSet<ValueUId> {
-        &self.vertices_highlighted
-    }
-    fn get_vertices_selected(&self) -> &HashSet<ValueUId> {
-        &self.vertices_selected
-    }
-    fn clear_vertices_selected(&mut self) {
-        self.vertices_selected.clear();
-    }
-    fn select_vertex(&mut self, position: Value<Vec2>, shift_pressed: bool) -> bool {
-        if !shift_pressed {
-            self.vertices_selected.clear();
-            for (uid, value) in &self.vertices {
-                if (value.curr - position.curr).hypot() < Self::GRAB_RADIUS {
-                    self.vertices_selected.insert(*uid);
-                    return true;
-                }
+    fn select_vertex(&mut self, position: Value<Vec2>) -> Option<ValueUId> {
+        for (uid, value) in &self.vertices {
+            if (value.curr - position.curr).hypot() < Self::GRAB_RADIUS {
+                return Some(*uid);
             }
-            return false;
-        } else {
-            let mut select = false;
-            for (uid, value) in &self.vertices {
-                if (value.curr - position.curr).hypot() < Self::GRAB_RADIUS {
-                    self.vertices_selected.insert(*uid);
-                    select = true;
-                }
-            }
-            return select || self.vertices_selected.len() > 0;
         }
+        return None;
     }
-    fn highlight_vertex(&mut self, _position: Value<Vec2>) -> bool {
-        false
+    fn highlight_vertex(&mut self, position: Value<Vec2>) -> Option<ValueUId> {
+        for (uid, value) in &self.vertices {
+            if (value.curr - position.curr).hypot() < Self::GRAB_RADIUS {
+                return Some(*uid);
+            }
+        }
+        return None;
     }
-    fn move_vertex(&mut self, value_uid: ValueUId, position: Value<Vec2>) -> Vec<ValueUId> {
-        let delta = position.curr - position.saved;
+    // Return the binded vertex if any and the move to apply to it
+    fn move_vertex(
+        &mut self,
+        value_uid: ValueUId,
+        delta: Value<Vec2>,
+    ) -> Option<((ElemUId, ValueUId), Value<Vec2>)> {
         match self.shape_type {
             ClosedShapeType::Disc => {
                 if self.vertices.len() != 2 {
-                    return vec![];
+                    return None;
                 }
                 // The first vertex is the center
                 // The second vertex is the radius
                 if self.vertices[0].0 == value_uid {
-                    self.vertices[0].1.add(delta);
-                    self.vertices[1].1.add(delta);
+                    self.vertices[0].1.add(delta.curr);
+                    self.vertices[1].1.add(delta.curr);
                     self.set_bezpath();
-                    return vec![self.vertices[0].0, self.vertices[1].0];
+                    self.vertices[0].1.bind.map(|uid| (uid, delta))
                 } else if self.vertices[1].0 == value_uid {
-                    self.vertices[1].1.add(delta);
+                    self.vertices[1].1.add(delta.curr);
                     self.set_bezpath();
-                    return vec![self.vertices[1].0];
+                    self.vertices[1].1.bind.map(|uid| (uid, delta))
                 } else {
-                    return vec![];
+                    None
                 }
             }
             ClosedShapeType::Oblong => {
                 if self.vertices.len() != 3 {
-                    return vec![];
+                    return None;
                 }
                 if let Some(seg) = SegBundle::new(self.vertices[0].1.curr, self.vertices[2].1.curr)
                 {
@@ -378,21 +248,24 @@ impl Drawable for ClosedShapes {
 
                     let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                         Some(i) => i,
-                        None => return vec![],
+                        None => return None,
                     };
                     // The side is moved, this doesn't change the pos of e1, e2
                     if idx == 1 {
-                        let proj_along = seg.u * delta.dot(seg.u);
-                        self.vertices[1].1.add(delta - proj_along);
+                        let proj_along = seg.u * delta.curr.dot(seg.u);
+                        self.vertices[1].1.add(delta.curr - proj_along);
                         self.set_bezpath();
-                        return vec![self.vertices[1].0];
+                        self.vertices[1]
+                            .1
+                            .bind
+                            .map(|uid| (uid, Value::new(delta.curr - proj_along)))
                     } else {
                         // e1 or e2 is moved, this affect the position of the side
                         // Apply the move to whichever endpoint
                         if idx == 0 {
-                            self.vertices[0].1.add(delta);
+                            self.vertices[0].1.add(delta.curr);
                         } else {
-                            self.vertices[2].1.add(delta);
+                            self.vertices[2].1.add(delta.curr);
                         }
                         if let Some(seg) =
                             SegBundle::new(self.vertices[0].1.curr, self.vertices[2].1.curr)
@@ -400,88 +273,99 @@ impl Drawable for ClosedShapes {
                             self.vertices[1].1.curr = seg.m + seg.n * signed_d;
                             self.set_bezpath();
                             if idx == 0 {
-                                return vec![self.vertices[0].0, self.vertices[1].0];
+                                self.vertices[0].1.bind.map(|uid| (uid, delta))
                             } else {
-                                return vec![self.vertices[2].0, self.vertices[1].0];
+                                self.vertices[2].1.bind.map(|uid| (uid, delta))
                             }
                         } else {
                             if idx == 0 {
-                                self.vertices[0].1.add(-delta);
+                                self.vertices[0].1.add(-delta.curr);
                             } else {
-                                self.vertices[2].1.add(-delta);
+                                self.vertices[2].1.add(-delta.curr);
                             }
-                            return vec![];
+                            None
                         }
                     }
                 } else {
-                    return vec![];
+                    None
                 }
             }
             ClosedShapeType::Rectangle | ClosedShapeType::PolyRectangle => {
                 // 0) Check length
                 let len = self.vertices.len();
                 if len < 4 {
-                    return vec![];
+                    return None;
                 }
                 // 1) find indices
                 let (idx_prev, idx, idx_next) =
                     match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                         Some(i) => ((i + len - 1) % len, i, (i + 1) % len),
-                        None => return vec![],
+                        None => return None,
                     };
                 // 2) grab positions and derive segments
-                let pos_m = self.vertices[idx].1.curr;
-                let o_seg_a = SegBundle::new(self.vertices[idx_prev].1.curr, pos_m);
-                let o_seg_b = SegBundle::new(pos_m, self.vertices[idx_next].1.curr);
+                let pos_m = self.vertices[idx].1.saved;
+                let o_seg_a = SegBundle::new(self.vertices[idx_prev].1.saved, pos_m);
+                let o_seg_b = SegBundle::new(pos_m, self.vertices[idx_next].1.saved);
                 if let Some(seg_a) = o_seg_a {
                     if let Some(seg_b) = o_seg_b {
-                        let delta_a = delta.dot(seg_a.u);
-                        let delta_b = delta.dot(seg_b.u);
+                        let delta_a = delta.curr.dot(seg_a.u);
+                        let delta_b = delta.curr.dot(seg_b.u);
 
-                        log!("seg_a.u = {:.2},  len: {:.2}", seg_a.u, seg_a.len);
+                        let new_prev = self.vertices[idx_prev].1.saved + delta_b * seg_b.u;
+                        let new_next = self.vertices[idx_next].1.saved + delta_a * seg_a.u;
+                        let new_m = pos_m + delta.curr;
 
-                        self.vertices[idx_prev].1.add(delta_b * seg_b.u);
-                        self.vertices[idx].1.add(delta);
-                        self.vertices[idx_next].1.add(delta_a * seg_a.u);
-
-                        self.set_bezpath();
-                        vec![
-                            self.vertices[idx_prev].0,
-                            self.vertices[idx].0,
-                            self.vertices[idx_next].0,
-                        ]
+                        if (new_m - new_prev).hypot() > EPSILON
+                            && (new_m - new_next).hypot() > EPSILON
+                        {
+                            self.vertices[idx_prev].1.set(new_prev);
+                            self.vertices[idx].1.set(new_m);
+                            self.vertices[idx_next].1.set(new_next);
+                            self.set_bezpath();
+                            self.vertices[idx].1.bind.map(|uid| (uid, delta))
+                        } else {
+                            return None;
+                        }
                     } else {
-                        log!("Error: Unable to create segment B");
-                        return vec![];
+                        return None;
                     }
                 } else {
-                    log!("Error: Unable to create segment A");
-                    return vec![];
+                    return None;
                 }
             }
             ClosedShapeType::Polygon => {
                 let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                     Some(i) => i,
-                    None => return vec![],
+                    None => return None,
                 };
-                self.vertices[idx].1.curr = position.curr;
+                self.vertices[idx].1.add(delta.curr);
                 self.set_bezpath();
-                return vec![self.vertices[idx].0];
+                self.vertices[idx].1.bind.map(|uid| (uid, delta))
             }
         }
+    }
+    fn move_all_vertices(&mut self, delta: Vec2) -> Vec<ValueUId> {
+        let mut v_moved = vec![];
+        for (v_id, value) in self.get_vertices_mut() {
+            value.add(delta);
+            v_moved.push(*v_id);
+        }
+        self.set_bezpath();
+        v_moved
     }
     fn save_vertices_positions(&mut self) {
         for (_, value) in self.get_vertices_mut() {
             value.save();
         }
     }
+
     fn get_bezpath(&self) -> &BezPath {
         &self.bezpath
     }
 }
 
 static COUNTER_VALUE: AtomicUsize = AtomicUsize::new(0);
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ValueUId {
     id: usize,
 }
@@ -495,4 +379,75 @@ impl ValueUId {
         let id = COUNTER_VALUE.fetch_add(1, Ordering::SeqCst);
         ValueUId { id }
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Operation {
+    Union,
+    UnionForced,
+    Difference,
+}
+impl Operation {
+    pub fn next(&mut self) {
+        match self {
+            Operation::Union => *self = Operation::UnionForced,
+            Operation::UnionForced => *self = Operation::Difference,
+            Operation::Difference => *self = Operation::Union,
+        }
+    }
+    pub fn union(&mut self) {
+        *self = Operation::Union;
+    }
+    pub fn force_union(&mut self) {
+        *self = Operation::UnionForced;
+    }
+    pub fn difference(&mut self) {
+        *self = Operation::Difference;
+    }
+}
+impl Display for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operation::Union => write!(f, "Add"),
+            Operation::UnionForced => write!(f, "Add to top"),
+            Operation::Difference => write!(f, "Substract"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ClosedShapeType {
+    Disc,
+    Oblong,
+    Rectangle,
+    PolyRectangle,
+    Polygon,
+}
+
+pub trait Drawable: Clone + 'static {
+    const TOLERANCE: f64;
+    const GRAB_RADIUS: f64 = 5.0;
+
+    fn op_next(&mut self);
+    fn op_union(&mut self);
+    fn op_force_union(&mut self);
+    fn op_difference(&mut self);
+
+    fn get_vertex(&self, value_uid: &ValueUId) -> Option<&Value<Vec2>>;
+    fn get_vertex_mut(&mut self, value_uid: &ValueUId) -> Option<&mut Value<Vec2>>;
+    fn get_vertices(&self) -> &Vec<(ValueUId, Value<Vec2>)>;
+    fn get_vertices_mut(&mut self) -> &mut Vec<(ValueUId, Value<Vec2>)>;
+    fn select_vertex(&mut self, position: Value<Vec2>) -> Option<ValueUId>;
+    fn highlight_vertex(&mut self, position: Value<Vec2>) -> Option<ValueUId>;
+    fn move_vertex(
+        &mut self,
+        value_uid: ValueUId,
+        delta: Value<Vec2>,
+    ) -> Option<((ElemUId, ValueUId), Value<Vec2>)>;
+    fn move_all_vertices(&mut self, delta: Vec2) -> Vec<ValueUId>;
+    fn save_vertices_positions(&mut self);
+    fn contains(&self, pos: Vec2) -> bool {
+        self.get_bezpath().contains(pos.to_point())
+    }
+    fn get_bezpath(&self) -> &BezPath;
 }
