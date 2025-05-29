@@ -44,15 +44,38 @@ impl<E: Clone> Set<E> {
     }
 }
 impl<E: Drawable> Set<E> {
-    pub fn element_select_vertex(&mut self, position: Vec2) -> bool {
-        self.elem_vertex_selected = None;
+    pub fn element_select_vertex(&mut self, position: Vec2, shift_pressed: bool) -> bool {
+        let mut vsel_new = None;
         for (eid, element) in self.elems.iter_mut() {
             if let Some(vid_sel) = element.elem.select_vertex(position) {
                 self.elems_selected.clear();
-                self.elem_vertex_selected = Some((*eid, vid_sel));
+                vsel_new = Some((*eid, vid_sel));
             }
         }
-        return self.elem_vertex_selected.is_some();
+        match (self.elem_vertex_selected, vsel_new) {
+            (None, None) => return false,
+            (None, Some(vselnew)) => {
+                self.elem_vertex_selected = Some(vselnew);
+                return true;
+            }
+            (Some(_), None) => {
+                self.elem_vertex_selected = None;
+                return false;
+            }
+            (Some(vsel), Some(vselnew)) => {
+                if shift_pressed {
+                    if self.bind_unbind_vertices(vsel.0, vsel.1, vselnew.0, vselnew.1) {
+                        return true;
+                    } else {
+                        self.elem_vertex_selected = None;
+                        return true;
+                    }
+                } else {
+                    self.elem_vertex_selected = Some(vselnew);
+                    return true;
+                }
+            }
+        }
     }
     pub fn element_highlight_vertex(&mut self, position: Vec2) -> bool {
         self.elem_vertex_highlighted = None;
@@ -105,29 +128,28 @@ impl<E: Drawable> Set<E> {
             node.elem.save_vertices_positions();
         }
     }
-    pub fn move_elements(&mut self, delta: Vec2) -> bool {
+    pub fn move_elements(&mut self, delta: Vec2, shift_pressed: bool) -> bool {
         let mut moved = false;
         let mut sel_and_bind = self.elems_selected.clone();
-        log!("START");
-        log!("len sel_and_bind: {}", sel_and_bind.len());
-        for eid in &self.elems_selected {
-            if let Some(_) = self.elems.get_mut(eid) {
-                sel_and_bind.extend(self.get_binded_elements(*eid));
+
+        if !shift_pressed {
+            for eid in &self.elems_selected {
+                if let Some(_) = self.elems.get_mut(eid) {
+                    sel_and_bind.extend(self.get_binded_elements(*eid));
+                }
             }
-        }
-        log!("len sel_and_bind: {}", sel_and_bind.len());
-        let mut other_binds: HashSet<ElemUId> = HashSet::new();
-        for eid in self.elems.keys() {
-            if let Some(s) = self.elems.get(eid) {
-                s.elem.get_binded_elements().iter().for_each(|bind_eid| {
-                    if sel_and_bind.contains(bind_eid) {
-                        other_binds.extend(s.elem.get_binded_elements().iter());
-                    }
-                });
+            let mut other_binds: HashSet<ElemUId> = HashSet::new();
+            for eid in self.elems.keys() {
+                if let Some(s) = self.elems.get(eid) {
+                    s.elem.get_binded_elements().iter().for_each(|bind_eid| {
+                        if sel_and_bind.contains(bind_eid) {
+                            other_binds.extend(s.elem.get_binded_elements().iter());
+                        }
+                    });
+                }
             }
+            sel_and_bind.extend(other_binds);
         }
-        log!("len other_binds: {}", other_binds.len());
-        sel_and_bind.extend(other_binds);
         // Move all selected elements and their binded elements
         for eid in sel_and_bind {
             if let Some(node) = self.elems.get_mut(&eid) {
@@ -142,6 +164,62 @@ impl<E: Drawable> Set<E> {
             return element.elem.get_binded_elements();
         }
         HashSet::new()
+    }
+    pub fn bind_unbind_vertices(
+        &mut self,
+        eid_sel: ElemUId,
+        vid_sel: ValueUId,
+        eid_hig: ElemUId,
+        vid_hig: ValueUId,
+    ) -> bool {
+        // Ensure vertices belong to different elements
+        if eid_sel == eid_hig {
+            log!("Cannot bind vertices from the same element");
+            return false;
+        }
+
+        let old_bind_sel = self
+            .get_element(eid_sel)
+            .and_then(|elem| elem.elem.get_vertex(&vid_sel))
+            .map(|vertex| vertex.bind.clone())
+            .unwrap_or_else(HashSet::new); // Default to empty HashSet if not found
+
+        let old_bind_hig = self
+            .get_element(eid_hig)
+            .and_then(|elem| elem.elem.get_vertex(&vid_hig))
+            .map(|vertex| vertex.bind.clone())
+            .unwrap_or_else(HashSet::new);
+
+        let unbound = if old_bind_sel.contains(&(eid_hig, vid_hig))
+            && old_bind_hig.contains(&(eid_sel, vid_sel))
+        {
+            true
+        } else {
+            false
+        };
+        if let Some(elem_sel) = self.get_element_mut(eid_sel) {
+            if let Some(vertex_sel) = elem_sel.elem.get_vertex_mut(&vid_sel) {
+                if unbound {
+                    log!("Unbind {} to {}", vid_hig, vid_sel);
+                    vertex_sel.bind.remove(&(eid_hig, vid_hig));
+                } else {
+                    log!("Binding {} to {}", vid_hig, vid_sel);
+                    vertex_sel.bind.insert((eid_hig, vid_hig));
+                }
+            }
+        }
+        if let Some(elem_hig) = self.get_element_mut(eid_hig) {
+            if let Some(vertex_hig) = elem_hig.elem.get_vertex_mut(&vid_hig) {
+                if unbound {
+                    log!("Unbind {} to {}", vid_sel, vid_hig);
+                    vertex_hig.bind.remove(&(eid_sel, vid_sel));
+                } else {
+                    log!("Binding {} to {}", vid_sel, vid_hig);
+                    vertex_hig.bind.insert((eid_sel, vid_sel));
+                }
+            }
+        }
+        true
     }
 }
 

@@ -4,7 +4,7 @@ macro_rules! log {
     }
 }
 use crate::nodes::ElemUId;
-use crate::types::SegBundle;
+use crate::types::{SegBundle, Snap};
 use approx::*;
 use geo::{LineString, Polygon};
 use kurbo::{
@@ -41,8 +41,6 @@ use std::{
 //
 
 pub const EPSILON: f64 = 1e-6;
-// Snap the angle to horizontal or vertical
-const THREAS_ANGLE: f64 = 2. / 180. * PI;
 
 #[derive(Debug)]
 pub enum MyError {
@@ -1277,77 +1275,22 @@ pub fn get_line_segment(size: &Size, point: Vec2, angle: f64) -> (Vec2, Vec2) {
     }
 }
 
-pub fn snap_pt(pos: Vec2, snap: f64) -> Vec2 {
-    // Avoid division by zero
-    if snap.abs() < EPSILON {
-        return pos;
-    }
+pub fn snap_vertex(pos: Vec2, snap: Snap) -> Vec2 {
     // Snap to grid
-    let x = (pos.x / snap).round() * snap;
-    let y = (pos.y / snap).round() * snap;
+    let x = (pos.x / snap.linear()).round() * snap.linear();
+    let y = (pos.y / snap.linear()).round() * snap.linear();
     Vec2::new(x, y)
 }
-pub fn snap_val(val: f64, snap: f64) -> f64 {
-    // Avoid division by zero
-    if snap.abs() < EPSILON {
-        return val;
-    }
-    // Snap to grid
-    let val = (val / snap).round() * snap;
-    val
+pub fn snap_val(val: f64, snap: Snap) -> f64 {
+    (val / snap.linear()).round() * snap.linear()
 }
-pub fn snap_length(start: Vec2, pos: Vec2, snap: f64) -> Vec2 {
-    SegBundle::new(start, pos)
-        .and_then(|bdl| {
-            let snap_len = (bdl.len / snap).round() * snap;
-            Some(bdl.s + bdl.u * snap_len)
-        })
-        .unwrap_or(pos)
+// Angle in degrees
+pub fn snap_angle_deg(a: f64, snap: Snap) -> f64 {
+    (a / snap.angle()).round() * snap.angle()
 }
-pub fn snap_xy(start: Vec2, pos: Vec2, snap: f64) -> Vec2 {
-    let px = snap_val(pos.x - start.x, snap);
-    let py = snap_val(pos.y - start.y, snap);
-    Vec2::new(start.x + px, start.y + py)
-}
-pub fn snap_angle_hv(angle: f64) -> f64 {
-    let angle = angle % (2. * PI);
-    if angle.abs_diff_eq(&0., THREAS_ANGLE) {
-        return 0.;
-    }
-    if angle.abs_diff_eq(&PI, THREAS_ANGLE) {
-        return PI;
-    }
-    if angle.abs_diff_eq(&FRAC_PI_2, THREAS_ANGLE) {
-        return FRAC_PI_2;
-    }
-    if angle.abs_diff_eq(&-FRAC_PI_2, THREAS_ANGLE) {
-        return -FRAC_PI_2;
-    }
-    angle
-}
-
-pub fn snap_length_and_angle(center: Vec2, pos: Vec2, snap: f64, snap_angle: f64) -> Vec2 {
-    // Vector from center to pointer
-    let dx = pos.x - center.x;
-    let dy = pos.y - center.y;
-
-    // Length (already being snapped)
-    let raw_length = (dx * dx + dy * dy).sqrt();
-    let snapped_length = snap_val(raw_length, snap);
-    // Angle of the vector
-    let angle = dy.atan2(dx); // in radians
-
-    // Snap angle to nearest increment
-    let angle_step = snap_angle.to_radians(); // snap_angle in degrees
-    let snapped_angle = (angle / angle_step).round() * angle_step;
-
-    // Compute new point at snapped angle and length
-    let radius_pt = center
-        + Vec2::new(
-            snapped_length * snapped_angle.cos(),
-            snapped_length * snapped_angle.sin(),
-        );
-    radius_pt
+// Angle in radians
+pub fn snap_angle(a: f64, snap: Snap) -> f64 {
+    (a / PI * 180. / snap.angle()).round() * snap.angle() / 180. * PI
 }
 
 pub fn angle_from(v1: Vec2, v2: Vec2) -> f64 {

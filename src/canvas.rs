@@ -461,7 +461,7 @@ impl Canvases {
 
         ctx.rotate(text.config.angle)
             .expect("Failed to rotate canvas");
-        ctx.set_font(&format!("{}px Ubuntu+Mono", text.config.font_size));
+        ctx.set_font(&format!("{}px Ubuntu Mono", text.config.font_size));
         ctx.set_global_alpha(text.config.opacity);
 
         ctx.set_stroke_style_str(text.config.color.get());
@@ -484,11 +484,11 @@ impl Canvases {
 
         ctx.rotate(text.config.angle)
             .expect("Failed to rotate canvas");
-        ctx.set_font(&format!("{}px Ubuntu+Mono", text.config.font_size));
+        ctx.set_font(&format!("{}px Ubuntu Mono", text.config.font_size));
         ctx.set_global_alpha(text.config.opacity);
 
-        ctx.set_stroke_style_str(Color::Pink30Opacity.get());
-        ctx.set_fill_style_str(Color::Pink30Opacity.get());
+        ctx.set_stroke_style_str(text.config.color.get());
+        ctx.set_fill_style_str(text.config.color.get());
         ctx.set_text_align(match text.config.align {
             TextAlign::Left => "left",
             TextAlign::Right => "right",
@@ -777,7 +777,7 @@ impl Color {
             Transparent => "rgba(255,255,255,0.125)",
             GridPrimary => "rgba(240,240,240,1)",
             GridSecondary => "rgba(224,224,224,1)",
-            Rules => "rgba(208,208,208,1)",
+            Rules => "hsl(350, 68.90%, 52.20%)",
             OnCreation => "rgba(0,119,255,1)",
             White40Opacity => "rgba(255,255,255,0.4)",
             White80Opacity => "rgba(240,240,240,0.8)",

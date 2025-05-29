@@ -23,7 +23,7 @@ pub struct UserUI {
     pub canvas_pos: Vec2,
     canvas_pos_ms_dwn: Vec2,
     canvas_pos_ms_up: Vec2,
-    draw_pos: Vec2,
+    pub draw_pos: Vec2,
     draw_pos_down: Vec2,
     draw_pos_up: Vec2,
     mouse_client: Vec2,
@@ -79,7 +79,8 @@ impl UserUI {
         self.draw_pos = to_draw(self.canvas_pos, drawing_scale, drawing_offset);
 
         // Pointer update
-        self.pointer.set(self.draw_pos);
+        self.pointer
+            .set((self.draw_pos / self.snap.linear()).round() * self.snap.linear());
 
         match sys_mouse {
             SystemMouse::Down => {

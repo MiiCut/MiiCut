@@ -109,8 +109,8 @@ pub struct Snap {
 impl Snap {
     pub fn new() -> Self {
         Self {
-            linear: SnapValue::SnapMax,
-            angle: SnapValue::SnapMax,
+            linear: SnapValue::SnapMin,
+            angle: SnapValue::SnapMin,
         }
     }
     pub fn linear(&self) -> f64 {

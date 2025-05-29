@@ -9,6 +9,7 @@ use std::{f64::consts::PI, vec};
 
 #[allow(dead_code)]
 const HU: Vec2 = Vec2::new(1., 0.);
+#[allow(dead_code)]
 const VU: Vec2 = Vec2::new(0., 1.);
 
 pub fn dim_linear(
@@ -41,6 +42,11 @@ pub fn dim_hv(
     let color = get_dimension_colors();
     let dim_offset = 15. / cinfo.1;
     let mut texts = vec![];
+    let (angle, txt_off) = if bdl.a > -PI / 2. && bdl.a < PI / 2. {
+        (bdl.a, -1.)
+    } else {
+        (bdl.a - PI, 1.)
+    };
     match (
         (bdl.s.x - bdl.e.x).abs() >= 0.1,
         (bdl.s.y - bdl.e.y).abs() >= 0.1,
@@ -48,31 +54,31 @@ pub fn dim_hv(
         (true, true) => {
             // Horizontal dimension
             texts.push(CanvasText::new(
-                format!("H: {:7.1}", (bdl.e.x - bdl.s.x).abs()),
-                TextPos::PosCustom(bdl.m - VU / 3. * (dim_offset)),
-                CanvasTextConfig::new(get_text_colors().color, 0., TextAlign::Center, 14, 0.8),
+                format!("H{:4.1}", (bdl.e.x - bdl.s.x).abs()),
+                TextPos::PosCustom(bdl.m + bdl.n * txt_off * 0.5 * (dim_offset)),
+                CanvasTextConfig::new(get_text_colors().color, angle, TextAlign::Center, 14, 0.8),
             ));
             // Vertical dimension
             texts.push(CanvasText::new(
-                format!("V: {:7.1}", (bdl.e.y - bdl.s.y).abs()),
-                TextPos::PosCustom(bdl.m + VU / 3. * (dim_offset)),
-                CanvasTextConfig::new(get_text_colors().color, 0., TextAlign::Center, 14, 0.8),
+                format!("V{:4.1}", (bdl.e.y - bdl.s.y).abs()),
+                TextPos::PosCustom(bdl.m - bdl.n * txt_off.abs() * (txt_off * dim_offset)),
+                CanvasTextConfig::new(get_text_colors().color, angle, TextAlign::Center, 14, 0.8),
             ));
         }
         (true, false) => {
             // Horizontal dimension
             texts.push(CanvasText::new(
-                format!("{:5.1}", (bdl.e.x - bdl.s.x).abs()),
-                TextPos::PosCustom(bdl.m - VU / 3. * (dim_offset)),
-                CanvasTextConfig::new(get_text_colors().color, 0., TextAlign::Center, 14, 0.8),
+                format!("H{:4.1}", (bdl.e.x - bdl.s.x).abs()),
+                TextPos::PosCustom(bdl.m + bdl.n * txt_off * 0.5 * (dim_offset)),
+                CanvasTextConfig::new(get_text_colors().color, angle, TextAlign::Center, 14, 0.8),
             ));
         }
         (false, true) => {
             // Vertical dimension
             texts.push(CanvasText::new(
-                format!("{:5.1}", (bdl.e.y - bdl.s.y).abs()),
-                TextPos::PosCustom(bdl.m + VU / 3. * (dim_offset)),
-                CanvasTextConfig::new(get_text_colors().color, 0., TextAlign::Center, 14, 0.8),
+                format!("V{:4.1}", (bdl.e.y - bdl.s.y).abs()),
+                TextPos::PosCustom(bdl.m - bdl.n * txt_off.abs() * (txt_off * dim_offset)),
+                CanvasTextConfig::new(get_text_colors().color, angle, TextAlign::Center, 14, 0.8),
             ));
         }
         (false, false) => (),
@@ -132,17 +138,30 @@ pub fn dim_radius(
     let dim_offset = 10. / cinfo.1;
     let mut path = BezPath::new();
     let (angle, txt_off) = if bdl.a > -PI / 2. && bdl.a < PI / 2. {
-        (bdl.a, 0.5)
+        (bdl.a, -1.)
     } else {
         (bdl.a - PI, 1.)
     };
-    let text = CanvasText::new(
-        format!("R: {:.1}", bdl.len),
-        TextPos::PosCustom(bdl.m - bdl.n * (txt_off * dim_offset)),
+    let text1 = CanvasText::new(
+        format!("R{:.1}", bdl.len),
+        TextPos::PosCustom(bdl.m + bdl.n * txt_off * 0.5 * (dim_offset)),
         CanvasTextConfig::new(get_text_colors().color, angle, TextAlign::Center, 14, 0.8),
     );
     line(&mut path, bdl.s, bdl.e);
-    (path, Dim, color, vec![text])
+
+    if bdl.a.abs() > EPSILON
+        && (bdl.a.abs() - PI / 2.).abs() > EPSILON
+        && (bdl.a.abs() - PI).abs() > EPSILON
+    {
+        let text2 = CanvasText::new(
+            format!("α{:.1}°", bdl.a / PI * 180.),
+            TextPos::PosCustom(bdl.m - bdl.n * txt_off.abs() * (txt_off * dim_offset)),
+            CanvasTextConfig::new(get_text_colors().color, angle, TextAlign::Center, 14, 0.8),
+        );
+        (path, Dim, color, vec![text1, text2])
+    } else {
+        (path, Dim, color, vec![text1])
+    }
 }
 
 fn line(path: &mut BezPath, pt1: Vec2, pt2: Vec2) {

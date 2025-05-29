@@ -5,9 +5,9 @@
 //     }
 // }
 use crate::{
-    math::EPSILON,
+    math::{snap_angle, snap_val, snap_vertex, EPSILON},
     nodes::ElemUId,
-    types::{SegBundle, Value},
+    types::{SegBundle, Snap, Value},
 };
 use geo::{LineString, Polygon};
 use kurbo::{Arc, BezPath, Circle, PathEl, Shape, Vec2};
@@ -211,7 +211,8 @@ impl Drawable for ClosedShapes {
         }
         return None;
     }
-    fn move_vertex(&mut self, value_uid: ValueUId, delta: Vec2) -> bool {
+    fn move_vertex(&mut self, value_uid: ValueUId, mut delta: Vec2, snap: Snap) -> bool {
+        delta = (delta / snap.linear()).round() * snap.linear();
         match self.shape_type {
             ClosedShapeType::Disc => {
                 if self.vertices.len() != 2 {
@@ -220,12 +221,39 @@ impl Drawable for ClosedShapes {
                 // The first vertex is the center
                 // The second vertex is the radius
                 if self.vertices[0].0 == value_uid {
-                    self.vertices[0].1.add(delta);
-                    self.vertices[1].1.add(delta);
-                    self.set_bezpath();
-                    true
+                    if let Some(seg) =
+                        SegBundle::new(self.vertices[0].1.saved, self.vertices[1].1.saved)
+                    {
+                        // Snap the saved center
+                        let snap_c = snap_vertex(seg.s, snap);
+                        // Snap the radius relative to the saved center (keep same radius)
+                        let snap_r = seg.e + snap_c - seg.s;
+                        // Snap the angle
+                        let r = (snap_r - snap_c).hypot();
+                        let a = snap_angle((snap_r - snap_c).atan2(), snap);
+
+                        self.vertices[0].1.saved = snap_c;
+                        self.vertices[1].1.saved = snap_c + Vec2::new(r * a.cos(), r * a.sin());
+
+                        // Then move all
+                        self.vertices[0].1.add(delta);
+                        self.vertices[1].1.add(delta);
+                        self.set_bezpath();
+                        true
+                    } else {
+                        self.vertices[0].1.add(delta);
+                        self.set_bezpath();
+                        true
+                    }
                 } else if self.vertices[1].0 == value_uid {
                     self.vertices[1].1.add(delta);
+                    if let Some(seg) =
+                        SegBundle::new(self.vertices[0].1.saved, self.vertices[1].1.curr)
+                    {
+                        let r = snap_val(seg.len, snap);
+                        let a = snap_angle(seg.a, snap);
+                        self.vertices[1].1.curr = seg.s + Vec2::new(r * a.cos(), r * a.sin());
+                    }
                     self.set_bezpath();
                     true
                 } else {
@@ -236,60 +264,101 @@ impl Drawable for ClosedShapes {
                 if self.vertices.len() != 3 {
                     return false;
                 }
-                if let Some(seg) = SegBundle::new(self.vertices[0].1.curr, self.vertices[2].1.curr)
-                {
-                    let side = self.vertices[1].1.curr;
-                    let signed_d = (side - seg.m).dot(seg.n);
+                let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
+                    Some(i) => i,
+                    None => return false,
+                };
+                // Save the side radius
+                let r_saved = ((self.vertices[0].1.saved + self.vertices[2].1.saved) / 2.
+                    - self.vertices[1].1.saved)
+                    .hypot();
 
-                    let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
-                        Some(i) => i,
-                        None => return false,
-                    };
-                    // The side is moved, this doesn't change the pos of e1, e2
-                    if idx == 1 {
-                        let proj_along = seg.u * delta.dot(seg.u);
-                        self.vertices[1].1.add(delta - proj_along);
-                        self.set_bezpath();
-                        true
+                // The side is moved, this doesn't change the pos of e1, e2
+                if idx == 1 {
+                    if let Some(seg) =
+                        SegBundle::new(self.vertices[0].1.saved, self.vertices[2].1.saved)
+                    {
+                        let s_d = (self.vertices[1].1.saved - seg.m).dot(seg.n);
+                        self.vertices[1].1.curr =
+                            seg.m + seg.n * snap_val(s_d + delta.dot(seg.n), snap);
                     } else {
-                        // e1 or e2 is moved, this affect the position of the side
-                        // Apply the move to whichever endpoint
-                        if idx == 0 {
-                            self.vertices[0].1.add(delta);
-                        } else {
-                            self.vertices[2].1.add(delta);
-                        }
-                        if let Some(seg) =
-                            SegBundle::new(self.vertices[0].1.curr, self.vertices[2].1.curr)
-                        {
-                            self.vertices[1].1.curr = seg.m + seg.n * signed_d;
-                            self.set_bezpath();
-                            true
-                        } else {
-                            if idx == 0 {
-                                self.vertices[0].1.add(-delta);
-                            } else {
-                                self.vertices[2].1.add(-delta);
-                            }
-                            false
-                        }
+                        self.vertices[0].1.add(delta);
                     }
                 } else {
-                    false
+                    // e1 is moved
+                    if idx == 0 {
+                        self.vertices[0].1.saved = snap_vertex(self.vertices[0].1.saved, snap);
+                        self.vertices[0].1.add(delta);
+                        if let Some(seg) =
+                            SegBundle::new(self.vertices[0].1.curr, self.vertices[2].1.saved)
+                        {
+                            let r = snap_val(seg.len, snap);
+                            let a = snap_angle(seg.a, snap);
+                            self.vertices[0].1.curr =
+                                snap_vertex(seg.e - Vec2::new(r * a.cos(), r * a.sin()), snap);
+                        } else {
+                            self.vertices[0].1.add(delta);
+                        }
+                    } else {
+                        // e2 is moved
+                        if idx == 2 {
+                            self.vertices[2].1.saved = snap_vertex(self.vertices[2].1.saved, snap);
+                            self.vertices[2].1.add(delta);
+                            if let Some(seg) =
+                                SegBundle::new(self.vertices[0].1.saved, self.vertices[2].1.curr)
+                            {
+                                let r = snap_val(seg.len, snap);
+                                let a = snap_angle(seg.a, snap);
+                                self.vertices[2].1.curr =
+                                    snap_vertex(seg.s + Vec2::new(r * a.cos(), r * a.sin()), snap);
+                            } else {
+                                self.vertices[2].1.add(delta);
+                            }
+                        }
+                    }
+                    // Move the side
+                    if let Some(seg) =
+                        SegBundle::new(self.vertices[0].1.curr, self.vertices[2].1.curr)
+                    {
+                        self.vertices[1].1.curr = seg.m + seg.n * r_saved;
+                    }
                 }
+                self.set_bezpath();
+                true
             }
             ClosedShapeType::Rectangle | ClosedShapeType::PolyRectangle => {
-                // 0) Check length
                 let len = self.vertices.len();
                 if len < 4 {
                     return false;
                 }
-                // 1) find indices
                 let (idx_prev, idx, idx_next) =
                     match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                         Some(i) => ((i + len - 1) % len, i, (i + 1) % len),
                         None => return false,
                     };
+
+                // Snap the saved vertex position, hence snap prev/next along h or v axis
+                let snap_idx = snap_vertex(self.vertices[idx].1.saved, snap);
+                if (self.vertices[idx_prev].1.saved.x - self.vertices[idx].1.saved.x).abs()
+                    < EPSILON
+                {
+                    self.vertices[idx_prev].1.saved.x =
+                        snap_val(self.vertices[idx_prev].1.saved.x, snap);
+                } else {
+                    self.vertices[idx_prev].1.saved.y =
+                        snap_val(self.vertices[idx_prev].1.saved.y, snap);
+                }
+                if (self.vertices[idx_next].1.saved.x - self.vertices[idx].1.saved.x).abs()
+                    < EPSILON
+                {
+                    self.vertices[idx_next].1.saved.x =
+                        snap_val(self.vertices[idx_next].1.saved.x, snap);
+                } else {
+                    self.vertices[idx_next].1.saved.y =
+                        snap_val(self.vertices[idx_next].1.saved.y, snap);
+                }
+                self.vertices[idx].1.saved = snap_idx;
+
                 // 2) grab positions and derive segments
                 let pos_m = self.vertices[idx].1.saved;
                 let o_seg_a = SegBundle::new(self.vertices[idx_prev].1.saved, pos_m);
@@ -326,6 +395,7 @@ impl Drawable for ClosedShapes {
                     Some(i) => i,
                     None => return false,
                 };
+                self.vertices[idx].1.saved = snap_vertex(self.vertices[idx].1.saved, snap);
                 self.vertices[idx].1.add(delta);
                 self.set_bezpath();
                 true
@@ -437,7 +507,7 @@ pub trait Drawable: Clone + 'static {
     fn get_vertices_mut(&mut self) -> &mut Vec<(ValueUId, Value<Vec2>)>;
     fn select_vertex(&mut self, position: Vec2) -> Option<ValueUId>;
     fn highlight_vertex(&mut self, position: Vec2) -> Option<ValueUId>;
-    fn move_vertex(&mut self, value_uid: ValueUId, delta: Vec2) -> bool;
+    fn move_vertex(&mut self, value_uid: ValueUId, delta: Vec2, snap: Snap) -> bool;
     fn move_all_vertices(&mut self, delta: Vec2) -> Vec<ValueUId>;
     fn save_vertices_positions(&mut self);
     fn get_binded_elements(&self) -> HashSet<ElemUId>;

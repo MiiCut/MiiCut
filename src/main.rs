@@ -108,66 +108,7 @@ impl<E: Drawable> AppVars<E> {
     fn a_pressed(&mut self) {
         self.userui.snap.next_angle();
     }
-    fn one_pressed(&mut self) {
-        // Extract selected and highlighted vertices
-        let v_sel = self.set.elem_vertex_selected;
-        let v_hig = self.set.elem_vertex_highlighted;
-
-        // Check if both selected and highlighted vertices exist
-        if let Some((eid_sel, vid_sel)) = v_sel {
-            if let Some((eid_hig, vid_hig)) = v_hig {
-                // Ensure vertices belong to different elements
-                if eid_sel == eid_hig {
-                    log!("Cannot bind vertices from the same element");
-                    return;
-                }
-
-                let old_bind_sel = self
-                    .set
-                    .get_element(eid_sel)
-                    .and_then(|elem| elem.elem.get_vertex(&vid_sel))
-                    .map(|vertex| vertex.bind.clone())
-                    .unwrap_or_else(HashSet::new); // Default to empty HashSet if not found
-
-                let old_bind_hig = self
-                    .set
-                    .get_element(eid_hig)
-                    .and_then(|elem| elem.elem.get_vertex(&vid_hig))
-                    .map(|vertex| vertex.bind.clone())
-                    .unwrap_or_else(HashSet::new);
-
-                let unbound = if old_bind_sel.contains(&(eid_hig, vid_hig))
-                    && old_bind_hig.contains(&(eid_sel, vid_sel))
-                {
-                    true
-                } else {
-                    false
-                };
-                if let Some(elem_sel) = self.set.get_element_mut(eid_sel) {
-                    if let Some(vertex_sel) = elem_sel.elem.get_vertex_mut(&vid_sel) {
-                        if unbound {
-                            log!("Unbind {} to {}", vid_hig, vid_sel);
-                            vertex_sel.bind.remove(&(eid_hig, vid_hig));
-                        } else {
-                            log!("Binding {} to {}", vid_hig, vid_sel);
-                            vertex_sel.bind.insert((eid_hig, vid_hig));
-                        }
-                    }
-                }
-                if let Some(elem_hig) = self.set.get_element_mut(eid_hig) {
-                    if let Some(vertex_hig) = elem_hig.elem.get_vertex_mut(&vid_hig) {
-                        if unbound {
-                            log!("Unbind {} to {}", vid_sel, vid_hig);
-                            vertex_hig.bind.remove(&(eid_sel, vid_sel));
-                        } else {
-                            log!("Binding {} to {}", vid_sel, vid_hig);
-                            vertex_hig.bind.insert((eid_sel, vid_sel));
-                        }
-                    }
-                }
-            }
-        }
-    }
+    fn one_pressed(&mut self) {}
     fn t_pressed(&mut self) {
         // if let None = self.on_creation {}
     }
@@ -261,7 +202,7 @@ fn create_app_vars<E: Drawable>(window: Window) -> Result<(), JsValue> {
     let e2 = Vec2::new(20., 100.);
 
     let center = Vec2::new(0., 40.);
-    let radius = Vec2::new(0., 100.);
+    let radius = Vec2::new(10., 120.);
     let sh1 = ClosedShapes::new(ClosedShapeType::Rectangle, vec![bl, tr]);
     let sh2 = ClosedShapes::new(ClosedShapeType::Oblong, vec![e1, side, e2]);
     let sh3 = ClosedShapes::new(ClosedShapeType::Disc, vec![center, radius]);
@@ -274,11 +215,11 @@ fn create_app_vars<E: Drawable>(window: Window) -> Result<(), JsValue> {
     let e6 = Vec2::new(30., -70.);
     let sh4 = ClosedShapes::new(ClosedShapeType::PolyRectangle, vec![e1, e2, e3, e4, e5, e6]);
 
-    let e1 = Vec2::new(30., 50.);
-    let e2 = Vec2::new(100., 100.);
-    let e3 = Vec2::new(200., 100.);
-    let e4 = Vec2::new(150., 200.);
-    let e5 = Vec2::new(100., 159.);
+    let e1 = Vec2::new(30.3, 50.);
+    let e2 = Vec2::new(100.2, 100.);
+    let e3 = Vec2::new(200.7, 100.);
+    let e4 = Vec2::new(150., 200.3);
+    let e5 = Vec2::new(100., 159.4);
     let sh5 = ClosedShapes::new(ClosedShapeType::Polygon, vec![e1, e2, e3, e4, e5]);
 
     if let Some(sh) = sh1 {
@@ -327,7 +268,6 @@ fn create_app_vars<E: Drawable>(window: Window) -> Result<(), JsValue> {
     let mut avb = av.borrow_mut();
 
     reset_origin(&mut avb);
-    update_informations(&mut avb);
     draw_grid_and_rules(&mut avb);
     render_drawing(&mut avb);
 
@@ -589,6 +529,7 @@ fn update<E: Drawable>(
 ) -> Result<(), MyError> {
     let user_action = avb.update_inputs(mouse_event, sys_mouse);
     let pointer = avb.userui.pointer.clone();
+    let draw_pos = avb.userui.draw_pos;
     let shift_pressed = avb.userui.keys_states.shift_pressed;
     let snap = avb.userui.snap;
 
@@ -597,26 +538,30 @@ fn update<E: Drawable>(
             UserAction::ClickDown(button) => {
                 if button == MouseButton::Left {
                     avb.set.save_elements_positions();
-                    if !avb.set.element_select_vertex(pointer.curr) {
-                        avb.set.select_elements(pointer.curr, shift_pressed);
+                    if !avb.set.element_select_vertex(draw_pos, shift_pressed) {
+                        avb.set.select_elements(draw_pos, shift_pressed);
                     }
                 }
             }
             UserAction::Move(btn) => {
                 if btn == ButtonLevel::Up {
-                    if !avb.set.element_highlight_vertex(pointer.curr) {
-                        avb.set.highlight_elements(pointer.curr);
+                    if !avb.set.element_highlight_vertex(draw_pos) {
+                        avb.set.highlight_elements(draw_pos);
                     }
                 } else {
                     // Elements and vertices selection are mutual exclusive
                     // Moving is done on selected objects
                     // Move Elements
-                    if !avb.set.move_elements(pointer.curr - pointer.saved) {
+                    if !avb
+                        .set
+                        .move_elements(pointer.curr - pointer.saved, shift_pressed)
+                    {
                         // Move selected vertex if no elements are moved
                         if let Some((eid, vid)) = avb.set.elem_vertex_selected {
                             // Move the selected vertex
                             avb.set.get_element_mut(eid).map(|elem| {
-                                elem.elem.move_vertex(vid, pointer.curr - pointer.saved);
+                                elem.elem
+                                    .move_vertex(vid, pointer.curr - pointer.saved, snap);
                             });
                         }
                     }
@@ -629,32 +574,6 @@ fn update<E: Drawable>(
     Ok(())
 }
 
-fn update_informations<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
-    avb.canvases.clear_background_canvas();
-    let c_size = avb.canvases.get_canvas_size();
-    let pos = avb.userui.pointer.curr;
-    let ckind = CanvasKind::Background;
-    avb.canvases.direct_text(
-        &ckind,
-        &CanvasText::new(
-            format!("( {:.1} , {:.1} )", pos.x, pos.y),
-            TextPos::PosCustom(Vec2::new(c_size.width - 10., c_size.height - 10.)),
-            CanvasTextConfig::new(Color::Rules, 0., TextAlign::Right, 20, 0.4),
-        ),
-    );
-    avb.canvases.direct_text(
-        &ckind,
-        &CanvasText::new(
-            format!(
-                "Snap value (PRESS S): {:.0} mm / {:.0} °",
-                avb.userui.snap.linear(),
-                avb.userui.snap.angle()
-            ),
-            TextPos::Pos1(c_size.height),
-            CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
-        ),
-    );
-}
 fn on_mouse_move<E: Drawable>(av: RefAV<E>, event: Event) {
     let mut avb = av.borrow_mut();
     if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
@@ -662,7 +581,6 @@ fn on_mouse_move<E: Drawable>(av: RefAV<E>, event: Event) {
             log!("ERROR: {}", e);
         }
     }
-    update_informations(&mut avb);
     render_drawing(&mut avb);
     drop(avb);
 }
@@ -686,7 +604,6 @@ fn on_mouse_up<E: Drawable>(av: RefAV<E>, event: Event) {
             log!("ERROR: {}", e);
         }
     }
-    update_informations(&mut avb);
     render_drawing(&mut avb);
     drop(avb);
 }
@@ -853,11 +770,9 @@ fn on_window_keydown<E: Drawable>(av: RefAV<E>, event: Event) {
                 // Entities values snapping
                 SLower | SUpper => {
                     avb.s_pressed();
-                    update_informations(&mut avb);
                 }
                 ALower | AUpper => {
                     avb.a_pressed();
-                    update_informations(&mut avb);
                 }
                 // Toggle boolean operation (add, substract, intersect)
                 TLower => avb.t_pressed(),
@@ -1062,7 +977,7 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
                     if let Some(seg1) = SegBundle::new(v[0], v[2]) {
                         // Draw the main segment
                         let (path, pattern, color, text) =
-                            dim_linear(seg1, avb.canvases.get_canvas_infos());
+                            dim_radius(seg1, avb.canvases.get_canvas_infos());
                         avb.canvases
                             .draw_path(&CanvasKind::Draw, &path, pattern, color, text);
                         // Draw the radius segment
@@ -1290,4 +1205,31 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     if avb.pointer_on_canvas {
         avb.canvases.draw_pointer(avb.userui.pointer.curr);
     }
+    render_informations(avb);
+}
+
+fn render_informations<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
+    // avb.canvases.clear_background_canvas();
+    let c_size = avb.canvases.get_canvas_size();
+    let pos = avb.userui.pointer.curr;
+    avb.canvases.direct_text(
+        &CanvasKind::Draw,
+        &CanvasText::new(
+            format!("({:.2},{:.2})", pos.x, pos.y),
+            TextPos::PosCustom(Vec2::new(30., c_size.height - 10.)),
+            CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
+        ),
+    );
+    avb.canvases.direct_text(
+        &CanvasKind::Draw,
+        &CanvasText::new(
+            format!(
+                "Snap value (PRESS S): {:.0} mm / {:.0} °",
+                avb.userui.snap.linear(),
+                avb.userui.snap.angle()
+            ),
+            TextPos::PosCustom(Vec2::new(300., c_size.height - 10.)),
+            CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
+        ),
+    );
 }
