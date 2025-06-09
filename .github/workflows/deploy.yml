@@ -28,7 +28,7 @@ jobs:
         # Note: --public-url is set to /fluxfox/ as a personal GitHub pages site is hosted at /repo-name/
         env:
           URL_PATH: "MiiCut" # URL_PATH should match public-url
-        run: trunk build --release --public-url /MiiCut/
+        run: trunk build --release --public-url /dist/
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
