@@ -1,0 +1,78 @@
+<!DOCTYPE html><html lang="en"><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MiiCut</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+ <link href="https://fonts.googleapis.com/css2?family=Ubuntu+Mono:ital,wght@0,400;0,700;1,400;1,700&amp;display=swap" rel="stylesheet">
+ <link rel="stylesheet" href="/styles-83d66ada05ae3208.css">
+  
+  <base href="/">
+
+<link rel="preload" href="/MiiCut-e56524b2164427d6_bg.wasm" as="fetch" type="application/wasm" crossorigin="">
+<link rel="modulepreload" href="/MiiCut-e56524b2164427d6.js"></head>
+<body>
+  <input type="file" id="file-input" style="display: none;">
+  <div id="color-tailwind"></div>
+  
+  <!-- Top Menu -->
+  <div id="top-menu" class="top-menu">
+    <div id="menuTitle">
+      &nbsp;MiiCut 0.1.0
+    </div>
+    <div class="dropdown">
+      <button class="dropbtn">File</button>
+      <div class="dropdown-content">
+        <a href="#" id="load-option">Load SVG path</a>
+        <a href="#" id="save-option">Save drawing (TBD)</a>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Main container for panels and canvas -->
+  <div id="main-container">
+    <!-- Left Toolbar Panel -->
+    <div class="left-panel" id="left-panel">
+      <div class="icon-container">
+        <div id="icon-arrow" class="icon icon-selected" data-tooltip="Select element, move the canvas"></div>
+        <div class="icon-separator"></div>
+        <div id="icon-disc" class="icon" data-tooltip="Draw a disc"></div>
+        <div id="icon-triangle" class="icon" data-tooltip="Draw a triangle"></div>
+        <div id="icon-square" class="icon" data-tooltip="Draw a square"></div>
+        <div class="icon-separator"></div>
+        <div id="icon-oblong" class="icon" data-tooltip="Draw a oblong shape"></div>
+        <div id="icon-polyrectangle" class="icon" data-tooltip="Draw a polyrectangle"></div>
+        <div id="icon-polygon" class="icon" data-tooltip="Draw a polygon"></div>
+        <div class="icon-separator"></div>
+        <div id="icon-construction-line" class="icon" data-tooltip="Construction line"></div>
+        <div id="icon-construction-circle" class="icon" data-tooltip="Construction circle"></div>
+      </div>
+    </div>
+    
+    <!-- Canvas Container -->
+    <div id="canvas-container">
+      <canvas id="backgroundCanvas"></canvas>
+      <canvas id="gridCanvas"></canvas>
+      <canvas id="mainCanvas"></canvas>
+      <div id="cm-shape" class="context-menu"></div>
+    </div>
+  </div>
+  
+  <div id="settingsPanel">
+    <form id="worksheetSettings">
+      <label>Work sheet Width:
+        <input type="number" id="worksheetWidthInput">
+      </label>
+      <br>
+      <label>Work sheet Height:
+        <input type="number" id="worksheetHeightInput">
+      </label>
+      <br>
+      <button type="button" id="applyWorksheetSettings">Apply</button>
+    </form>
+  </div>
+  <div id="modalBackdrop"></div>
+  <div id="tooltip" class="tooltip"></div>
+
+
+<script type="module">import init from '/MiiCut-e56524b2164427d6.js';init('/MiiCut-e56524b2164427d6_bg.wasm');</script></body></html>

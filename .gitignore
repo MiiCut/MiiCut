@@ -1,5 +1,4 @@
-# Ignore Trunk build directory
-/dist/
+
 /index.html
 
 # Ignore other common Rust build artifacts
