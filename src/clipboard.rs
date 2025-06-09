@@ -1,13 +1,12 @@
 use kurbo::Vec2;
 
-use crate::nodes::Elem;
 use crate::shapes::drawable::Drawable;
 use crate::types::Value;
 
 #[derive(Clone, Debug)]
 pub struct Clipboard<E: Drawable> {
-    item_copy: Option<(Elem<E>, Value<Vec2>)>,
-    item_paste: Option<(Elem<E>, Value<Vec2>)>,
+    item_copy: Option<(E, Value<Vec2>)>,
+    item_paste: Option<(E, Value<Vec2>)>,
 }
 impl<E: Drawable> Clipboard<E> {
     pub fn new() -> Self {
@@ -17,7 +16,7 @@ impl<E: Drawable> Clipboard<E> {
         }
     }
 
-    pub fn copy(&mut self, nodes: Elem<E>, pointer_copy: Value<Vec2>) {
+    pub fn copy(&mut self, nodes: E, pointer_copy: Value<Vec2>) {
         self.item_copy = Some((nodes, pointer_copy));
         self.item_paste = None;
     }

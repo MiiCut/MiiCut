@@ -212,20 +212,23 @@ canvas {
 #icon-arrow {
   background-image: url("../assets/icon-arrow.svg");
 }
-#icon-circle {
-  background-image: url("../assets/icon-circle.svg");
+#icon-disc {
+  background-image: url("../assets/icon-disc.svg");
 }
-#icon-rectangle {
-  background-image: url("../assets/icon-rectangle.svg");
+#icon-triangle {
+  background-image: url("../assets/icon-triangle.svg");
 }
-#icon-rectangle-fillet {
-  background-image: url("../assets/icon-rectangle-fillet.svg");
+#icon-square {
+  background-image: url("../assets/icon-square.svg");
 }
 #icon-oblong {
   background-image: url("../assets/icon-oblong.svg");
 }
-#icon-custom {
-  background-image: url("../assets/icon-custom.svg");
+#icon-polyrectangle {
+  background-image: url("../assets/icon-polyrectangle.svg");
+}
+#icon-polygon {
+  background-image: url("../assets/icon-polygon.svg");
 }
 #icon-construction-line {
   background-image: url("../assets/icon-construction-line.svg");

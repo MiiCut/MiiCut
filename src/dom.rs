@@ -6,21 +6,23 @@ use web_sys::{window, Document, Element, Event, EventTarget, HtmlElement};
 pub enum Icons {
     Arrow,
     Disc,
-    Rectangle,
-    RectangleFillet,
-    Custom,
+    Triangle,
+    Square,
     Oblong,
+    PolyRectangle,
+    Polygon,
 }
 impl Icons {
     pub fn id(&self) -> &'static str {
         use Icons::*;
         match self {
             Arrow => "icon-arrow",
-            Disc => "icon-circle",
-            Rectangle => "icon-rectangle",
-            RectangleFillet => "icon-rectangle-fillet",
-            Custom => "icon-custom",
+            Disc => "icon-disc",
+            Triangle => "icon-triangle",
+            Square => "icon-square",
             Oblong => "icon-oblong",
+            PolyRectangle => "icon-polyrectangle",
+            Polygon => "icon-polygon",
         }
     }
     pub fn get_element(&self) -> Option<Element> {

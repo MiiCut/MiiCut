@@ -3,8 +3,8 @@ macro_rules! log {
         web_sys::console::log_1(&format!( $( $t )* ).into())
     }
 }
-use crate::nodes::ElemUId;
-use crate::types::{SegBundle, Snap};
+
+use crate::types::{EUId, SegBundle, Snap};
 use approx::*;
 use geo::{LineString, Polygon};
 use kurbo::{
@@ -17,6 +17,13 @@ use std::{
     fmt::{self},
 };
 
+pub fn between(pos1: &Vec2, pos2: &Vec2) -> Vec2 {
+    let diff = *pos2 - *pos1;
+    Vec2::new(
+        pos1.x.min(pos2.x) + diff.x / 3.,
+        pos1.y.min(pos2.y) + diff.y / 3.,
+    )
+}
 // For kurbo::arc what is drawn is:
 // start_angle is positive, then it is drawn CLOCKWIZE
 // sweep_angle is positive, then it is drawn CLOCKWIZE
@@ -45,7 +52,7 @@ pub const EPSILON: f64 = 1e-6;
 #[derive(Debug)]
 pub enum MyError {
     NoShapeSelected,
-    NoClosedShapeForCShid(ElemUId),
+    NoClosedShapeForCShid(EUId),
     Inconsistent,
     Impossible,
     ShapesFull,

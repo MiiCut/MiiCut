@@ -356,7 +356,6 @@ impl Display for ShapePolygon {
         write!(f, "Polygon")
     }
 }
-impl Drawable for ShapePolygon {}
 
 impl Shape for ShapePolygon {
     type PathElementsIter<'iter> = PolygonIter;

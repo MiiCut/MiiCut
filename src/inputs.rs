@@ -8,7 +8,7 @@ use web_sys::MouseEvent;
 
 pub enum UserAction {
     ClickDown(MouseButton),
-    Move(ButtonLevel),
+    Move(MouseButton, ButtonLevel),
     ClickUp(MouseButton),
 }
 #[derive(Clone, Debug)]
@@ -93,7 +93,7 @@ impl UserUI {
             }
             SystemMouse::Move => {
                 self.moving = true;
-                UserAction::Move(self.button_level)
+                UserAction::Move(self.mouse_button, self.button_level)
             }
             SystemMouse::Up => {
                 self.canvas_pos_ms_up = self.canvas_pos;
@@ -149,7 +149,7 @@ pub enum Keys {
 
 #[derive(Default, Copy, Clone, Debug, PartialEq)]
 pub struct KeysStates {
-    pub crtl_cmd_pressed: bool,
+    pub ctrl_cmd_pressed: bool,
     pub shift_pressed: bool,
     pub alt_pressed: bool,
 }

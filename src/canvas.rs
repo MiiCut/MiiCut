@@ -683,12 +683,8 @@ impl Canvases {
     pub fn set_drawing_offset(&mut self, offset: Vec2) {
         self.drawing_offset = offset
     }
-    pub fn move_drawing_offset(&mut self, pos_dwn: Vec2, cursor_pos: Vec2) {
-        self.drawing_offset = to_canvas(
-            cursor_pos - pos_dwn,
-            self.drawing_scale,
-            self.drawing_offset,
-        );
+    pub fn move_drawing_offset(&mut self, delta: Vec2) {
+        self.drawing_offset = to_canvas(delta, self.drawing_scale, self.drawing_offset);
     }
     pub fn save_drawing_offset(&mut self) {
         self.drawing_offset_saved = self.drawing_offset

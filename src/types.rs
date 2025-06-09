@@ -1,51 +1,151 @@
 use crate::math::EPSILON;
-use crate::nodes::ElemUId;
-use crate::shapes::drawable::ValueUId;
 use kurbo::Vec2;
 use std::cmp::{max, min};
 use std::collections::HashSet;
+use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     fmt::Debug,
     ops::{Add, AddAssign},
 };
 
 #[derive(Debug, Clone)]
-pub struct VecRing<T> {
-    pub vec: Vec<T>,
+pub struct VecRing<K, V> {
+    vec: Vec<(K, V)>,
 }
-impl<T> VecRing<T> {
-    pub fn from_element(e: T) -> Self {
-        Self { vec: vec![e] }
+impl<K: PartialEq + Clone + Debug, V: Clone> VecRing<K, V> {
+    pub fn from_slice(slice: &[(K, V)]) -> Option<Self> {
+        if slice.is_empty() {
+            None
+        } else {
+            Some(Self { vec: slice.into() })
+        }
     }
-    pub fn get(&self, idx: i64) -> &T {
+    pub fn dist_ok(&self, idx1: i64, idx2: i64, dist: i64) -> Option<()> {
+        let n = self.vec.len() as i64;
+        if n == 0 {
+            return None;
+        }
+        let i = ((idx1 % n) + n) % n;
+        let j = ((idx2 % n) + n) % n;
+        let diff = (i - j).abs();
+        let min_dist = diff.min(n - diff);
+        (min_dist == dist).then_some(())
+    }
+    pub fn insert_one_between(&mut self, key1: &K, key2: &K, kv: (K, V)) -> Option<K> {
+        let n = self.vec.len();
+        if n < 2 {
+            return None;
+        }
+
+        // find positions of the two keys
+        let i = self.vec.iter().position(|(k, _)| k == key1)?;
+        let j = self.vec.iter().position(|(k, _)| k == key2)?;
+
+        // decide where to insert:
+        // if key1 → key2, insert at j
+        // if key2 → key1, insert at i
+        let insert_at = if (i + 1) % n == j {
+            j
+        } else if (j + 1) % n == i {
+            i
+        } else {
+            return None;
+        };
+        let (key, val) = kv;
+        self.vec.insert(insert_at, (key.clone(), val));
+        Some(key)
+    }
+    pub fn insert_two_between(
+        &mut self,
+        key1: &K,
+        key2: &K,
+        kv1: (K, V),
+        kv2: (K, V),
+    ) -> Option<(K, K)> {
+        let n = self.vec.len();
+        if n < 2 {
+            return None;
+        }
+
+        // find positions of the two keys
+        let i = self.vec.iter().position(|(k, _)| k == key1)?;
+        let j = self.vec.iter().position(|(k, _)| k == key2)?;
+
+        // decide where to insert:
+        // if key1 → key2, insert at j
+        // if key2 → key1, insert at i
+        let insert_at = if (i + 1) % n == j {
+            j
+        } else if (j + 1) % n == i {
+            i
+        } else {
+            return None;
+        };
+        let (key1, val1) = kv1;
+        let (key2, val2) = kv2;
+        self.vec.insert(insert_at, (key2.clone(), val2));
+        self.vec.insert(insert_at, (key1.clone(), val1));
+        Some((key1, key2))
+    }
+    pub fn remove(&mut self, idx: &i64) {
+        let len = self.vec.len() as i64;
+        let idx = (idx).rem_euclid(len) as usize;
+        self.vec.remove(idx);
+    }
+    pub fn get_idx(&self, key: &K) -> Option<i64> {
+        self.vec
+            .iter()
+            .position(|(k, _)| k == key)
+            .and_then(|i| Some(i as i64))
+    }
+    pub fn key(&self, idx: i64) -> &K {
         let len = self.vec.len() as i64;
         let i = idx.rem_euclid(len) as usize;
-        &self.vec[i]
+        &self.vec[i].0
     }
-    pub fn get_mut(&mut self, idx: i64) -> &mut T {
+    pub fn key_mut(&mut self, idx: i64) -> &mut K {
         let len = self.vec.len() as i64;
         let i = idx.rem_euclid(len) as usize;
-        &mut self.vec[i]
+        &mut self.vec[i].0
     }
-    pub fn push(&mut self, e: T) {
+    pub fn val(&self, idx: i64) -> &V {
+        let len = self.vec.len() as i64;
+        let i = idx.rem_euclid(len) as usize;
+        &self.vec[i].1
+    }
+    pub fn val_mut(&mut self, idx: i64) -> &mut V {
+        let len = self.vec.len() as i64;
+        let i = idx.rem_euclid(len) as usize;
+        &mut self.vec[i].1
+    }
+    pub fn val_from_key(&self, key: K) -> Option<&V> {
+        self.vec.iter().find_map(|(k, v)| (k == &key).then(|| v))
+    }
+    pub fn val_mut_from_key(&mut self, key: K) -> Option<&mut V> {
+        self.vec
+            .iter_mut()
+            .find_map(|(k, v)| (k == &key).then(|| v))
+    }
+    pub fn push(&mut self, e: (K, V)) {
         self.vec.push(e);
     }
-    pub fn replace_first(&mut self, e: T) {
+    pub fn replace_first(&mut self, e: (K, V)) {
         self.vec[0] = e;
     }
-    pub fn last_mut(&mut self) -> &mut T {
+    pub fn last_mut(&mut self) -> &mut (K, V) {
         let len1 = self.vec.len() - 1;
         &mut self.vec[len1]
     }
     pub fn len(&self) -> usize {
         self.vec.len()
     }
-    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+    pub fn iter(&self) -> std::slice::Iter<'_, (K, V)> {
         self.vec.iter()
     }
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, (K, V)> {
         self.vec.iter_mut()
     }
 }
@@ -79,7 +179,7 @@ pub struct Value<T: Copy + Clone + Debug> {
     pub saved: T,
     pub last: T,
     pub curr: T,
-    pub bind: HashSet<(ElemUId, ValueUId)>,
+    pub bind: HashSet<(EUId, VUId)>,
 }
 impl<T: Copy + Clone + Debug + AddAssign + Add<Output = T>> Value<T> {
     pub fn new(value: T) -> Self {
@@ -278,5 +378,39 @@ impl<T: Copy + Clone + PartialEq + Ord + Hash> Hash for Couple<T> {
         let b = max(self.0, self.1);
         a.hash(state);
         b.hash(state);
+    }
+}
+
+static COUNTER_VALUE: AtomicUsize = AtomicUsize::new(0);
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct VUId {
+    id: usize,
+}
+impl Display for VUId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.id)
+    }
+}
+impl VUId {
+    pub fn new() -> Self {
+        let id = COUNTER_VALUE.fetch_add(1, Ordering::SeqCst);
+        VUId { id }
+    }
+}
+
+static COUNTER_NODE: AtomicUsize = AtomicUsize::new(0);
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EUId {
+    id: usize,
+}
+impl Display for EUId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.id)
+    }
+}
+impl EUId {
+    pub fn new() -> Self {
+        let id = COUNTER_NODE.fetch_add(1, Ordering::SeqCst);
+        EUId { id }
     }
 }

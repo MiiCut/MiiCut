@@ -24,6 +24,8 @@ pub mod types;
 pub mod undoredo;
 use crate::dom::*;
 use crate::math::*;
+use crate::types::EUId;
+use crate::types::VUId;
 use canvas::{
     CanvasKind, CanvasText, CanvasTextConfig, Canvases, Color, Pattern, TextAlign, TextPos,
 };
@@ -35,20 +37,15 @@ use inputs::Keys;
 use inputs::SystemMouse;
 use inputs::*;
 use kurbo::{Size, Vec2};
-use nodes::ElemUId;
-use nodes::{Elem, Set};
+use nodes::DataSet;
 use prefab::get_shapes_colors;
 use prefab::get_vertices_colors;
 use prefab::point_path;
 use shapes::drawable::Drawable;
-use shapes::drawable::ValueUId;
 use shapes::drawable::{ClosedShapeType, ClosedShapes};
 use std::collections::HashSet;
 use std::str::FromStr;
-use std::{
-    cell::{RefCell, RefMut},
-    rc::Rc,
-};
+use std::{cell::RefCell, rc::Rc};
 use svg::node::element::path::Data;
 use svg::read;
 use types::Binding;
@@ -63,7 +60,6 @@ use web_sys::{
 };
 
 type RefAV<E> = Rc<RefCell<AppVars<E>>>;
-type ElementCallback<E> = Box<dyn Fn(RefAV<E>, Event) + 'static>;
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -73,8 +69,8 @@ fn main() {
 
 #[allow(dead_code)]
 struct AppVars<E: Drawable> {
-    set: Set<E>,
-    // on_creation: Option<(VecRing<HalfEdge>, Vec2)>,
+    element_on_creation: Option<E>,
+    dataset: DataSet<E>,
     clipboard: Clipboard<E>,
     undo_redo: UndoRedo<E>,
 
@@ -89,24 +85,28 @@ struct AppVars<E: Drawable> {
     icon_selected: Icons,
 
     // Inputs
-    userui: UserUI,
+    user_ui: UserUI,
     pointer_on_canvas: bool,
 }
 impl<E: Drawable> AppVars<E> {
     fn esc_pressed(&mut self) {
-        // self.on_creation = None;
+        self.element_on_creation = None;
         self.go_to_arrow_tool();
     }
     fn ctrl_c_pressed(&mut self) {
         if let Icons::Arrow = self.icon_selected.clone() {}
     }
     fn ctrl_v_pressed(&mut self) {}
-    fn del_back_pressed(&mut self) {}
+    fn del_back_pressed(&mut self) {
+        if let Icons::Arrow = self.icon_selected {
+            self.dataset.delete_selected_elements();
+        }
+    }
     fn s_pressed(&mut self) {
-        self.userui.snap.next_linear();
+        self.user_ui.snap.next_linear();
     }
     fn a_pressed(&mut self) {
-        self.userui.snap.next_angle();
+        self.user_ui.snap.next_angle();
     }
     fn one_pressed(&mut self) {}
     fn t_pressed(&mut self) {
@@ -114,9 +114,9 @@ impl<E: Drawable> AppVars<E> {
     }
     fn tab_pressed(&mut self) {
         if let Icons::Arrow = self.icon_selected.clone() {
-            for id in self.set.elems_selected.clone().iter() {
-                if let Some(node) = self.set.get_element_mut(*id) {
-                    node.elem.op_next();
+            for id in self.dataset.set_selected.clone().iter() {
+                if let Some(node) = self.dataset.get_element_mut(*id) {
+                    node.op_next();
                 }
             }
         }
@@ -160,7 +160,7 @@ impl<E: Drawable> AppVars<E> {
         }
     }
     fn update_inputs(&mut self, mouse_event: MouseEvent, sys_mouse: SystemMouse) -> UserAction {
-        self.userui.update(
+        self.user_ui.update(
             get_element_width(&self.left_panel),
             get_element_height(&self.top_menu),
             self.canvases.get_drawing_offset(),
@@ -168,6 +168,42 @@ impl<E: Drawable> AppVars<E> {
             &mouse_event,
             sys_mouse,
         )
+    }
+    fn set_element_select_vertex(&mut self) -> bool {
+        self.dataset.element_select_vertex(&self.user_ui)
+    }
+    fn set_select_elements(&mut self) {
+        self.dataset.select_elements(&self.user_ui);
+    }
+    fn set_element_highlight_vertex(&mut self) -> bool {
+        self.dataset.element_highlight_vertex(&self.user_ui)
+    }
+    fn set_highlight_elements(&mut self) {
+        self.dataset.highlight_elements(&self.user_ui);
+    }
+    fn set_move_elements(&mut self) -> bool {
+        self.dataset.move_elements(&self.user_ui)
+    }
+    fn set_move_vertex_selected(&mut self) -> bool {
+        // Move selected vertex if no elements are moved
+        let mut moved = false;
+        if let Some((eid, vid)) = self.dataset.elem_vertex_selected {
+            // Move the selected vertex
+            self.dataset.get_element_mut(eid).map(|e| {
+                moved = e.move_vertex(vid, &self.user_ui);
+            });
+        }
+        moved
+    }
+    fn move_element_on_creation(&mut self) {
+        if let Some(elem) = &mut self.element_on_creation {
+            let delta = self.user_ui.pointer.curr - self.user_ui.pointer.saved;
+            elem.move_drawable(delta);
+        }
+    }
+    fn move_canvas(&mut self) {
+        self.canvases
+            .move_drawing_offset(self.user_ui.pointer.curr - self.user_ui.pointer.saved);
     }
 }
 
@@ -188,59 +224,62 @@ fn create_app_vars<E: Drawable>(window: Window) -> Result<(), JsValue> {
     use Icons::*;
     user_icons.insert(Arrow);
     user_icons.insert(Disc);
-    user_icons.insert(Rectangle);
-    user_icons.insert(RectangleFillet);
+    user_icons.insert(Triangle);
+    user_icons.insert(Square);
     user_icons.insert(Oblong);
-    user_icons.insert(Custom);
+    user_icons.insert(PolyRectangle);
+    user_icons.insert(Polygon);
 
-    let mut set = Set::<ClosedShapes>::new();
-    let bl = Vec2::new(-100., 10.);
-    let tr = Vec2::new(10., -100.);
+    let set = DataSet::<E>::new();
+    // let mut creation_set: Vec<Elem<E>> = vec![];
+    // let bl = Vec2::new(-100., 10.);
+    // let tr = Vec2::new(10., -100.);
 
-    let e1 = Vec2::new(20., -100.);
-    let side = Vec2::new(-40., 0.);
-    let e2 = Vec2::new(20., 100.);
+    // let center = Vec2::new(0., 40.);
+    // let radius = Vec2::new(10., 120.);
+    // let sh1 = E::new(ClosedShapeType::Square, &[bl, tr]);
 
-    let center = Vec2::new(0., 40.);
-    let radius = Vec2::new(10., 120.);
-    let sh1 = ClosedShapes::new(ClosedShapeType::Rectangle, vec![bl, tr]);
-    let sh2 = ClosedShapes::new(ClosedShapeType::Oblong, vec![e1, side, e2]);
-    let sh3 = ClosedShapes::new(ClosedShapeType::Disc, vec![center, radius]);
+    // let sh3 = E::new(ClosedShapeType::Disc, &[center, radius]);
 
-    let e1 = Vec2::new(30., -100.);
-    let e2 = Vec2::new(50., -100.);
-    let e3 = Vec2::new(50., 100.);
-    let e4 = Vec2::new(-50., 100.);
-    let e5 = Vec2::new(-50., -70.);
-    let e6 = Vec2::new(30., -70.);
-    let sh4 = ClosedShapes::new(ClosedShapeType::PolyRectangle, vec![e1, e2, e3, e4, e5, e6]);
+    // let e1 = Vec2::new(30., -100.);
+    // let e2 = Vec2::new(50., -100.);
+    // let e3 = Vec2::new(50., 100.);
+    // let e4 = Vec2::new(-50., 100.);
+    // let e5 = Vec2::new(-50., -70.);
+    // let e6 = Vec2::new(-150., -70.);
+    // let e7 = Vec2::new(-150., -200.);
+    // let e8 = Vec2::new(30., -200.);
+    // let sh4 = E::new(
+    //     ClosedShapeType::PolyRectangle,
+    //     &[e1, e2, e3, e4, e5, e6, e7, e8],
+    // );
 
-    let e1 = Vec2::new(30.3, 50.);
-    let e2 = Vec2::new(100.2, 100.);
-    let e3 = Vec2::new(200.7, 100.);
-    let e4 = Vec2::new(150., 200.3);
-    let e5 = Vec2::new(100., 159.4);
-    let sh5 = ClosedShapes::new(ClosedShapeType::Polygon, vec![e1, e2, e3, e4, e5]);
+    // let e1 = Vec2::new(30.3, 50.);
+    // let e2 = Vec2::new(100.2, 100.);
+    // let e3 = Vec2::new(200.7, 100.);
+    // let e4 = Vec2::new(150., 200.3);
+    // let e5 = Vec2::new(100., 159.4);
+    // let sh5 = E::new(ClosedShapeType::Polygon, &[e1, e2, e3, e4, e5]);
 
-    if let Some(sh) = sh1 {
-        set.push_element(Elem::<ClosedShapes>::new_element("rect", sh));
-    }
-    if let Some(sh) = sh2 {
-        set.push_element(Elem::<ClosedShapes>::new_element("oblong", sh));
-    }
-    if let Some(sh) = sh3 {
-        set.push_element(Elem::<ClosedShapes>::new_element("disc", sh));
-    }
-    if let Some(sh) = sh4 {
-        set.push_element(Elem::<ClosedShapes>::new_element("polyrect", sh));
-    }
-    if let Some(sh) = sh5 {
-        set.push_element(Elem::<ClosedShapes>::new_element("polygone", sh));
-    }
+    // if let Some(sh) = sh1 {
+    //     creation_set.push(Elem::<E>::new_element("rect", sh));
+    // }
+    // if let Some(sh) = sh2 {
+    //     creation_set.push(Elem::<E>::new_element("oblong", sh));
+    // }
+    // if let Some(sh) = sh3 {
+    //     creation_set.push(Elem::<E>::new_element("disc", sh));
+    // }
+    // if let Some(sh) = sh4 {
+    //     creation_set.push(Elem::<E>::new_element("polyrect", sh));
+    // }
+    // if let Some(sh) = sh5 {
+    //     creation_set.push(Elem::<E>::new_element("polygon", sh));
+    // }
 
     let app_vars = Rc::new(RefCell::new(AppVars {
-        set,
-        // on_creation: None,
+        element_on_creation: None,
+        dataset: set,
         clipboard: Clipboard::new(),
         undo_redo: UndoRedo::new(),
         window,
@@ -252,7 +291,7 @@ fn create_app_vars<E: Drawable>(window: Window) -> Result<(), JsValue> {
         user_icons,
         tooltip,
         icon_selected: Icons::Arrow,
-        userui: UserUI::new(),
+        user_ui: UserUI::new(),
         pointer_on_canvas: false,
     }));
 
@@ -264,12 +303,11 @@ fn create_app_vars<E: Drawable>(window: Window) -> Result<(), JsValue> {
     init_window(app_vars.clone())?;
     resize_canvases(app_vars.clone());
 
-    let av = app_vars.clone();
-    let mut avb = av.borrow_mut();
+    let av = app_vars;
 
-    reset_origin(&mut avb);
-    draw_grid_and_rules(&mut avb);
-    render_drawing(&mut avb);
+    reset_origin(av.clone());
+    draw_grid_and_rules(av.clone());
+    render_drawing(av);
 
     Ok(())
 }
@@ -428,7 +466,6 @@ fn init_menu<E: Drawable>(av: RefAV<E>) -> Result<(), JsValue> {
                         log!("File content loaded!");
                         // Convert the SVG content to your shapes
                         convert_svg_to_shapes(av_clone.clone(), result);
-                        drop(av_clone.borrow_mut());
                     }
                 }) as Box<dyn FnMut(_)>);
 
@@ -459,11 +496,11 @@ fn set_callback<E: Drawable>(
     av: RefAV<E>,
     event_str: String,
     element: &Element,
-    callbacka: ElementCallback<E>,
+    callbacka: Box<dyn Fn(RefAV<E>, Event) + 'static>,
 ) -> Result<(), JsValue> {
     let event_str_cloned = event_str.clone();
 
-    let callback = Box::new(move |av: RefAV<E>, e: Event| {
+    let cb = Box::new(move |av: RefAV<E>, e: Event| {
         if let Ok(mouse_event) = e.clone().dyn_into::<MouseEvent>() {
             if mouse_event.type_().as_str() == event_str_cloned {
                 callbacka(av.clone(), e);
@@ -478,7 +515,7 @@ fn set_callback<E: Drawable>(
     });
 
     let closure = Closure::wrap(Box::new(move |event: Event| {
-        callback(av.clone(), event);
+        cb(av.clone(), event);
     }) as Box<dyn FnMut(Event)>);
 
     element
@@ -522,90 +559,110 @@ fn convert_svg_to_shapes<E: Drawable>(_av: RefAV<E>, svg_data: String) {
 }
 
 #[allow(unused_variables)]
-fn update<E: Drawable>(
-    avb: &mut RefMut<'_, AppVars<E>>,
-    mouse_event: MouseEvent,
-    sys_mouse: SystemMouse,
-) -> Result<(), MyError> {
-    let user_action = avb.update_inputs(mouse_event, sys_mouse);
-    let pointer = avb.userui.pointer.clone();
-    let draw_pos = avb.userui.draw_pos;
-    let shift_pressed = avb.userui.keys_states.shift_pressed;
-    let snap = avb.userui.snap;
+fn update<E: Drawable>(av: RefAV<E>, user_action: UserAction) -> Result<(), MyError> {
+    let mut avb = av.borrow_mut();
 
     match avb.icon_selected {
         Icons::Arrow => match user_action {
             UserAction::ClickDown(button) => {
                 if button == MouseButton::Left {
-                    avb.set.save_elements_positions();
-                    if !avb.set.element_select_vertex(draw_pos, shift_pressed) {
-                        avb.set.select_elements(draw_pos, shift_pressed);
+                    avb.canvases.save_drawing_offset();
+                    avb.dataset.save_elements_positions();
+                    if !avb.set_element_select_vertex() {
+                        avb.set_select_elements();
                     }
                 }
             }
-            UserAction::Move(btn) => {
-                if btn == ButtonLevel::Up {
-                    if !avb.set.element_highlight_vertex(draw_pos) {
-                        avb.set.highlight_elements(draw_pos);
+            UserAction::Move(btn, btn_level) => {
+                if btn_level == ButtonLevel::Up {
+                    if !avb.set_element_highlight_vertex() {
+                        avb.set_highlight_elements();
                     }
                 } else {
                     // Elements and vertices selection are mutual exclusive
                     // Moving is done on selected objects
                     // Move Elements
-                    if !avb
-                        .set
-                        .move_elements(pointer.curr - pointer.saved, shift_pressed)
-                    {
-                        // Move selected vertex if no elements are moved
-                        if let Some((eid, vid)) = avb.set.elem_vertex_selected {
-                            // Move the selected vertex
-                            avb.set.get_element_mut(eid).map(|elem| {
-                                elem.elem
-                                    .move_vertex(vid, pointer.curr - pointer.saved, snap);
-                            });
+                    match btn {
+                        MouseButton::Left => {
+                            if !avb.set_move_elements() {
+                                // If no elements moved, move vertices
+                                avb.set_move_vertex_selected();
+                            }
                         }
+                        MouseButton::Right => {
+                            avb.move_canvas();
+                        }
+                        _ => {}
                     }
                 }
             }
             _ => {}
         },
-        _ => {}
+        Icons::Disc
+        | Icons::Triangle
+        | Icons::Square
+        | Icons::Oblong
+        | Icons::PolyRectangle
+        | Icons::Polygon => match user_action {
+            UserAction::ClickDown(button) => {
+                if button == MouseButton::Left {
+                    if let Some(e) = avb.element_on_creation.as_mut() {
+                        e.save_vertices_positions();
+                        let e_cloned = e.clone();
+                        avb.dataset.push_element(e_cloned);
+                    }
+                } else {
+                    if button == MouseButton::Right {
+                        // Right click to cancel the creation
+                        avb.element_on_creation = None;
+                        avb.go_to_arrow_tool();
+                    }
+                }
+            }
+            UserAction::Move(_, btn_level) => {
+                if btn_level == ButtonLevel::Up {
+                    avb.move_element_on_creation();
+                }
+            }
+            _ => {}
+        },
     }
     Ok(())
 }
 
 fn on_mouse_move<E: Drawable>(av: RefAV<E>, event: Event) {
-    let mut avb = av.borrow_mut();
     if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
-        if let Some(e) = update(&mut avb, mouse_event, SystemMouse::Move).err() {
+        let ua = av
+            .borrow_mut()
+            .update_inputs(mouse_event, SystemMouse::Move);
+        if let Some(e) = update(av.clone(), ua).err() {
             log!("ERROR: {}", e);
         }
     }
-    render_drawing(&mut avb);
-    drop(avb);
+    render_drawing(av);
 }
 fn on_mouse_down<E: Drawable>(av: RefAV<E>, event: Event) {
-    let mut avb = av.borrow_mut();
     if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
+        let ua = av
+            .borrow_mut()
+            .update_inputs(mouse_event, SystemMouse::Down);
         // Hide the context menu when clicking elsewhere
         display_html_element(DOMElements::ContextMenuShape, false);
-        if let Some(e) = update(&mut avb, mouse_event, SystemMouse::Down).err() {
+        if let Some(e) = update(av.clone(), ua).err() {
             log!("ERROR: {}", e);
         }
     }
     // update_status_bar(&mut pam);
-    render_drawing(&mut avb);
-    drop(avb);
+    render_drawing(av);
 }
 fn on_mouse_up<E: Drawable>(av: RefAV<E>, event: Event) {
-    let mut avb = av.borrow_mut();
     if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
-        if let Some(e) = update(&mut avb, mouse_event, SystemMouse::Up).err() {
+        let ua = av.borrow_mut().update_inputs(mouse_event, SystemMouse::Up);
+        if let Some(e) = update(av.clone(), ua).err() {
             log!("ERROR: {}", e);
         }
     }
-    render_drawing(&mut avb);
-    drop(avb);
+    render_drawing(av);
 }
 fn on_mouse_wheel<E: Drawable>(av: RefAV<E>, event: Event) {
     if let Ok(wheel_event) = event.dyn_into::<WheelEvent>() {
@@ -623,34 +680,41 @@ fn on_mouse_wheel<E: Drawable>(av: RefAV<E>, event: Event) {
         };
         avb.canvases.set_drawing_scale(new_scale);
 
-        let canvas_pos = avb.userui.canvas_pos;
+        let canvas_pos = avb.user_ui.canvas_pos;
         let old_draw_offset_rel = canvas_pos - old_draw_offset;
         let new_draw_offset = canvas_pos - old_draw_offset_rel * (new_scale / old_draw_scale);
 
         avb.canvases.set_drawing_offset(new_draw_offset);
 
-        draw_grid_and_rules(&mut avb);
-        render_drawing(&mut avb);
         drop(avb);
+        draw_grid_and_rules(av.clone());
+        render_drawing(av);
     }
 }
 fn on_mouse_enter<E: Drawable>(av: RefAV<E>, _event: Event) {
     let mut avb = av.borrow_mut();
     avb.pointer_on_canvas = true;
-    render_drawing(&mut avb);
+    let curr_pos = avb.user_ui.pointer.curr;
+    avb.user_ui.pointer.saved = curr_pos;
+    if let Some(elem) = &mut avb.element_on_creation {
+        elem.move_drawable(curr_pos);
+        elem.save_vertices_positions();
+    }
     drop(avb);
+    render_drawing(av);
 }
 fn on_mouse_leave<E: Drawable>(av: RefAV<E>, _event: Event) {
     let mut avb = av.borrow_mut();
     avb.pointer_on_canvas = false;
-    render_drawing(&mut avb);
+    avb.element_on_creation = None;
+    avb.go_to_arrow_tool();
     drop(avb);
+    render_drawing(av);
 }
 
 fn on_context_menu<E: Drawable>(_av: RefAV<E>, event: Event) {
     // Prevent the default context menu from appearing
     event.prevent_default();
-    // let mut avb = av.borrow_mut();
 }
 // fn show_context_menu(_avb: &mut RefMut<'_, AppVars>) {}
 // fn _show_contex_menu_shape(pos: Vec2) {
@@ -685,35 +749,33 @@ fn on_context_menu<E: Drawable>(_av: RefAV<E>, event: Event) {
 // Window events
 fn resize_canvases<E: Drawable>(av: RefAV<E>) {
     log!("resize--called");
-    let mut pam = av.borrow_mut();
-    let window_width = pam
+    let mut avb = av.borrow_mut();
+    let window_width = avb
         .window
         .inner_width()
         .expect("Failed to get window width")
         .as_f64()
         .expect("Width is not a number") as u32;
-    let window_height = pam
+    let window_height = avb
         .window
         .inner_height()
         .expect("Failed to get window height")
         .as_f64()
         .expect("Height is not a number") as u32;
-    let offset_start_x = get_element_width(&pam.left_panel);
-    let offset_start_y = get_element_height(&pam.top_menu);
+    let offset_start_x = get_element_width(&avb.left_panel);
+    let offset_start_y = get_element_height(&avb.top_menu);
     let width = window_width - offset_start_x;
     let height = window_height - offset_start_y;
     // log!("resize sizes: ({},{})", width, height);
-    pam.canvases.resize_canvases(width, height);
+    avb.canvases.resize_canvases(width, height);
 
-    draw_grid_and_rules(&mut pam);
-    render_drawing(&mut pam);
-    drop(pam);
+    drop(avb);
+    draw_grid_and_rules(av.clone());
+    render_drawing(av);
 }
 fn on_window_resize<E: Drawable>(av: RefAV<E>, _event: Event) {
     resize_canvases(av.clone());
-    let mut pam = av.borrow_mut();
-    render_drawing(&mut pam);
-    drop(pam);
+    render_drawing(av);
 }
 fn on_window_click<E: Drawable>(_pa: RefAV<E>, _event: Event) {}
 fn on_window_keydown<E: Drawable>(av: RefAV<E>, event: Event) {
@@ -725,27 +787,27 @@ fn on_window_keydown<E: Drawable>(av: RefAV<E>, event: Event) {
             match key {
                 Control | Meta => {
                     log!("control pressed");
-                    avb.userui.keys_states.crtl_cmd_pressed = true;
+                    avb.user_ui.keys_states.ctrl_cmd_pressed = true;
                 }
                 Shift => {
                     log!("shift pressed");
-                    avb.userui.keys_states.shift_pressed = true;
+                    avb.user_ui.keys_states.shift_pressed = true;
                 }
                 Alt => {
                     log!("alt pressed");
-                    avb.userui.keys_states.alt_pressed = true;
+                    avb.user_ui.keys_states.alt_pressed = true;
                 }
                 Delete | Backspace => avb.del_back_pressed(),
                 Escape => avb.esc_pressed(),
                 // Copy and paste
                 CLower => {
-                    if avb.userui.keys_states.crtl_cmd_pressed {
+                    if avb.user_ui.keys_states.ctrl_cmd_pressed {
                         log!("ctrl-c pressed");
                         avb.ctrl_c_pressed();
                     }
                 }
                 VLower => {
-                    if avb.userui.keys_states.crtl_cmd_pressed {
+                    if avb.user_ui.keys_states.ctrl_cmd_pressed {
                         log!("ctrl-v pressed");
                         avb.ctrl_v_pressed();
                     }
@@ -756,13 +818,13 @@ fn on_window_keydown<E: Drawable>(av: RefAV<E>, event: Event) {
                 }
                 // Undo and Redo
                 ZLower => {
-                    if avb.userui.keys_states.crtl_cmd_pressed {
+                    if avb.user_ui.keys_states.ctrl_cmd_pressed {
                         log!("ctrl-z pressed");
                         avb.undo();
                     }
                 }
                 ZUpper | YLower => {
-                    if avb.userui.keys_states.crtl_cmd_pressed {
+                    if avb.user_ui.keys_states.ctrl_cmd_pressed {
                         log!("ctrl-Z pressed or ctrl-y pressed");
                         avb.redo();
                     }
@@ -783,9 +845,8 @@ fn on_window_keydown<E: Drawable>(av: RefAV<E>, event: Event) {
                 }
                 _ => (),
             };
-
-            render_drawing(&mut avb);
             drop(avb);
+            render_drawing(av);
         }
     }
 }
@@ -797,15 +858,15 @@ fn on_window_keyup<E: Drawable>(av: RefAV<E>, event: Event) {
             match key {
                 Control | Meta => {
                     log!("control released");
-                    avb.userui.keys_states.crtl_cmd_pressed = false;
+                    avb.user_ui.keys_states.ctrl_cmd_pressed = false;
                 }
                 Shift => {
                     log!("shift released");
-                    avb.userui.keys_states.shift_pressed = false;
+                    avb.user_ui.keys_states.shift_pressed = false;
                 }
                 Alt => {
                     log!("alt released");
-                    avb.userui.keys_states.alt_pressed = false;
+                    avb.user_ui.keys_states.alt_pressed = false;
                 }
                 _ => (),
             }
@@ -821,26 +882,95 @@ fn on_icon_click<E: Drawable>(av: RefAV<E>, event: Event) {
             if let Some(id) = element.get_attribute("id") {
                 if let Some(icon) = avb.user_icons.iter().find(|&&k| k.id() == id).cloned() {
                     avb.icon_selected = icon;
-                    // avb.on_creation = None;
-                    avb.set.elems_highlighted.clear();
-                    avb.set.elems_selected.clear();
+                    avb.dataset.set_highlighted.clear();
+                    avb.dataset.set_selected.clear();
                     avb.user_icons
                         .iter()
                         .for_each(|icon| avb.html_deselect_icons(*icon));
                     avb.html_select_icon(icon);
+                    match avb.icon_selected {
+                        Icons::Arrow => {
+                            avb.element_on_creation = None;
+                        }
+                        Icons::Disc => {
+                            let sh =
+                                E::new(ClosedShapeType::Disc, &[Vec2::ZERO, Vec2::new(100., 0.)]);
+                            if let Some(sh) = sh {
+                                avb.element_on_creation = Some(sh);
+                            }
+                        }
+                        Icons::Triangle => {
+                            let sh = E::new(
+                                ClosedShapeType::Triangle,
+                                &[Vec2::ZERO, Vec2::new(100., -150.), Vec2::new(200., 0.)],
+                            );
+                            if let Some(sh) = sh {
+                                avb.element_on_creation = Some(sh);
+                            }
+                        }
+                        Icons::Square => {
+                            let sh = E::new(
+                                ClosedShapeType::Square,
+                                &[Vec2::ZERO, Vec2::new(100., -100.)],
+                            );
+                            if let Some(sh) = sh {
+                                avb.element_on_creation = Some(sh);
+                            }
+                        }
+                        Icons::Oblong => {
+                            let sh = E::new(
+                                ClosedShapeType::Oblong,
+                                &[Vec2::ZERO, Vec2::new(100., -100.), Vec2::new(200., 0.)],
+                            );
+                            if let Some(sh) = sh {
+                                avb.element_on_creation = Some(sh);
+                            }
+                        }
+                        Icons::PolyRectangle => {
+                            let sh = E::new(
+                                ClosedShapeType::PolyRectangle,
+                                &[
+                                    Vec2::ZERO,
+                                    Vec2::new(100., 0.),
+                                    Vec2::new(100., 100.),
+                                    Vec2::new(50., 100.),
+                                    Vec2::new(50., 150.),
+                                    Vec2::new(0., 150.),
+                                ],
+                            );
+                            if let Some(sh) = sh {
+                                avb.element_on_creation = Some(sh);
+                            }
+                        }
+                        Icons::Polygon => {
+                            let sh = E::new(
+                                ClosedShapeType::Polygon,
+                                &[
+                                    Vec2::ZERO,
+                                    Vec2::new(100., -100.),
+                                    Vec2::new(200., 70.),
+                                    Vec2::new(80., 0.),
+                                    Vec2::new(30., 50.),
+                                ],
+                            );
+                            if let Some(sh) = sh {
+                                avb.element_on_creation = Some(sh);
+                            }
+                        }
+                    }
                 }
             }
         }
     }
-    render_drawing(&mut avb);
     drop(avb);
+    render_drawing(av);
 }
 fn on_icon_mouseover<E: Drawable>(av: RefAV<E>, event: Event) {
-    let pam = av.borrow_mut();
+    let avb = av.borrow_mut();
     if let Some(target) = event.target() {
         if let Some(element) = wasm_bindgen::JsCast::dyn_ref::<Element>(&target) {
             if let Some(data_tooltip) = element.get_attribute("data-tooltip") {
-                let tooltip_html = &pam.tooltip;
+                let tooltip_html = &avb.tooltip;
                 tooltip_html.set_inner_text(&data_tooltip);
                 tooltip_html
                     .style()
@@ -872,13 +1002,14 @@ fn on_icon_mouseout<E: Drawable>(av: RefAV<E>, _event: Event) {
 
 ///////////////
 // Rendering
-fn reset_origin<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
-    avb.canvases.reset_origin();
+fn reset_origin<E: Drawable>(av: RefAV<E>) {
+    av.borrow_mut().canvases.reset_origin();
 }
-fn draw_grid_and_rules<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
-    avb.canvases.draw_origin();
+fn draw_grid_and_rules<E: Drawable>(av: RefAV<E>) {
+    av.borrow_mut().canvases.draw_origin();
 }
-fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
+fn render_drawing<E: Drawable>(av: RefAV<E>) {
+    let mut avb = av.borrow_mut();
     // use IconsShapes::*;
     // Get the Performance API
     // let performance = window().unwrap().performance().unwrap();
@@ -902,12 +1033,12 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     // );
 
     // Draw the elements (shapes outlines)
-    for e in avb.set.elems.values() {
+    for (eid, e) in avb.dataset.set.iter() {
         let colors = get_shapes_colors(
-            avb.set.elems_selected.contains(&e.id),
-            avb.set.elems_highlighted.contains(&e.id),
+            avb.dataset.set_selected.contains(eid),
+            avb.dataset.set_highlighted.contains(eid),
         );
-        let path = e.elem.get_bezpath();
+        let path = e.get_bezpath();
         avb.canvases.draw_path(
             &CanvasKind::Draw,
             path,
@@ -917,11 +1048,11 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
         );
     }
     // Draw the elements vertices, get the bind on the same time
-    let mut binds = Binding::<(ElemUId, ValueUId)>::new();
-    let vid_sel = avb.set.elem_vertex_selected.map(|(_, vid)| vid);
-    let vid_hig = avb.set.elem_vertex_highlighted.map(|(_, vid)| vid);
-    for (eid, e) in avb.set.elems.iter() {
-        for (v_id, vertex) in e.elem.get_vertices() {
+    let mut binds = Binding::<(EUId, VUId)>::new();
+    let vid_sel = avb.dataset.elem_vertex_selected.map(|(_, vid)| vid);
+    let vid_hig = avb.dataset.elem_vertex_highlighted.map(|(_, vid)| vid);
+    for (eid, e) in avb.dataset.set.iter() {
+        for (v_id, vertex) in e.get_vertices().iter() {
             let colors = get_vertices_colors(vid_sel == Some(*v_id), vid_hig == Some(*v_id));
             avb.canvases.draw_path(
                 &CanvasKind::Draw,
@@ -937,13 +1068,12 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
         }
         // Dimensions
         use ClosedShapeType::*;
-        match e.elem.get_shape_type() {
-            Polygon | PolyRectangle => {
+        match e.get_shape_type() {
+            Polygon | PolyRectangle | Triangle => {
                 for (v1, v2) in e
-                    .elem
                     .get_vertices()
                     .iter()
-                    .zip(e.elem.get_vertices().iter().cycle().skip(1))
+                    .zip(e.get_vertices().iter().cycle().skip(1))
                     .map(|(v1, v2)| (v1.1.curr, v2.1.curr))
                 {
                     if let Some(seg) = SegBundle::new(v1, v2) {
@@ -954,12 +1084,11 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
                     }
                 }
             }
-            Rectangle => {
+            Square => {
                 for (v1, v2) in e
-                    .elem
                     .get_vertices()
                     .iter()
-                    .zip(e.elem.get_vertices().iter().cycle().skip(1))
+                    .zip(e.get_vertices().iter().cycle().skip(1))
                     .take(2)
                     .map(|(v1, v2)| (v1.1.curr, v2.1.curr))
                 {
@@ -972,7 +1101,7 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
                 }
             }
             Oblong => {
-                let v: Vec<Vec2> = e.elem.get_vertices().iter().map(|(_, v)| v.curr).collect();
+                let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
                 if v.len() == 3 {
                     if let Some(seg1) = SegBundle::new(v[0], v[2]) {
                         // Draw the main segment
@@ -991,7 +1120,7 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
                 }
             }
             Disc => {
-                let v: Vec<Vec2> = e.elem.get_vertices().iter().map(|(_, v)| v.curr).collect();
+                let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
                 if v.len() == 2 {
                     if let Some(seg) = SegBundle::new(v[0], v[1]) {
                         // Draw the radius segment
@@ -1008,9 +1137,12 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     // Draw the binds dimensions
     for Couple((eid1, vid1), (eid2, vid2)) in binds.iter() {
         // Get elements e1 and e2
-        if let (Some(e1), Some(e2)) = (avb.set.get_element(*eid1), avb.set.get_element(*eid2)) {
+        if let (Some(e1), Some(e2)) = (
+            avb.dataset.get_element(*eid1),
+            avb.dataset.get_element(*eid2),
+        ) {
             // Get vertices v1 and v2
-            if let (Some(v1), Some(v2)) = (e1.elem.get_vertex(vid1), e2.elem.get_vertex(vid2)) {
+            if let (Some(v1), Some(v2)) = (e1.get_vertex(vid1), e2.get_vertex(vid2)) {
                 // Draw the binding segment
                 if let Some(seg) = SegBundle::new(v1.curr, v2.curr) {
                     let (path, pattern, color, text) = dim_hv(seg, avb.canvases.get_canvas_infos());
@@ -1021,25 +1153,6 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
         }
     }
 
-    // Draw the controls points
-    // for e in avb.set.elements() {
-    //     for (path, pattern, colors) in e.get_kind().get_controls_paths_and_patterns(das, cinfo) {
-    //         avb.canvases
-    //             .draw_path(&CanvasKind::Draw, (path, pattern, colors, vec![]));
-    //     }
-    // }
-    // // SHAPES: Draw dimensions
-    // for e in avb.set.elements() {
-    //     if e.get_kind().get_state(IsHS(Select))
-    //         || e.get_kind().get_state(IsHS(Highlight))
-    //         || e.get_kind().get_state(IsAControlHS(Select))
-    //         || e.get_kind().get_state(IsAControlHS(Highlight))
-    //     {
-    //         for bundle in e.get_kind().get_dimensions_paths_and_patterns(das, cinfo) {
-    //             avb.canvases.draw_path(&CanvasKind::Draw, bundle);
-    //         }
-    //     }
-    // }
     // CLIPBOARD
     // if let Some(item) = avb.clipboard.get_paste() {
     //     match item {}
@@ -1201,17 +1314,42 @@ fn render_drawing<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
     // }
     // let end_time = performance.now();
     // log!("Rendering time: {:.2} ms", end_time - start_time);
-    // Draw inputs.pointer
+
+    // Only if the pointer is over the canvas
     if avb.pointer_on_canvas {
-        avb.canvases.draw_pointer(avb.userui.pointer.curr);
+        // Draw element on creation if any
+        if let Some(e) = avb.element_on_creation.as_ref() {
+            let colors = get_shapes_colors(false, false);
+            let path = e.get_bezpath();
+            avb.canvases.draw_path(
+                &CanvasKind::Draw,
+                path,
+                Pattern::Composed(true),
+                colors,
+                vec![],
+            );
+            e.get_vertices().iter().for_each(|(_, v)| {
+                avb.canvases.draw_path(
+                    &CanvasKind::Draw,
+                    &point_path(v.curr, 1.),
+                    Pattern::Point,
+                    get_vertices_colors(false, false),
+                    vec![],
+                );
+            });
+        }
+        // Draw the pointer
+        avb.canvases.draw_pointer(avb.user_ui.pointer.curr);
     }
-    render_informations(avb);
+    drop(avb);
+    render_informations(av);
 }
 
-fn render_informations<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
+fn render_informations<E: Drawable>(av: RefAV<E>) {
+    let avb = av.borrow_mut();
     // avb.canvases.clear_background_canvas();
     let c_size = avb.canvases.get_canvas_size();
-    let pos = avb.userui.pointer.curr;
+    let pos = avb.user_ui.pointer.curr;
     avb.canvases.direct_text(
         &CanvasKind::Draw,
         &CanvasText::new(
@@ -1225,8 +1363,8 @@ fn render_informations<E: Drawable>(avb: &mut RefMut<'_, AppVars<E>>) {
         &CanvasText::new(
             format!(
                 "Snap value (PRESS S): {:.0} mm / {:.0} °",
-                avb.userui.snap.linear(),
-                avb.userui.snap.angle()
+                avb.user_ui.snap.linear(),
+                avb.user_ui.snap.angle()
             ),
             TextPos::PosCustom(Vec2::new(300., c_size.height - 10.)),
             CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
