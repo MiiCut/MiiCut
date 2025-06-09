@@ -25,7 +25,10 @@ jobs:
         uses: jetli/trunk-action@v0.4.0
 
       - name: Build with trunk
-        run: trunk build --release --public-url /dist/
+        run: trunk build --release --public-url ${{ env.PUBLIC_URL }}
+
+      - name: Check dist exists
+        run: test -d dist || (echo "❌ dist/ folder not found!" && exit 1)
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
