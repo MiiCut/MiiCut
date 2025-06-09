@@ -1,0 +1,38 @@
+# .github/workflows/deploy.yml
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: wasm32-unknown-unknown
+
+      - name: Install trunk
+        uses: jetli/trunk-action@v0.4.0
+
+      - name: Build with trunk
+        working-directory: crates/ff_egui_app
+        # Note: --public-url is set to /fluxfox/ as a personal GitHub pages site is hosted at /repo-name/
+        env:
+          URL_PATH: "MiiCut" # URL_PATH should match public-url
+        run: trunk build --release --public-url /MiiCut/
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
