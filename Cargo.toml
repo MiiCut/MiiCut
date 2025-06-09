@@ -4,11 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-kurbo = { git = "https://github.com/linebender/kurbo" }
+# kurbo = { git = "https://github.com/linebender/kurbo" }
+ttf-parser = "0.25.1"
+svg = "0.18.0"
+kurbo = "0.11.2"
+geo = "0.29.3"
 approx = "0.5.1"
 console_error_panic_hook = "0.1.7"
 wasm-bindgen = "0.2.99"
 js-sys = "0.3.70"
+strum = "0.24"
+strum_macros = "0.24"
 
 [dependencies.web-sys]
 version = "0.3.64"
@@ -17,6 +23,7 @@ features = [
     "CssStyleDeclaration",
     "Document",
     "Element",
+    "FontFaceSet",
     "EventTarget",
     "HtmlCanvasElement",
     "HtmlElement",
@@ -33,4 +40,5 @@ features = [
     "WheelEvent",
     "KeyboardEvent",
     "Text",
+    "Performance",
 ]

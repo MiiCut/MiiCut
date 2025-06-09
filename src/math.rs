@@ -1,13 +1,15 @@
-#![allow(dead_code)]
-// A macro to provide `println!(..)`-style syntax for `console.log` logging.
 macro_rules! log {
     ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
+        web_sys::console::log_1(&format!( $( $t )* ).into())
     }
 }
 
+use crate::types::{EUId, SegBundle, Snap};
 use approx::*;
-use kurbo::{BezPath, Line, ParamCurveNearest, PathEl, Rect, RoundedRectRadii, Vec2};
+use geo::{LineString, Polygon};
+use kurbo::{
+    flatten, Arc, BezPath, Line, ParamCurveNearest, PathEl, Point, RoundedRectRadii, Size, Vec2,
+};
 use std::f64::consts::PI;
 use std::{
     error::Error,
@@ -15,12 +17,42 @@ use std::{
     fmt::{self},
 };
 
-use crate::shapes_pool::CShid;
+pub fn between(pos1: &Vec2, pos2: &Vec2) -> Vec2 {
+    let diff = *pos2 - *pos1;
+    Vec2::new(
+        pos1.x.min(pos2.x) + diff.x / 3.,
+        pos1.y.min(pos2.y) + diff.y / 3.,
+    )
+}
+// For kurbo::arc what is drawn is:
+// start_angle is positive, then it is drawn CLOCKWIZE
+// sweep_angle is positive, then it is drawn CLOCKWIZE
+// This is because Y is reversed on the canvas
+// So, if you want to draw a clockwise arc, you need to set start_angle to -PI/2 and sweep_angle to PI/2
+// To have the arc up-right
+//
+// paths_patterns.push((
+//     PrimitiveKindIter::PArc(
+//         kurbo::Arc {
+//             center: Vec2::ZERO.to_point(),
+//             radii: Vec2::new(50., 50.),
+//             start_angle: 0.,
+//             sweep_angle: PI / 2.,
+//             x_rotation: 0.0,
+//         }
+//         .path_elements(0.01),
+//     )
+//     .collect(),
+//     modifiers_pattern(false, true),
+// ));
+//
+
+pub const EPSILON: f64 = 1e-6;
 
 #[derive(Debug)]
 pub enum MyError {
     NoShapeSelected,
-    NoClosedShapeForCShid(CShid),
+    NoClosedShapeForCShid(EUId),
     Inconsistent,
     Impossible,
     ShapesFull,
@@ -148,52 +180,6 @@ fn _is_between(pt: &Vec2, pt1: &Vec2, pt2: &Vec2) -> bool {
 //     is_between(pos, &pos1, &pos2)
 // }
 
-pub fn is_box_inside(box_outer: &Rect, box_inner: &Rect) -> bool {
-    box_outer.contains_rect(*box_inner)
-}
-pub fn reorder_corners(bb: &mut [Vec2; 2]) {
-    let pt1 = bb[0];
-    let pt2 = bb[1];
-    if pt1.x < pt2.x {
-        if pt1.y < pt2.y {
-            let bl = Vec2 { x: pt1.x, y: pt1.y };
-            let tr = Vec2 { x: pt2.x, y: pt2.y };
-            bb[0] = bl;
-            bb[1] = tr;
-        } else {
-            let bl = Vec2 { x: pt1.x, y: pt2.y };
-            let tr = Vec2 { x: pt2.x, y: pt1.y };
-            bb[0] = bl;
-            bb[1] = tr;
-        }
-    } else {
-        if pt1.y < pt2.y {
-            let bl = Vec2 { x: pt2.x, y: pt1.y };
-            let tr = Vec2 { x: pt1.x, y: pt2.y };
-            bb[0] = bl;
-            bb[1] = tr;
-        } else {
-            let bl = Vec2 { x: pt2.x, y: pt2.y };
-            let tr = Vec2 { x: pt1.x, y: pt1.y };
-            bb[0] = bl;
-            bb[1] = tr;
-        }
-    }
-}
-
-pub fn _snap_to_positive_value(value: f64, snap_value: f64) -> f64 {
-    let value = (value / snap_value).round() * snap_value;
-    if value == 0. {
-        snap_value
-    } else {
-        if value < 0. {
-            -value
-        } else {
-            value
-        }
-    }
-}
-
 pub fn is_near_position(pos: Vec2, other_pos: Vec2, grab_handle_precision: f64) -> bool {
     (pos - other_pos).hypot() < grab_handle_precision / 2.
 }
@@ -239,40 +225,38 @@ pub fn is_near_position(pos: Vec2, other_pos: Vec2, grab_handle_precision: f64) 
 //     None
 // }
 
-// Project v1(pt2-pos) vector to the perpendicular of vector v2(pt1-pt2)
-pub fn get_unit_vector_perpendicular(pt1: &Vec2, pt2: &Vec2, pos: &Vec2) -> Option<Vec2> {
-    let v1 = *pos - *pt2;
-    let v2 = *pt2 - *pt1;
-    if v2.hypot2() == 0. {
-        return None;
-    }
-    let pv2 = Vec2::new(-v2.y, v2.x).normalize();
-    let dot_product = v1.dot(pv2) * pv2;
-
-    Some(dot_product)
-}
 // Helper to calculate signed distance to a line
 pub fn signed_distance(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     (p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x)
 }
 
-pub fn get_dist_to_line(pt1: Vec2, pt2: Vec2, pos: Vec2) -> f64 {
+pub fn get_dist_to_segment(pt1: Vec2, pt2: Vec2, pos: Vec2) -> f64 {
     let v1 = pt2 - pt1; // Vector from pt1 to pt2
     let v2 = pos - pt1; // Vector from pt1 to pos
+    let v3 = pos - pt2; // Vector from pt2 to pos
 
-    // Compute the cross product magnitude between v1 and v2
-    let cross = v1.x * v2.y - v1.y * v2.x;
+    // Compute the squared length of the segment
+    let length_v1_sq = v1.hypot2();
 
-    // Compute the length of v1 (the base of the triangle)
-    let length_v1 = v1.hypot();
-
-    if length_v1 == 0.0 {
-        // If pt1 and pt2 are the same point, return the distance to the point
+    if length_v1_sq == 0.0 {
+        // If pt1 and pt2 are the same point, return the distance to that point
         return v2.hypot();
     }
 
-    // Distance is the height of the triangle formed
-    cross.abs() / length_v1
+    // Project v2 onto v1 to find the perpendicular point on the line
+    let t = v2.dot(v1) / length_v1_sq;
+
+    if t < 0.0 {
+        // Closest point is pt1
+        v2.hypot()
+    } else if t > 1.0 {
+        // Closest point is pt2
+        v3.hypot()
+    } else {
+        // Closest point is on the segment
+        let projection = pt1 + t * v1;
+        (pos - projection).hypot()
+    }
 }
 
 // intersection of the perpendicular to the line
@@ -281,7 +265,7 @@ pub fn get_dist_to_line(pt1: Vec2, pt2: Vec2, pos: Vec2) -> f64 {
 pub fn get_intersection(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
     let v1 = pt2 - pt1; // Vector representing pt1-pt2
     if v1.hypot() == 0.0 {
-        // return None; // Handle edge case where pt1 and pt2 are the same
+        log!("WARNING: Degenerate case get_intersection()");
         return pt1;
     }
 
@@ -311,7 +295,7 @@ pub fn get_intersection(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
 pub fn symmetric_point(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
     let v1 = pt2 - pt1; // Vector representing pt1-pt2
     if v1.hypot() == 0.0 {
-        // return None; // Handle edge case where pt1 and pt2 are the same
+        log!("WARNING: Degenerate case symmetric_point()");
         return pt1;
     }
 
@@ -334,7 +318,7 @@ pub fn symmetric_point(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
 pub fn projection_to_perpendicular(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
     let v1 = pt2 - pt1; // Vector from pt1 to pt2
     if v1.hypot() == 0.0 {
-        // return None; // Handle edge case where pt1 and pt2 are the same
+        log!("WARNING: Degenerate case projection_to_perpendicular()");
         return pt1;
     }
 
@@ -356,7 +340,7 @@ pub fn projection_to_perpendicular(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
 pub fn point_at_distance(pt1: Vec2, pt2: Vec2, distance: f64) -> Vec2 {
     let v1 = pt2 - pt1; // Vector from pt1 to pt2
     if v1.hypot() == 0.0 {
-        // return None; // Handle edge case where pt1 and pt2 are the same
+        log!("WARNING: Degenerate case point_at_distance()");
         return pt1;
     }
 
@@ -370,12 +354,6 @@ pub fn point_at_distance(pt1: Vec2, pt2: Vec2, distance: f64) -> Vec2 {
     let result = midpoint + distance * perpendicular;
 
     result
-}
-
-pub fn angle_between(pt1: Vec2, pt2: Vec2) -> f64 {
-    let vector = pt2 - pt1; // Vector from pt1 to pt2
-    let angle = vector.y.atan2(vector.x); // atan2 gives the angle in radians
-    angle
 }
 
 pub fn magnet_to_grid(pt: &Vec2) -> Vec2 {
@@ -625,12 +603,6 @@ pub fn _pos_to_polar(pos1: &Vec2, pos2: &Vec2) -> (Vec2, f64) {
 //     Vec2::ZERO
 // }
 
-pub fn _get_vec2_from_angle(radius: &Vec2, angle: f64) -> Vec2 {
-    let x = radius.x.abs() * angle.cos();
-    let y = radius.y.abs() * angle.sin();
-    Vec2 { x: x, y: y }
-}
-
 #[inline]
 pub fn get_line_angle(pt2: &Vec2, pt1: &Vec2) -> f64 {
     let pt = *pt2 - *pt1;
@@ -641,11 +613,6 @@ pub fn get_line_angle(pt2: &Vec2, pt1: &Vec2) -> f64 {
 pub fn is_same_direction(pt2: &Vec2, pt1: &Vec2, angle: f64) -> bool {
     let angle1 = get_line_angle(pt2, pt1);
     (angle1.tan() - angle.tan()).abs() <= 0.0001
-}
-
-#[inline]
-pub fn dotp(pt2: &Vec2, pt1: &Vec2) -> f64 {
-    pt2.x * pt1.x + pt2.y * pt1.y
 }
 
 // #[inline]
@@ -696,18 +663,19 @@ pub fn dotp(pt2: &Vec2, pt1: &Vec2) -> f64 {
 //     None
 // }
 
-pub fn to_canvas(pt: &Vec2, scale: f64, offset: &Vec2) -> Vec2 {
+pub fn to_canvas(pt: Vec2, scale: f64, offset: Vec2) -> Vec2 {
     Vec2 {
         x: (pt.x * scale) + offset.x,
         y: (pt.y * scale) + offset.y,
     }
 }
-pub fn to_draw(pt: &Vec2, scale: f64, offset: &Vec2) -> Vec2 {
+pub fn to_draw(pt: Vec2, scale: f64, offset: Vec2) -> Vec2 {
     Vec2 {
         x: (pt.x - offset.x) / scale,
         y: (pt.y - offset.y) / scale,
     }
 }
+
 pub fn near_line(pos1: Vec2, pos2: Vec2, pos: Vec2, precision: f64) -> bool {
     Line::new(pos1.to_point(), pos2.to_point())
         .nearest(pos.to_point(), 0.)
@@ -805,4 +773,1699 @@ pub fn get_max_radius(radii: RoundedRectRadii) -> f64 {
         .max(radii.top_right)
         .max(radii.bottom_left)
         .max(radii.bottom_right)
+}
+
+pub fn calculate_arc_points(arc: Arc) -> (Vec2, Vec2) {
+    let center = arc.center; // Center of the arc
+    let radii = arc.radii; // Radii of the ellipse
+    let start_angle = arc.start_angle; // Start angle in radians
+    let sweep_angle = arc.sweep_angle; // Sweep angle in radians
+    let rotation = arc.x_rotation; // Rotation in radians
+
+    // Start and end angles in radians
+    let end_angle = start_angle + sweep_angle;
+
+    // Function to compute an elliptical point without rotation
+    let compute_point =
+        |angle: f64| -> Vec2 { Vec2::new(radii.x * angle.cos(), radii.y * angle.sin()) };
+
+    // Rotate a point around the origin by a given angle
+    let rotate_point = |point: Vec2, angle: f64| -> Vec2 {
+        Vec2::new(
+            point.x * angle.cos() - point.y * angle.sin(),
+            point.x * angle.sin() + point.y * angle.cos(),
+        )
+    };
+
+    // Compute the unrotated start and end points
+    let start_point_unrotated = compute_point(start_angle);
+    let end_point_unrotated = compute_point(end_angle);
+
+    // Rotate the points by the given rotation angle
+    let start_point_rotated = rotate_point(start_point_unrotated, rotation);
+    let end_point_rotated = rotate_point(end_point_unrotated, rotation);
+
+    // Translate the points to the center
+    let start_point = Vec2::new(
+        center.x + start_point_rotated.x,
+        center.y + start_point_rotated.y,
+    );
+    let end_point = Vec2::new(
+        center.x + end_point_rotated.x,
+        center.y + end_point_rotated.y,
+    );
+
+    (start_point, end_point)
+}
+
+pub fn is_point_near_path(path: &BezPath, point: Vec2, threshold: f64) -> bool {
+    let threshold_squared = threshold * threshold;
+
+    for el in path.elements() {
+        match *el {
+            kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) => {
+                if (p.x - point.x).powi(2) + (p.y - point.y).powi(2) <= threshold_squared {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    false
+}
+
+/// Calculate the shortest distance from a point to a line segment.
+pub fn distance_to_segment(start: Vec2, end: Vec2, pos: Vec2, grab_zone: f64) -> f64 {
+    let a = start;
+    let b = end;
+
+    if (a - pos).hypot() < grab_zone {
+        return f64::MAX;
+    }
+    if (b - pos).hypot() < grab_zone {
+        return f64::MAX;
+    }
+
+    // Vector from a to b
+    let ab = (b.x - a.x, b.y - a.y);
+
+    // Vector from a to the point
+    let ap = (pos.x - a.x, pos.y - a.y);
+
+    // Project point onto the line segment, clamping t to [0, 1]
+    let ab_length_squared = ab.0 * ab.0 + ab.1 * ab.1;
+    let t = if ab_length_squared == 0.0 {
+        0.0 // Degenerate segment
+    } else {
+        ((ap.0 * ab.0 + ap.1 * ab.1) / ab_length_squared).clamp(0.0, 1.0)
+    };
+
+    // Closest point on the segment
+    let closest = Vec2::new(a.x + t * ab.0, a.y + t * ab.1);
+
+    // Distance to the closest point
+    (pos - closest).hypot()
+}
+
+pub fn compute_winding_number(path: &BezPath, point: Vec2) -> i32 {
+    let mut winding_number = 0;
+    let mut last_point = None;
+
+    for element in path.elements() {
+        match element {
+            PathEl::MoveTo(p1) => {
+                last_point = Some(p1);
+            }
+            PathEl::LineTo(p2) => {
+                if let Some(p1) = last_point {
+                    winding_number +=
+                        segment_winding_contribution(p1.to_vec2(), p2.to_vec2(), point);
+                }
+                last_point = Some(p2);
+            }
+            PathEl::ClosePath => {
+                if let Some(p1) = last_point {
+                    if let Some(PathEl::MoveTo(p_start)) = path.elements().first() {
+                        winding_number +=
+                            segment_winding_contribution(p1.to_vec2(), p_start.to_vec2(), point);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    winding_number
+}
+
+fn segment_winding_contribution(p1: Vec2, p2: Vec2, point: Vec2) -> i32 {
+    if p1.y <= point.y {
+        if p2.y > point.y && is_left(p1, p2, point) > 0.0 {
+            // Upward crossing, and the point is to the left of the segment
+            return 1;
+        }
+    } else {
+        if p2.y <= point.y && is_left(p1, p2, point) < 0.0 {
+            // Downward crossing, and the point is to the right of the segment
+            return -1;
+        }
+    }
+    0
+}
+
+fn is_left(p1: Vec2, p2: Vec2, point: Vec2) -> f64 {
+    // Compute determinant to check if the point is to the left of the line
+    (p2.x - p1.x) * (point.y - p1.y) - (point.x - p1.x) * (p2.y - p1.y)
+}
+
+pub fn rotate_vector(vector: Vec2, angle: f64) -> Vec2 {
+    // Compute the cosine and sine of the angle
+    let cos_theta = angle.cos();
+    let sin_theta = angle.sin();
+
+    // Apply the rotation formula
+    Vec2::new(
+        vector.x * cos_theta - vector.y * sin_theta,
+        vector.x * sin_theta + vector.y * cos_theta,
+    )
+}
+
+// Project v on v_p =(pt2-pt1)
+pub fn project_on_vec(pt1: Vec2, pt2: Vec2, v: Vec2) -> Vec2 {
+    let v_p = pt2 - pt1;
+    let denom = v_p.dot(v_p);
+    if denom.abs() < f64::EPSILON {
+        return v;
+    }
+    v_p * v.dot(v_p) / denom
+}
+
+pub fn symmetric_point_to_segment(p1: Vec2, p2: Vec2, q: Vec2) -> Vec2 {
+    // Segment midpoint
+    let midpoint = (p1 + p2) / 2.0;
+
+    if (p2 - p1).hypot() == 0.0 {
+        log!("WARNING: Degenerate case symmetric_point_to_segment()");
+        return p1;
+    }
+
+    // Segment direction vector
+    let direction = (p2 - p1).normalize();
+
+    // Vector from midpoint to the point `q`
+    let to_point = q - midpoint;
+
+    // Project `to_point` onto the segment's direction
+    let projection_length = to_point.dot(direction);
+    let projection = midpoint + projection_length * direction;
+
+    // Calculate the symmetric point
+    let symmetric = 2.0 * projection - q;
+
+    symmetric
+}
+
+/// Returns `Some((distance, projection point))` if the orthogonal projection of `q`
+/// onto the infinite line through `p1->p2` lies within the segment [p1, p2].
+/// Otherwise, returns `None`. The `offset` parameter is a small distance
+/// to exclude points near the segment's endpoints.
+pub fn distance_and_projection_to_segment(
+    p1: Vec2,
+    p2: Vec2,
+    q: Vec2,
+    offset: f64,
+) -> Option<(f64, Vec2)> {
+    let seg = p2 - p1; // segment vector
+    let pq = q - p1; // from p1 to q
+
+    let seg_len_sq = seg.length_squared();
+    if seg_len_sq < f64::EPSILON {
+        // Degenerate case: segment is effectively a point.
+        // Decide how you want to handle it; here, we say there's no valid 'segment'.
+        return None;
+    }
+
+    // Parametric distance (t) along segment from p1:
+    // t=0 => p1, t=1 => p2, <0 => before p1, >1 => beyond p2
+    let t = pq.dot(seg) / seg_len_sq;
+
+    // If outside [0..1], there's no valid orth projection within the segment
+    if t < 0.0 || t > 1.0 {
+        return None;
+    }
+
+    // The actual projection point on the segment
+    let proj = p1 + t * seg;
+
+    if (proj - p1).hypot() < offset || (proj - p2).hypot() < offset {
+        return None;
+    }
+    // Distance from q to its projection
+    let dist = (q - proj).hypot();
+
+    Some((dist, proj))
+}
+
+/// Returns `Some((distance, projected_point))` if the angle is within
+/// the arc’s sweep and *outside* the small "guard" zone around the start and end.
+/// Otherwise returns `None`.
+pub fn distance_and_projection_to_arc(
+    arc: &Arc,
+    pos: Vec2,
+    guard: f64, // small angle in radians to exclude near start & end
+) -> Option<(f64, Vec2)> {
+    let cp = pos - arc.center.to_vec2();
+    let dist_cp = cp.hypot();
+
+    // Normalize angles to [0, 2π).
+    let start = arc.start_angle.rem_euclid(2.0 * PI);
+    let end = (arc.start_angle + arc.sweep_angle).rem_euclid(2.0 * PI);
+
+    // Angle of the point w.r.t. the center, also in [0, 2π).
+    let theta_p = cp.atan2().rem_euclid(2.0 * PI);
+
+    // 1) Check if theta_p is in the arc sweep range
+    let in_arc_range = |angle: f64| {
+        if arc.sweep_angle >= 0.0 {
+            // CCW arc
+            if start <= end {
+                // Normal range: start -> end
+                angle >= start && angle <= end
+            } else {
+                // Arc spans the 2π boundary
+                angle >= start || angle <= end
+            }
+        } else {
+            // CW arc
+            if end <= start {
+                // Normal range: end -> start
+                angle <= start && angle >= end
+            } else {
+                // Arc spans the 2π boundary in CW sense
+                angle <= start || angle >= end
+            }
+        }
+    };
+
+    // 2) Helper to measure the minimal distance on a circle
+    //    (so angle_dist(a, b) is how many radians separate angles a and b).
+    let angle_dist = |a: f64, b: f64| {
+        let d = (a - b).abs();
+        d.min(2.0 * PI - d)
+    };
+
+    // 3) If the angle is in the arc’s sweep
+    if in_arc_range(theta_p) {
+        // but too close to start or end (within `guard` radians),
+        // then we say "no valid projection" => return None.
+        if angle_dist(theta_p, start) <= guard || angle_dist(theta_p, end) <= guard {
+            return None;
+        }
+
+        // Otherwise, proceed with your existing distance/projection logic:
+        let radius = arc.radii.x; // The relevant radius for this arc
+        let dir = cp / dist_cp; // Unit direction from center to pos
+        let proj_pt = arc.center + dir * radius;
+        let dist = (dist_cp - radius).abs();
+
+        Some((dist, proj_pt.to_vec2()))
+    } else {
+        None
+    }
+}
+
+pub fn project_to_segment_with_direction(p1: Vec2, p2: Vec2, q: Vec2) -> (f64, f64) {
+    // First segment vector
+    let v1 = p2 - p1;
+
+    // Second segment vector (q already starts at the origin)
+    let v2 = q;
+
+    // Dot product of v2 and v1
+    let dot_product = v2.dot(v1);
+
+    // Magnitude squared of v1
+    let v1_magnitude_squared = v1.length_squared();
+
+    // Projection formula
+    let projection_length = dot_product / v1_magnitude_squared;
+    let projection = projection_length * v1;
+
+    // Direction relative to the first segment
+    let direction = dot_product.signum(); // -1.0, 0.0, or 1.0
+
+    (projection.hypot(), direction)
+}
+
+pub fn project_to_perpendicular(p1: Vec2, p2: Vec2, q: Vec2) -> (Vec2, f64) {
+    // First segment vector
+    let v1 = p2 - p1;
+
+    // Perpendicular vector to the first segment
+    let v_perp = Vec2::new(-v1.y, v1.x);
+
+    // Second segment vector (q already starts at the origin)
+    let v2 = q;
+
+    // Dot product of v2 and v_perp
+    let dot_product = v2.dot(v_perp);
+
+    // Magnitude squared of v_perp
+    let v_perp_magnitude_squared = v_perp.length_squared();
+
+    // Projection formula
+    (
+        (dot_product / v_perp_magnitude_squared) * v_perp,
+        dot_product.signum(),
+    )
+}
+
+pub fn project_to_perpendicular_with_direction(p1: Vec2, p2: Vec2, q: Vec2) -> (f64, f64) {
+    // First segment vector
+    let v1 = p2 - p1;
+
+    // Perpendicular vector to the first segment
+    let v_perp = Vec2::new(-v1.y, v1.x);
+
+    // Second segment vector (q already starts at the origin)
+    let v2 = q;
+
+    // Dot product of v2 and v_perp
+    let dot_product = v2.dot(v_perp);
+
+    // Magnitude squared of v_perp
+    let v_perp_magnitude_squared = v_perp.length_squared();
+
+    // Projection formula
+    let projection = (dot_product / v_perp_magnitude_squared) * v_perp;
+
+    // Direction relative to the first segment's perpendicular
+    let direction = dot_product.signum(); // -1.0, 0.0, or 1.0
+
+    (projection.hypot(), direction)
+}
+
+pub fn get_middle_from_start_end_positions(start: Vec2, end: Vec2, width: f64) -> Vec2 {
+    let middle = (start + end) / 2.;
+    let radius = width / 2.;
+    let angle = (end - start).atan2();
+    middle + Vec2::from_angle(angle + FRAC_PI_2) * radius
+}
+
+pub fn bez_path_to_geo_polygon(bez_path: &BezPath) -> Polygon<f64> {
+    let mut points = Vec::new();
+    for element in bez_path.elements() {
+        match element {
+            PathEl::MoveTo(p) | PathEl::LineTo(p) => points.push((p.x, p.y)),
+            PathEl::ClosePath => {
+                // Le polygone doit être fermé
+                if points.first() != points.last() {
+                    points.push(points[0]);
+                }
+            }
+            _ => log!("Error: Non-linear path elements found."),
+        }
+    }
+
+    if points.len() < 3 {
+        Polygon::new(LineString::new(vec![]), vec![])
+    } else {
+        Polygon::new(points.into(), vec![])
+    }
+}
+pub fn geo_polygon_to_bez_path(polygon: &Polygon<f64>) -> Vec<BezPath> {
+    let mut vec_bez_path = Vec::new();
+
+    // Convert exterior ring
+    if let Some(exterior_path) = ring_to_bez_path(polygon.exterior()) {
+        vec_bez_path.push(exterior_path);
+    }
+    // Convert interior rings (holes)
+    polygon.interiors().iter().for_each(|interior| {
+        if let Some(interior_path) = ring_to_bez_path(interior) {
+            vec_bez_path.push(interior_path);
+        }
+    });
+
+    vec_bez_path
+}
+
+pub fn calc_segs(bez_path: BezPath) -> BezPath {
+    let mut bez_path_flat = BezPath::new();
+    flatten(bez_path, 0.15, |s| bez_path_flat.push(s));
+    bez_path_flat
+}
+
+pub fn calc_polygon(bez_path_flat: &BezPath) -> Polygon<f64> {
+    bez_path_to_geo_polygon(bez_path_flat)
+}
+
+// Helper function to convert a ring (either exterior or interior) to a bezier path
+pub fn ring_to_bez_path(ring: &LineString<f64>) -> Option<BezPath> {
+    let points: Vec<_> = ring
+        .coords()
+        .map(|coord| kurbo::Point::new(coord.x, coord.y))
+        .collect();
+    if points.len() < 2 {
+        return None; // Skip invalid rings
+    }
+
+    let mut bez_path = BezPath::new();
+    bez_path.push(PathEl::MoveTo(points[0]));
+    points
+        .iter()
+        .skip(1)
+        .for_each(|&point| bez_path.push(PathEl::LineTo(point)));
+
+    // Close the path if it's a closed ring
+    if points.first() == points.last() {
+        bez_path.push(PathEl::ClosePath);
+    }
+
+    Some(bez_path)
+}
+
+// pub fn is_near_line(point: Vec2, angle: f64, cursor: Vec2, precision: f64) -> bool {
+//     let dx = cursor.x - point.x;
+//     let dy = cursor.y - point.y;
+//     let distance = (dx * angle.sin() - dy * angle.cos()).abs();
+//     distance <= precision
+// }
+
+pub fn get_line_segment(size: &Size, point: Vec2, angle: f64) -> (Vec2, Vec2) {
+    let width = size.width;
+    let height = size.height;
+
+    // Handle vertical lines (angle = ±π/2)
+    if (angle - std::f64::consts::FRAC_PI_2).abs() < EPSILON
+        || (angle + std::f64::consts::FRAC_PI_2).abs() < EPSILON
+    {
+        let x = point.x;
+        return (Vec2::new(x, 0.0), Vec2::new(x, height));
+    }
+
+    // Handle horizontal lines (angle = 0 or π)
+    let m = angle.tan();
+    if m.abs() < EPSILON {
+        let y = point.y;
+        return (Vec2::new(0.0, y), Vec2::new(width, y));
+    }
+
+    // Calculate intersections
+    let x0 = -point.y / m + point.x; // Intersection with y = 0
+    let xh = (height - point.y) / m + point.x; // Intersection with y = height
+    let y0 = m * -point.x + point.y; // Intersection with x = 0
+    let yw = m * (width - point.x) + point.y; // Intersection with x = width
+
+    // Collect valid points inside the canvas
+    let mut intersections = vec![];
+    if x0 >= 0.0 && x0 <= width {
+        intersections.push(Vec2::new(x0, 0.0));
+    }
+    if xh >= 0.0 && xh <= width {
+        intersections.push(Vec2::new(xh, height));
+    }
+    if y0 >= 0.0 && y0 <= height {
+        intersections.push(Vec2::new(0.0, y0));
+    }
+    if yw >= 0.0 && yw <= height {
+        intersections.push(Vec2::new(width, yw));
+    }
+
+    // Ensure two valid points
+    if intersections.len() == 2 {
+        (intersections[0], intersections[1])
+    } else {
+        // Fallback: Return a degenerate line if something goes wrong
+        (Vec2::new(0.0, 0.0), Vec2::new(width, height))
+    }
+}
+
+pub fn snap_vertex(pos: Vec2, snap: Snap) -> Vec2 {
+    // Snap to grid
+    let x = (pos.x / snap.linear()).round() * snap.linear();
+    let y = (pos.y / snap.linear()).round() * snap.linear();
+    Vec2::new(x, y)
+}
+pub fn snap_val(val: f64, snap: Snap) -> f64 {
+    (val / snap.linear()).round() * snap.linear()
+}
+// Angle in degrees
+pub fn snap_angle_deg(a: f64, snap: Snap) -> f64 {
+    (a / snap.angle()).round() * snap.angle()
+}
+// Angle in radians
+pub fn snap_angle(a: f64, snap: Snap) -> f64 {
+    (a / PI * 180. / snap.angle()).round() * snap.angle() / 180. * PI
+}
+
+pub fn angle_from(v1: Vec2, v2: Vec2) -> f64 {
+    let cross = v1.x * v2.y - v1.y * v2.x; // Cross product
+    cross.atan2(v1.dot(v2)) // Returns the signed angle in radians
+}
+//
+
+pub fn get_arc_center(start: Vec2, end: Vec2, radius: f64, up: bool) -> Vec2 {
+    let chord_midpoint = (start + end) / 2.0;
+    let chord_vector = end - start;
+
+    // Handle degenerate case: start and end are the same
+    if chord_vector.hypot() < f64::EPSILON {
+        log!("WARNING: Degenerate case in get_arc_center()");
+        return start;
+    }
+
+    let perpendicular = Vec2::new(-chord_vector.y, chord_vector.x).normalize();
+    let chord_length = chord_vector.hypot() / 2.0;
+
+    // Check if the radius is valid
+    let radius_squared = radius.powi(2);
+    let chord_length_squared = chord_length.powi(2);
+
+    if radius_squared < chord_length_squared {
+        log!("WARNING: Invalid radius. Radius is too small to form an arc.");
+        return (start + end) / 2.0;
+    }
+
+    // Compute the distance from the midpoint to the center
+    let height = (radius_squared - chord_length_squared).sqrt();
+
+    if up {
+        chord_midpoint + perpendicular * height
+    } else {
+        chord_midpoint - perpendicular * height
+    }
+}
+
+pub fn find_circle_center(start: Vec2, end: Vec2, mut radius: f64, concavity: bool) -> Vec2 {
+    // Vector of the chord
+    let chord = end - start;
+    let chord_length = chord.hypot();
+
+    // Check if the radius is valid (must be >= half the chord length)
+    if radius.abs() < chord_length / 2.0 {
+        radius = radius.signum() * chord_length / 2.0;
+    }
+
+    // Midpoint of the chord
+    let midpoint = (start + end) / 2.0;
+
+    // Perpendicular vector to the chord
+    let perpendicular = Vec2::new(-chord.y, chord.x).normalize();
+
+    // Distance from the midpoint to the arc center
+    let h = (radius.powi(2) - (chord_length / 2.0).powi(2)).sqrt();
+
+    // Determine the arc center based on the radius' sign (concavity)
+    match (concavity, radius > 0.0) {
+        (true, true) => midpoint + perpendicular * h,
+        (true, false) => midpoint - perpendicular * h,
+        (false, true) => midpoint - perpendicular * h,
+        (false, false) => midpoint + perpendicular * h,
+    }
+}
+/// Creates an arc passing through `start` and `end` with the specified `radius`.
+/// The `concavity` parameter determines whether the arc is the smallest (true) or the largest (false).
+/// The radius sign determines the arc's direction (concavity up/down).
+pub fn create_arc_from_radius_and_concavity(
+    start: Vec2,
+    end: Vec2,
+    radius: f64,
+    concavity: bool,
+) -> Arc {
+    let arc_center = find_circle_center(start, end, radius, concavity);
+
+    // Start and end angles of the arc
+    let start_angle = (start - arc_center).atan2();
+    let end_angle = (end - arc_center).atan2();
+
+    // Sweep angle
+    let mut sweep_angle = end_angle - start_angle;
+
+    if concavity ^ (radius > 0.0) {
+        // Smallest arc: Adjust sweep angle to be less than 180 degrees
+        if radius > 0.0 && sweep_angle < 0.0 {
+            sweep_angle += 2.0 * std::f64::consts::PI;
+        } else if radius < 0.0 && sweep_angle > 0.0 {
+            sweep_angle -= 2.0 * std::f64::consts::PI;
+        }
+    } else {
+        // Largest arc: Adjust sweep angle to be more than 180 degrees
+        if radius > 0.0 && sweep_angle > 0.0 {
+            sweep_angle -= 2.0 * std::f64::consts::PI;
+        } else if radius < 0.0 && sweep_angle < 0.0 {
+            sweep_angle += 2.0 * std::f64::consts::PI;
+        }
+    }
+
+    Arc {
+        center: arc_center.to_point(),
+        radii: Vec2::new(radius.abs(), radius.abs()), // Uniform radius
+        start_angle,
+        sweep_angle,
+        x_rotation: 0.0, // No rotation in this implementation
+    }
+}
+
+pub fn is_point_near_arc(arc: &Arc, point: Vec2, tolerance: f64) -> bool {
+    // Calculate the center-to-point vector
+    let center_to_point = point - arc.center.to_vec2();
+
+    // Calculate the distance from the center to the point
+    let distance = center_to_point.hypot();
+
+    // Check if the distance is within the radius ± tolerance
+    if (distance - arc.radii.x).abs() > tolerance {
+        return false;
+    }
+
+    // Calculate the angle from the center to the point and normalize to [0, 2π]
+    let point_angle = center_to_point
+        .atan2()
+        .rem_euclid(2.0 * std::f64::consts::PI);
+
+    // Normalize the arc's start and end angles to [0, 2π]
+    let start_angle = arc.start_angle.rem_euclid(2.0 * std::f64::consts::PI);
+    let end_angle = (arc.start_angle + arc.sweep_angle).rem_euclid(2.0 * std::f64::consts::PI);
+
+    // Check if the point's angle is within the arc's angle range
+    if arc.sweep_angle > 0.0 {
+        // Counterclockwise arc
+        if start_angle <= end_angle {
+            point_angle >= start_angle && point_angle <= end_angle
+        } else {
+            // Wrapped around 0
+            point_angle >= start_angle || point_angle <= end_angle
+        }
+    } else {
+        // Clockwise arc
+        if end_angle <= start_angle {
+            point_angle <= start_angle && point_angle >= end_angle
+        } else {
+            // Wrapped around 0
+            point_angle <= start_angle || point_angle >= end_angle
+        }
+    }
+}
+
+/// Get the middle point of an arc
+pub fn middle_point_of_arc(arc: &Arc) -> Vec2 {
+    // Calculate the mid-angle
+    let mid_angle = arc.start_angle + arc.sweep_angle / 2.0;
+
+    // Calculate the x and y coordinates of the middle point
+    Vec2::new(
+        arc.center.x + mid_angle.cos() * arc.radii.x,
+        arc.center.y + mid_angle.sin() * arc.radii.y,
+    )
+}
+
+pub fn get_arc_radius(start: Vec2, end: Vec2, current_radius: f64, pos: Vec2, up: bool) -> f64 {
+    // Compute the current arc center
+    let current_center = get_arc_center(start, end, current_radius, up);
+    // Compute the new radius based on the cursor's distance to the current center
+    (pos - current_center).hypot()
+}
+
+pub fn move_arc_middle(start: Vec2, end: Vec2, old_center: Vec2, new_middle: Vec2) -> Vec2 {
+    // Compute the chord midpoint (old middle point)
+    let old_middle = (start + end) / 2.0;
+
+    // Compute the vector from the old middle to the new middle
+    let adjustment = new_middle - old_middle;
+
+    // Adjust the old center by the same adjustment vector
+    let new_center = old_center + adjustment;
+
+    // Ensure the radius remains constant
+    let radius = (start - old_center).hypot();
+    let current_radius = (start - new_center).hypot();
+    if (current_radius - radius).abs() > EPSILON {
+        log!("Radius has changed! Ensure the new middle point is valid.");
+        return old_center;
+    }
+
+    new_center
+}
+
+pub fn perpendicular_point(start: Vec2, end: Vec2, dist: f64, up: bool) -> Vec2 {
+    // Midpoint of the segment
+    let midpoint = (start + end) / 2.0;
+
+    // Vector of the segment
+    let segment_vector = end - start;
+
+    if segment_vector.hypot() < EPSILON {
+        log!("WARNING: Degenerate case, perpendicular_point()");
+        return start;
+    }
+
+    // Perpendicular vectors
+    let perp = if up {
+        Vec2::new(-segment_vector.y, segment_vector.x).normalize()
+    } else {
+        Vec2::new(segment_vector.y, -segment_vector.x).normalize()
+    };
+
+    midpoint + perp * dist
+}
+
+pub fn perpendicular_point_with_projection(start: Vec2, end: Vec2, dpos: Vec2, up: bool) -> Vec2 {
+    // Midpoint of the segment
+    let midpoint = (start + end) / 2.0;
+
+    // Vector of the segment
+
+    let segment_vector = end - start; // if up { end - start } else { start - end };
+
+    // Handle degenerate case: start and end are the same
+    if segment_vector.hypot() < f64::EPSILON {
+        log!("WARNING: Degenerate case, perpendicular_point_with_projection()");
+        return start;
+    }
+
+    // Perpendicular vectors
+    let perp = if up {
+        Vec2::new(-segment_vector.y, segment_vector.x).normalize()
+    } else {
+        Vec2::new(segment_vector.y, -segment_vector.x).normalize()
+    };
+
+    // Project dpos onto the perpendicular vector
+    let projection = dpos.dot(perp);
+
+    // Move the midpoint by the projected distance along the perpendicular
+    midpoint + perp * projection
+}
+
+pub fn perpendicular_points_with_distance(
+    pt1: Vec2,
+    pt2: Vec2,
+    dist: f64,
+    concavity: bool,
+) -> Vec2 {
+    // Compute the vector of the segment
+    let segment_vector = pt2 - pt1;
+    let segment_length = segment_vector.hypot();
+
+    // Compute the midpoint of the segment
+    let midpoint = (pt1 + pt2) / 2.0;
+    // Ensure dist is valid
+    if dist < segment_length / 2.0 {
+        log!("WARNING: Invalid distance in perpendicular_points_with_distance()");
+        return midpoint;
+    }
+
+    // Perpendicular vector (normalized)
+    let perpendicular = Vec2::new(-segment_vector.y, segment_vector.x).normalize();
+
+    // Two points on the perpendicular bisector at the given distance
+    if concavity {
+        midpoint + perpendicular * dist
+    } else {
+        midpoint - perpendicular * dist
+    }
+}
+
+pub fn lines_intersection_1(point1: Vec2, angle1: f64, point2: Vec2, angle2: f64) -> Option<Vec2> {
+    // Direction vectors for the two lines
+    let dir1 = Vec2::new(angle1.cos(), angle1.sin());
+    let dir2 = Vec2::new(angle2.cos(), angle2.sin());
+
+    // Differences between the points
+    let delta = point2 - point1;
+
+    // Determinant (cross product of direction vectors)
+    let det = dir1.x * dir2.y - dir1.y * dir2.x;
+
+    // If determinant is zero, the lines are parallel or coincident
+    if det.abs() < f64::EPSILON {
+        return None;
+    }
+
+    // Solve for t and u
+    let t = (delta.x * dir2.y - delta.y * dir2.x) / det;
+
+    // Compute the intersection point
+    Some(point1 + dir1 * t)
+}
+pub fn lines_intersection_2(point1: Vec2, dir1: Vec2, point2: Vec2, dir2: Vec2) -> Option<Vec2> {
+    // Differences between the points
+    let delta = point2 - point1;
+
+    // Determinant (cross product of the direction vectors)
+    let det = dir1.x * dir2.y - dir1.y * dir2.x;
+
+    // If determinant is zero (or near zero), the lines are parallel or coincident
+    if det.abs() < f64::EPSILON {
+        return None;
+    }
+
+    // Solve for t (the scalar parameter along dir1)
+    let t = (delta.x * dir2.y - delta.y * dir2.x) / det;
+
+    // Compute the intersection point
+    Some(point1 + dir1 * t)
+}
+
+/// Computes the intersection point of two line segments, if it exists.
+///
+/// The first segment is defined by the points `p` and `p2`, and the second segment by the points `q` and `q2`.
+/// Each segment is considered as a closed interval, meaning that the endpoints are included in the segment.
+///
+/// The function uses a parametric representation of the segments:
+///
+/// ```ignore
+/// p + t * (p2 - p)
+/// q + u * (q2 - q)
+/// ```
+///
+/// and solves for the parameters `t` and `u` such that:
+///
+/// ```ignore
+/// p + t * (p2 - p) = q + u * (q2 - q)
+/// ```
+///
+/// The cross product `r.cross(s)` (where `r = p2 - p` and `s = q2 - q`) is used to determine if the segments
+/// are parallel (or nearly collinear). If `rxs.abs()` is less than `EPSILON`, the segments are considered parallel,
+/// and the function returns `None`.
+///
+/// If the segments are not parallel, `t` and `u` are computed as:
+///
+/// - `t = (q - p).cross(s) / r.cross(s)`
+/// - `u = (q - p).cross(r) / r.cross(s)`
+///
+/// The segments intersect if and only if both `t` and `u` lie within the range `[0.0, 1.0]`.
+/// In that case, the intersection point is given by `p + t * (p2 - p)`.
+///
+/// # Parameters
+///
+/// - `p`: The starting point of the first segment.
+/// - `p2`: The ending point of the first segment.
+/// - `q`: The starting point of the second segment.
+/// - `q2`: The ending point of the second segment.
+///
+/// # Returns
+///
+/// - `Some(Vec2)` containing the intersection point if the segments intersect.
+/// - `None` if the segments do not intersect, or if they are parallel/collinear within the tolerance defined by `EPSILON`.
+///
+/// # Example
+///
+/// ```
+/// let p = Vec2::new(0.0, 0.0);
+/// let p2 = Vec2::new(4.0, 4.0);
+/// let q = Vec2::new(0.0, 4.0);
+/// let q2 = Vec2::new(4.0, 0.0);
+///
+/// if let Some(intersection) = segment_intersection(p, p2, q, q2) {
+///     println!("Intersection at: {:?}", intersection);
+/// } else {
+///     println!("No intersection.");
+/// }
+/// ```
+///
+pub fn segment_intersection(p: Vec2, p2: Vec2, q: Vec2, q2: Vec2) -> Option<Vec2> {
+    let r = p2 - p;
+    let s = q2 - q;
+    let rxs = r.cross(s);
+    let q_minus_p = q - p;
+
+    // Check if the segments are parallel (or collinear).
+    if rxs.abs() < EPSILON {
+        return None;
+    }
+
+    let t = q_minus_p.cross(s) / rxs;
+    let u = q_minus_p.cross(r) / rxs;
+
+    // If t and u are between 0 and 1, the segments intersect.
+    if t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0 {
+        Some(p + r * t)
+    } else {
+        None
+    }
+}
+
+/// Computes the intersection points between a segment (from `p` to `p2`) and a circle
+/// (with center `center` and radius `radius`).
+///
+/// Returns a vector containing zero, one, or two points.
+/// Note that only intersections that occur within the segment (i.e. where t is between 0 and 1)
+/// are included.
+pub fn segment_circle_intersections(p: Vec2, p2: Vec2, center: Vec2, radius: f64) -> Vec<Vec2> {
+    // The vector along the segment.
+    let d = p2 - p;
+    // The vector from the circle's center to the start of the segment.
+    let f = p - center;
+
+    // Quadratic coefficients for the equation:
+    //   a*t^2 + b*t + c = 0
+    let a = d.dot(d);
+    let b = 2.0 * f.dot(d);
+    let c = f.dot(f) - radius * radius;
+
+    // The discriminant of the quadratic equation.
+    let discriminant = b * b - 4.0 * a * c;
+
+    // If the discriminant is negative, there are no real intersections.
+    if discriminant < 0.0 {
+        Vec::new()
+    } else {
+        let mut intersections = Vec::new();
+        let discriminant_sqrt = discriminant.sqrt();
+        // Find the two potential intersection parameters.
+        let t1 = (-b - discriminant_sqrt) / (2.0 * a);
+        let t2 = (-b + discriminant_sqrt) / (2.0 * a);
+
+        // Only add the intersection if t is within [0, 1] (i.e. on the segment)
+        if t1 >= 0.0 && t1 <= 1.0 {
+            intersections.push(p + d * t1);
+        }
+        // t2 is different from t1 when discriminant > 0. For a tangent (discriminant == 0),
+        // it would be the same, so we avoid a duplicate.
+        if discriminant > 0.0 && t2 >= 0.0 && t2 <= 1.0 {
+            intersections.push(p + d * t2);
+        }
+        intersections
+    }
+}
+
+/// Find the intersection points of a line (origin, angle) and a circle (center, radius)
+pub fn line_circle_intersection_with_angle(
+    origin: Vec2,
+    angle: f64,
+    center: Vec2,
+    radius: f64,
+) -> Option<(Vec2, Option<Vec2>)> {
+    // Line direction vector from the angle
+    let direction = Vec2::new(angle.cos(), angle.sin());
+    // Vector from the circle center to the line origin
+    let f = origin - center;
+    // Quadratic coefficients
+    let a = direction.dot(direction);
+    let b = 2.0 * f.dot(direction);
+    let c = f.dot(f) - radius.powi(2);
+    // Discriminant
+    let discriminant = b * b - 4.0 * a * c;
+    if discriminant < 0.0 {
+        // No intersection
+        None
+    } else {
+        let discriminant_sqrt = discriminant.sqrt();
+        let t1 = (-b - discriminant_sqrt) / (2.0 * a);
+        let t2 = (-b + discriminant_sqrt) / (2.0 * a);
+
+        // Calculate intersection points
+        match (t1.is_finite(), t2.is_finite()) {
+            (true, true) => {
+                if (t1 - t2).abs() < EPSILON {
+                    Some((origin + direction * t1, None))
+                } else {
+                    Some((origin + direction * t1, Some(origin + direction * t2)))
+                }
+            }
+            (true, false) => Some((origin + direction * t1, None)),
+            (false, true) => Some((origin + direction * t2, None)),
+            (false, false) => None,
+        }
+    }
+}
+
+/// Find the intersection points of two circles
+pub fn circle_circle_intersection(
+    center1: Vec2,
+    radius1: f64,
+    center2: Vec2,
+    radius2: f64,
+) -> Option<(Vec2, Option<Vec2>)> {
+    let d = (center2 - center1).hypot();
+    // No intersection cases
+    if d > radius1 + radius2 || d < (radius1 - radius2).abs() || d.abs() < f64::EPSILON {
+        return None;
+    }
+    let a = (radius1.powi(2) - radius2.powi(2) + d.powi(2)) / (2.0 * d);
+    let h = (radius1.powi(2) - a.powi(2)).sqrt();
+    let p2 = Point::new(
+        center1.x + a * (center2.x - center1.x) / d,
+        center1.y + a * (center2.y - center1.y) / d,
+    );
+    let intersection1 = Vec2::new(
+        p2.x + h * (center2.y - center1.y) / d,
+        p2.y - h * (center2.x - center1.x) / d,
+    );
+    let intersection2 = Vec2::new(
+        p2.x - h * (center2.y - center1.y) / d,
+        p2.y + h * (center2.x - center1.x) / d,
+    );
+    if intersection1 == intersection2 {
+        Some((intersection1, None))
+    } else {
+        Some((intersection1, Some(intersection2)))
+    }
+}
+
+pub fn get_point_at_dist_from_angle(origin: Vec2, angle: f64, dist: f64) -> Vec2 {
+    origin + Vec2::new(angle.cos(), angle.sin()) * dist
+}
+
+/// Splits an arc (defined by two points, a radius, and concavity) with a circle centered at `start`
+/// returning two arcs if there are two valid intersection points.
+pub fn split_arc_with_circle(
+    start: Vec2,
+    end: Vec2,
+    arc_radius: f64,
+    arc_concavity: bool,
+    circle_radius: f64,
+) -> Option<(Arc, Arc)> {
+    // 1. Compute the arc center and angles for the original arc
+    let arc_center = get_arc_center(start, end, arc_radius, arc_concavity);
+    let start_angle = (start - arc_center).atan2();
+    let end_angle = (end - arc_center).atan2();
+
+    // Sweep angle (handle concavity if needed)
+    // For a "simple" approach, we do:
+    //   sweep_angle = end_angle - start_angle
+    // But you can adjust for concavity if the sign is inverted
+    let mut sweep_angle = end_angle - start_angle;
+
+    // Normalize sweep angle to range (-π..π) or [0..2π),
+    // ensuring correct direction for "concavity".
+    // A simple approach is to keep the sign if arc_concavity is relevant:
+    if arc_concavity && sweep_angle > 0.0 {
+        sweep_angle -= 2.0 * std::f64::consts::PI;
+    } else if !arc_concavity && sweep_angle < 0.0 {
+        sweep_angle += 2.0 * std::f64::consts::PI;
+    }
+
+    // Construct the original arc
+    let _original_arc = Arc {
+        center: arc_center.to_point(),
+        radii: Vec2::new(arc_radius, arc_radius),
+        start_angle,
+        sweep_angle,
+        x_rotation: 0.0,
+    };
+
+    // 2. The circle is centered at `start`, radius = `circle_radius`
+    // We'll find intersections between that circle and the arc's circle
+    let circle_center = start;
+    let circle_r = circle_radius;
+
+    // 3. Find intersection points between the two circles
+    match find_arc_circle_intersections(arc_center, arc_radius, circle_center, circle_r) {
+        None => None, // No intersection or infinite intersection
+        Some((_pt1, None)) => {
+            // Only one intersection => tangent
+            // The arc is not really "split" into two arcs,
+            // but you could return a degenerate second arc if desired.
+            // For now, we treat it as no valid two-arc split.
+            None
+        }
+        Some((pt1, Some(pt2))) => {
+            // Two intersection points: split into two arcs
+
+            // Convert intersection points to angles relative to arc_center
+            let angle1 = (pt1 - arc_center).atan2();
+            let angle2 = (pt2 - arc_center).atan2();
+
+            // Sort angles so arc1 is [start_angle..angle1], arc2 is [angle1..end_angle]
+            let (mid_angle1, _mid_angle2) = if angle1 < angle2 {
+                (angle1, angle2)
+            } else {
+                (angle2, angle1)
+            };
+
+            // Ensure mid angles lie within [start_angle..start_angle+sweep_angle]
+            // or handle them as is if you assume geometry is correct
+
+            // Arc 1: from start_angle to mid_angle1
+            let arc1 = Arc {
+                center: arc_center.to_point(),
+                radii: Vec2::new(arc_radius, arc_radius),
+                start_angle,
+                sweep_angle: mid_angle1 - start_angle,
+                x_rotation: 0.0,
+            };
+
+            // Arc 2: from mid_angle1 to end_angle
+            let arc2 = Arc {
+                center: arc_center.to_point(),
+                radii: Vec2::new(arc_radius, arc_radius),
+                start_angle: mid_angle1,
+                sweep_angle: (start_angle + sweep_angle) - mid_angle1,
+                x_rotation: 0.0,
+            };
+
+            Some((arc1, arc2))
+        }
+    }
+}
+
+/// Finds intersection points between two circles:
+/// Circle1: center=arc_center, radius=arc_radius
+/// Circle2: center=circle_center, radius=circle_radius
+/// Returns:
+///   None => No intersection or infinite intersection (coincident)
+///   Some((pt1, None)) => tangent
+///   Some((pt1, Some(pt2))) => two intersections
+fn find_arc_circle_intersections(
+    arc_center: Vec2,
+    arc_radius: f64,
+    circle_center: Vec2,
+    circle_radius: f64,
+) -> Option<(Vec2, Option<Vec2>)> {
+    // Distance between centers
+    let d = (circle_center - arc_center).hypot();
+    // Check for no intersection
+    if d > arc_radius + circle_radius
+        || d < (arc_radius - circle_radius).abs()
+        || d.abs() < f64::EPSILON
+    {
+        return None;
+    }
+
+    // Solve circle-circle intersection
+    let a = (arc_radius.powi(2) - circle_radius.powi(2) + d.powi(2)) / (2.0 * d);
+    let h = (arc_radius.powi(2) - a.powi(2)).sqrt();
+
+    // Midpoint of intersection chord
+    let mid = arc_center + (circle_center - arc_center) * (a / d);
+
+    let offset = circle_center - arc_center;
+    let offset_perp = Vec2::new(-offset.y, offset.x);
+
+    let i1 = mid + offset_perp * (h / d);
+    let i2 = mid - offset_perp * (h / d);
+
+    if h.abs() < f64::EPSILON {
+        // One intersection => tangent
+        Some((i1, None))
+    } else {
+        Some((i1, Some(i2)))
+    }
+}
+
+/// Moves the apex point with snapping. Given points `a` and `c` (the two fixed endpoints),
+/// the original apex, and a displacement `dpos`, this function computes the new apex position
+/// by snapping the distances |AB| and |BC| to multiples of `snap` and then finding the circle‐
+/// circle intersection.
+///
+/// Returns `Some(new_apex)` if an intersection is found, or `None` if no valid intersection exists.
+pub fn move_vertex_with_3v_snapping(
+    a: Vec2,
+    apex: Vec2,
+    c: Vec2,
+    dpos: Vec2,
+    snap: f64,
+) -> Option<Vec2> {
+    // Apply the small displacement to the apex (B)
+    let new_b = apex + dpos;
+
+    // Compute the current distances from the new apex to points a and c
+    let ab = (new_b - a).hypot();
+    let bc = (new_b - c).hypot();
+
+    // Snap these distances to the nearest multiple of 'snap'
+    let snap_ab = (ab / snap).round() * snap;
+    let snap_bc = (bc / snap).round() * snap;
+
+    // Find the intersection of the two circles centered at 'a' and 'c'
+    // with radii 'snap_ab' and 'snap_bc' respectively.
+    match circle_circle_intersection(a, snap_ab, c, snap_bc) {
+        // If there's a single intersection, return it.
+        Some((i1, None)) => Some(i1),
+        // If there are two intersections, choose the one closest to the new_b position.
+        Some((i1, Some(i2))) => {
+            let dist1 = (i1 - new_b).hypot();
+            let dist2 = (i2 - new_b).hypot();
+            if dist1 < dist2 {
+                Some(i1)
+            } else {
+                Some(i2)
+            }
+        }
+        // If no intersection is found, log a warning and return None.
+        _ => {
+            log!("WARNING: No intersection found in move_apex_with_snapping()");
+            None
+        }
+    }
+}
+
+// pub fn area_from_hes(pts: &VecRing<HalfEdge>) -> f64 {
+//     let len = pts.len();
+//     let mut area = 0.0;
+//     for idx in 0..len as i64 {
+//         let vi = pts.get(idx).get_vertex().curr;
+//         let vj = pts.get((idx + 1) % len as i64).get_vertex().curr;
+//         area += vi.x * vj.y - vj.x * vi.y;
+//     }
+//     area * 0.5
+// }
+
+/// CORRECTED VERSION WITH Y AXIS INVERTED
+pub fn arc_intersection_with_circle(arc: Arc, r: f64, circle_from_end: bool) -> Option<Vec2> {
+    // Let arc_c be the center of the arc's circle and arc_r its radius.
+    let arc_c = arc.center.to_vec2();
+    let arc_r = arc.radii.x;
+
+    // Choose the base angle depending on the flag.
+    let base_angle = if circle_from_end {
+        arc.start_angle + arc.sweep_angle
+    } else {
+        arc.start_angle
+    };
+
+    // Compute the circle's center: either the arc's start or end point.
+    // Here we assume that the arc's angle is given in the y-down system.
+    let circ_c = arc_c + Vec2::new(arc_r * base_angle.cos(), arc_r * base_angle.sin());
+
+    // Find intersections between the arc's circle (center arc_c, radius arc_r) and the circle
+    // centered at circ_c with radius r.
+    let d = (arc_c - circ_c).length();
+    if d > arc_r + r || d < (arc_r - r).abs() {
+        return None;
+    }
+
+    // Standard circle–circle intersection formula.
+    let a = (arc_r * arc_r - r * r + d * d) / (2.0 * d);
+    let h_sq = arc_r * arc_r - a * a;
+    if h_sq < 0.0 {
+        return None;
+    }
+    let h = h_sq.sqrt();
+
+    let v = (circ_c - arc_c) / d;
+    let p = arc_c + a * v;
+    // Compute a perpendicular to v. (No special adjustment is needed here.)
+    let offset = Vec2::new(-v.y, v.x);
+
+    let inter1 = p + h * offset;
+    let inter2 = p - h * offset;
+
+    // Helper to compute the angle (from center arc_c) in our y-down system:
+    // we flip the y value when using atan2.
+    let angle_from_center =
+        |pt: Vec2| -> f64 { ((pt - arc_c).y).atan2((pt - arc_c).x).rem_euclid(2.0 * PI) };
+
+    let a1 = angle_from_center(inter1);
+    let a2 = angle_from_center(inter2);
+
+    // Normalize the arc's start angle.
+    let start_angle = arc.start_angle.rem_euclid(2.0 * PI);
+    // Compute the arc's end angle.
+    let end_angle = (arc.start_angle + arc.sweep_angle).rem_euclid(2.0 * PI);
+
+    // Check if a given angle lies on the arc's sweep.
+    let angle_in_arc = |angle: f64| -> bool {
+        if arc.sweep_angle > 0.0 {
+            // For a counterclockwise sweep.
+            if start_angle <= end_angle {
+                angle >= start_angle && angle <= end_angle
+            } else {
+                angle >= start_angle || angle <= end_angle
+            }
+        } else {
+            // For a clockwise sweep.
+            if start_angle >= end_angle {
+                angle <= start_angle && angle >= end_angle
+            } else {
+                angle <= start_angle || angle >= end_angle
+            }
+        }
+    };
+
+    let mut valid_points = Vec::new();
+    if angle_in_arc(a1) {
+        valid_points.push(inter1);
+    }
+    if angle_in_arc(a2) {
+        valid_points.push(inter2);
+    }
+
+    if valid_points.len() == 1 {
+        Some(valid_points[0])
+    } else {
+        // Either no intersection on the arc, or ambiguous (two points)
+        None
+    }
+}
+
+/// CORRECTED VERSION WITH Y AXIS INVERTED
+pub fn arc_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<Arc> {
+    // Coordinates of points.
+    let (x1, y1) = (p1.x, p1.y);
+    let (x2, y2) = (p2.x, p2.y);
+    let (x3, y3) = (p3.x, p3.y);
+    // Compute determinant to check for collinearity.
+    let d = 2.0 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2));
+    if d.abs() < EPSILON {
+        return None;
+    }
+    // Compute circle center (using the standard formula).
+    let x_center = ((x1 * x1 + y1 * y1) * (y2 - y3)
+        + (x2 * x2 + y2 * y2) * (y3 - y1)
+        + (x3 * x3 + y3 * y3) * (y1 - y2))
+        / d;
+    let y_center = ((x1 * x1 + y1 * y1) * (x3 - x2)
+        + (x2 * x2 + y2 * y2) * (x1 - x3)
+        + (x3 * x3 + y3 * y3) * (x2 - x1))
+        / d;
+    let center = Vec2::new(x_center, y_center);
+    let radius = (p1 - center).length();
+    if radius.abs() < EPSILON {
+        return None;
+    }
+    let angle_from_center = |p: Vec2| ((p - center).y).atan2((p - center).x).rem_euclid(2.0 * PI);
+    let a1 = angle_from_center(p1);
+    let a2 = angle_from_center(p2);
+    let a3 = angle_from_center(p3);
+    // We assume the arc should start at p1, pass through p2, and end at p3.
+    // There are two arcs connecting p1 and p3. We choose the one that passes through p2.
+    let candidate_sweep = (a3 - a1).rem_euclid(2.0 * PI);
+    // Check where p2 lies relative to a1.
+    let diff2 = (a2 - a1).rem_euclid(2.0 * PI);
+    let sweep = if diff2 <= candidate_sweep {
+        candidate_sweep
+    } else {
+        // If p2 is not between a1 and a3 in the positive direction,
+        // choose the negative (clockwise) sweep.
+        candidate_sweep - 2.0 * PI
+    };
+    Some(Arc {
+        center: center.to_point(),
+        // Both radii components are the same, so this is a circle.
+        radii: Vec2::new(radius, radius),
+        start_angle: a1,
+        sweep_angle: sweep,
+        x_rotation: 0.0,
+    })
+}
+pub fn circle_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<(Vec2, f64)> {
+    // Coordinates of points.
+    let (x1, y1) = (p1.x, p1.y);
+    let (x2, y2) = (p2.x, p2.y);
+    let (x3, y3) = (p3.x, p3.y);
+    // Compute determinant to check for collinearity.
+    let d = 2.0 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2));
+    if d.abs() < EPSILON {
+        return None;
+    }
+    // Compute circle center using the standard formula.
+    let x_center = ((x1 * x1 + y1 * y1) * (y2 - y3)
+        + (x2 * x2 + y2 * y2) * (y3 - y1)
+        + (x3 * x3 + y3 * y3) * (y1 - y2))
+        / d;
+    let y_center = ((x1 * x1 + y1 * y1) * (x3 - x2)
+        + (x2 * x2 + y2 * y2) * (x1 - x3)
+        + (x3 * x3 + y3 * y3) * (x2 - x1))
+        / d;
+    let center = Vec2::new(x_center, y_center);
+    // Compute the radius from the center to any of the points.
+    let radius = (p1 - center).length();
+    (radius.abs() > EPSILON).then(|| (center, radius))
+}
+
+/// NO CORRECTION NEEDED FOR Y AXIS INVERTED
+pub fn angle_between(v: Vec2, w: Vec2) -> Option<f64> {
+    let dot = v.dot(w);
+    let mag_v = v.hypot();
+    let mag_w = w.hypot();
+
+    if mag_v == 0.0 || mag_w == 0.0 {
+        // Cannot compute angle with a zero-length vector.
+        return None;
+    }
+    // Clamp the cosine value to the range [-1.0, 1.0] to avoid errors from floating point inaccuracies.
+    let cos_theta = (dot / (mag_v * mag_w)).clamp(-1.0, 1.0);
+    Some(cos_theta.acos() * v.cross(w).signum())
+}
+
+pub fn angle0_90(angle: f64) -> f64 {
+    let mut angle = angle.rem_euclid(2.0 * PI);
+    if angle > PI {
+        angle -= 2.0 * PI;
+    }
+    if angle < 0.0 {
+        angle += 2.0 * PI;
+    }
+    if angle > PI / 2.0 {
+        angle = PI - angle;
+    }
+    if angle < -PI / 2.0 {
+        angle = -angle - PI;
+    }
+    angle.abs()
+}
+/// CORRECTED VERSION WITH Y AXIS INVERTED ----
+pub fn arc_from_center_and_points(center: Vec2, start: Vec2, end: Vec2) -> Option<Arc> {
+    // Compute vectors from the center to the start and end points.
+    let v_start = start - center;
+    let v_end = end - center;
+
+    // Compute the radius from the start point. It should be > 0.
+    let radius = v_start.length();
+    if radius.abs() < EPSILON {
+        // Degenerate: the start point is at the center.
+        return None;
+    }
+
+    // Ensure that the end point is approximately on the same circle.
+    if (v_end.length() - radius).abs() > EPSILON {
+        log!(
+            "ddddd v_end.length():{:.2}, radius:{:.2}",
+            v_end.length(),
+            radius
+        );
+        return None;
+    }
+
+    // Compute the angles from the center to the start and end.
+    let start_angle = v_start.y.atan2(v_start.x);
+    let end_angle = v_end.y.atan2(v_end.x);
+
+    // Normalize the sweep angle to be within (-PI, PI] using rem_euclid.
+    let sweep = (end_angle - start_angle + PI).rem_euclid(2.0 * PI) - PI;
+
+    // Degenerate: if the sweep is zero (or nearly zero) there is no meaningful arc.
+    if sweep.abs() < EPSILON {
+        return None;
+    }
+
+    Some(Arc {
+        center: center.to_point(),
+        radii: Vec2::new(radius, radius),
+        start_angle,
+        sweep_angle: sweep,
+        x_rotation: 0.0,
+    })
+}
+
+/// CORRECTED VERSION WITH Y AXIS INVERTED
+pub fn sub_arc(arc: Arc, pt1: Vec2, pt2: Vec2) -> Option<Arc> {
+    let center = arc.center.to_vec2();
+
+    // Compute the vectors from the center to the points.
+    let v1 = pt1 - center;
+    let v2 = pt2 - center;
+
+    // Invert the y components for a coordinate system where y increases downward.
+    let a1 = (-v1.y).atan2(v1.x);
+    let a2 = (-v2.y).atan2(v2.x);
+
+    // rem_euclid angles to be within [0, 2π).
+    let a1 = a1.rem_euclid(2.0 * PI);
+    let a2 = a2.rem_euclid(2.0 * PI);
+
+    // Compute the sweep based on the sign of the original arc's sweep angle.
+    let sweep = if arc.sweep_angle > 0. {
+        (a2 - a1).rem_euclid(2.0 * PI)
+    } else {
+        -(a1 - a2).rem_euclid(2.0 * PI)
+    };
+
+    Some(Arc {
+        center: arc.center,
+        radii: arc.radii,
+        start_angle: a1,
+        sweep_angle: sweep,
+        x_rotation: 0.0,
+    })
+}
+
+/// CORRECTED VERSION WITH Y AXIS INVERTED ----
+pub fn arc_start_end_points(arc: &Arc) -> (Vec2, Vec2) {
+    let center = arc.center.to_vec2();
+    let r = arc.radii.x;
+    let start_point = center + Vec2::new(r * arc.start_angle.cos(), r * arc.start_angle.sin());
+    let end_angle = arc.start_angle + arc.sweep_angle;
+    let end_point = center + Vec2::new(r * end_angle.cos(), r * end_angle.sin());
+    (start_point, end_point)
+}
+
+/// NO CORRECTION NEEDED FOR Y AXIS INVERTED
+pub fn intersect_lines(p1: Vec2, d1: Vec2, p2: Vec2, d2: Vec2) -> Option<Vec2> {
+    // Compute the 2D cross product (determinant) of d1 and d2.
+    let denom = d1.x * d2.y - d1.y * d2.x;
+    // Check if the lines are parallel (or nearly so).
+    if denom.abs() < EPSILON {
+        return None; // No unique intersection.
+    }
+    let diff = p2 - p1;
+    // Compute the cross product of the difference and d2.
+    let t = (diff.x * d2.y - diff.y * d2.x) / denom;
+    Some(p1 + d1 * t)
+}
+
+pub fn intersect_circles(c1: Vec2, r1: f64, c2: Vec2, r2: f64) -> Option<(Vec2, Vec2)> {
+    let d = (c2 - c1).hypot();
+
+    // Check for non-intersecting or coincident circles.
+    if d > r1 + r2 || d < (r1 - r2).abs() {
+        // No intersection.
+        return None;
+    }
+    if d.abs() < 1e-6 && (r1 - r2).abs() < 1e-6 {
+        // Circles are coincident.
+        return None;
+    }
+
+    // 'a' is the distance from c1 to the line joining the intersections.
+    let a = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d);
+
+    // p0 is the point along the line from c1 to c2.
+    let p0 = c1 + (c2 - c1) * (a / d);
+
+    // 'h' is the distance from p0 to each intersection point.
+    let h = (r1 * r1 - a * a).sqrt();
+
+    // The perpendicular vector (normalized).
+    let perp = Vec2::new(-(c2.y - c1.y), c2.x - c1.x) / d;
+
+    // Calculate the intersection points.
+    let intersection1 = p0 + perp * h;
+    let intersection2 = p0 - perp * h;
+
+    // If h is nearly zero, the circles are tangent (one intersection).
+    if h.abs() < EPSILON {
+        None
+    } else {
+        Some((intersection1, intersection2))
+    }
+}
+
+pub fn bissector(p1: Vec2, apex: Vec2, p3: Vec2) -> Option<(Vec2, f64, Vec2, Vec2)> {
+    // Compute the raw vectors from the apex to p1 and p3.
+    let v1 = p1 - apex;
+    let v2 = p3 - apex;
+
+    // Check that both vectors are non-zero to avoid division by zero during normalization.
+    if v1.length() < EPSILON || v2.length() < EPSILON {
+        return None;
+    }
+
+    // Normalize the vectors.
+    let u = v1.normalize();
+    let v = v2.normalize();
+
+    // Sum the unit vectors.
+    let sum = u + v;
+
+    // Check if the sum is nearly zero (this happens if u and v are opposite directions).
+    if sum.length() < EPSILON {
+        return None;
+    }
+
+    // Normalize the sum to get the bisector direction.
+    let bisector = sum.normalize();
+
+    // Compute the angle between u and v, clamping the dot product to the [-1, 1] range to avoid numerical issues.
+    let dot = u.dot(v).clamp(-1.0, 1.0);
+    let angle = dot.acos();
+
+    if angle.abs() < EPSILON {
+        return None;
+    }
+
+    // Return the bisector direction and half the angle.
+    Some((bisector, angle / 2.0, u, v))
+}
+
+/// Returns true if `point` lies within the wedge defined by (p1, apex, p3).
+/// The wedge is the area between the two rays starting at `apex` and going through `p1` and `p3`.
+pub fn is_point_inside_wedge(p1: Vec2, apex: Vec2, p3: Vec2, point: Vec2) -> bool {
+    // Compute vectors from the apex to the boundaries and the point.
+    let v1 = p1 - apex;
+    let v2 = p3 - apex;
+    let vp = point - apex;
+
+    // Compute the cross products.
+    // These help to determine the relative orientation of the vectors.
+    let cross_wedge = v1.cross(v2);
+    let cross1 = v1.cross(vp);
+    let cross2 = vp.cross(v2);
+
+    // Depending on the orientation (clockwise or counterclockwise) of the wedge,
+    // the point is inside if it lies between the two boundary vectors.
+    if cross_wedge >= 0.0 {
+        cross1 >= 0.0 && cross2 >= 0.0
+    } else {
+        cross1 <= 0.0 && cross2 <= 0.0
+    }
+}
+
+pub fn get_sagitta_pt(v0: Vec2, v1: Vec2, sag_rel: f64) -> Option<Vec2> {
+    SegBundle::new(v0, v1).and_then(|sb| Some(sb.m - sb.n * sb.len * sag_rel))
+}
+
+pub fn circle_line_intersection(
+    c: Vec2,
+    r: f64,
+    pt: Vec2,
+    u_dir: Vec2,
+) -> Option<(Vec2, Option<Vec2>)> {
+    // Compute vector from circle center to the line point.
+    let d = pt - c;
+
+    // Coefficients for the quadratic equation:
+    // A * t^2 + B * t + C = 0, where the line is pt + t*u_dir.
+    let a = u_dir.dot(u_dir); // if u_dir is unit, then a == 1.0
+    let b = 2.0 * d.dot(u_dir);
+    let c_val = d.dot(d) - r * r;
+
+    // Compute the discriminant.
+    let disc = b * b - 4.0 * a * c_val;
+
+    // If the discriminant is negative, no real intersections.
+    if disc < 0.0 {
+        return None;
+    }
+
+    // Compute the first intersection.
+    let sqrt_disc = disc.sqrt();
+    let t1 = (-b + sqrt_disc) / (2.0 * a);
+    let p1 = pt + u_dir * t1;
+
+    // If the discriminant is nearly zero, there's one intersection.
+    if disc.abs() < 1e-10 {
+        return Some((p1, None));
+    }
+
+    // Otherwise, compute the second intersection.
+    let t2 = (-b - sqrt_disc) / (2.0 * a);
+    let p2 = pt + u_dir * t2;
+
+    Some((p1, Some(p2)))
+}
+
+/// Projects a point `p` onto a line defined by `line_point` and a unit direction `u_dir`.
+pub fn project_point_on_line(p: Vec2, line_point: Vec2, line_u_dir: Vec2) -> Vec2 {
+    // Vector from the line point to the given point.
+    let v = p - line_point;
+
+    // Compute the projection length along the line (using the unit direction).
+    let proj_length = v.dot(line_u_dir);
+
+    // Compute the projection point.
+    line_point + line_u_dir * proj_length
+}
+/// Returns the nearest intersection point on the circle circumference with
+/// the line passing through the given point and the circle's center.
+/// If the point is exactly at the center, returns None.
+pub fn nearest_circle_point(center: Vec2, radius: f64, p: Vec2) -> Option<Vec2> {
+    let diff = p - center;
+    let d = diff.hypot();
+
+    // Check that the point is not exactly at the center.
+    if d < EPSILON {
+        return None;
+    }
+
+    // Compute the unit direction from center to the point.
+    let unit_dir = diff / d;
+
+    // The intersection point on the circumference.
+    Some(center + unit_dir * radius)
 }
