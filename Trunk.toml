@@ -1,4 +1,4 @@
 [build]
-public_url = "/MiiCut/"
+# public_url = "/MiiCut/"
 target = "index.html"
 dist = "dist"
