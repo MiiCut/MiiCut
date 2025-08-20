@@ -573,7 +573,6 @@ pub enum ClosedShapeType {
     Triangle,
     Square,
     Oblong,
-    PolyRectangle,
     Polygon,
 }
 
