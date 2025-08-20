@@ -95,11 +95,6 @@ impl Drawable for ClosedShapes {
                 }
             }
 
-            ClosedShapeType::PolyRectangle => {
-                if vertices.len() < 4 {
-                    return None;
-                }
-            }
             ClosedShapeType::Polygon => {
                 if vertices.len() < 3 {
                     return None;
@@ -362,65 +357,6 @@ impl Drawable for ClosedShapes {
                 //     return false;
                 // }
             }
-            ClosedShapeType::PolyRectangle => {
-                let len = self.vertices.len();
-                if len < 4 {
-                    return false;
-                }
-                let (idx_prev, idx, idx_next) =
-                    match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
-                        Some(i) => (i as i64 - 1, i as i64, i as i64 + 1),
-                        None => return false,
-                    };
-
-                // Snap the saved vertex position, hence snap prev/next along h or v axis
-                let snap_v_idx = snap_vertex(self.vertices.val(idx as i64).saved, snap);
-
-                if idx % 2 == 0 {
-                    self.vertices.val_mut(idx_prev).saved.x =
-                        snap_val(self.vertices.val(idx_prev).saved.x, snap);
-                    self.vertices.val_mut(idx_next).saved.y =
-                        snap_val(self.vertices.val(idx_next).saved.y, snap);
-                } else {
-                    self.vertices.val_mut(idx_prev).saved.y =
-                        snap_val(self.vertices.val(idx_prev).saved.y, snap);
-                    self.vertices.val_mut(idx_next).saved.x =
-                        snap_val(self.vertices.val(idx_next).saved.x, snap);
-                }
-
-                self.vertices.val_mut(idx).saved = snap_v_idx;
-
-                // 2) grab positions and derive segments
-                let pos_m = self.vertices.val(idx).saved;
-                let o_seg_a = SegBundle::new(self.vertices.val(idx_prev).saved, pos_m);
-                let o_seg_b = SegBundle::new(pos_m, self.vertices.val(idx_next).saved);
-                if let Some(seg_a) = o_seg_a {
-                    if let Some(seg_b) = o_seg_b {
-                        let delta_a = delta.dot(seg_a.u);
-                        let delta_b = delta.dot(seg_b.u);
-
-                        let new_prev = self.vertices.val(idx_prev).saved + delta_b * seg_b.u;
-                        let new_next = self.vertices.val(idx_next).saved + delta_a * seg_a.u;
-                        let new_m = pos_m + delta;
-
-                        if (new_m - new_prev).hypot() > EPSILON
-                            && (new_m - new_next).hypot() > EPSILON
-                        {
-                            self.vertices.val_mut(idx_prev).set(new_prev);
-                            self.vertices.val_mut(idx).set(new_m);
-                            self.vertices.val_mut(idx_next).set(new_next);
-                            self.set_bezpath();
-                            true
-                        } else {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-            }
             ClosedShapeType::Polygon | ClosedShapeType::Triangle => {
                 let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                     Some(i) => i as i64,
@@ -514,10 +450,7 @@ impl Drawable for ClosedShapes {
                 }
                 self.bezpath = path;
             }
-            ClosedShapeType::Square
-            | ClosedShapeType::PolyRectangle
-            | ClosedShapeType::Polygon
-            | ClosedShapeType::Triangle => {
+            ClosedShapeType::Square | ClosedShapeType::Polygon | ClosedShapeType::Triangle => {
                 let mut path = BezPath::new();
                 for (i, (_, value)) in self.vertices.iter().enumerate() {
                     if i == 0 {

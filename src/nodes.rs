@@ -60,22 +60,6 @@ impl<E: Drawable> DataSet<E> {
         let v_hig = elem.get_vertex(&vid_hig)?;
 
         match elem.get_shape_type() {
-            ClosedShapeType::PolyRectangle => {
-                // Create new vertex between the selected and highlighted vertices
-                let new_v1 = (
-                    VUId::new(),
-                    Value::new(snap_vertex((v_sel.curr + v_hig.curr) / 2.0, Snap::new())),
-                );
-                let new_v2 = (
-                    VUId::new(),
-                    Value::new(snap_vertex((v_sel.curr + v_hig.curr) / 2.0, Snap::new())),
-                );
-                elem.get_vertices_mut()
-                    .insert_two_between(&vid_sel, &vid_hig, new_v1, new_v2);
-                elem.set_bezpath();
-                return Some(());
-            }
-
             ClosedShapeType::Polygon => {
                 // Create new vertex between the selected and highlighted vertices
                 let new_v = (
@@ -107,42 +91,6 @@ impl<E: Drawable> DataSet<E> {
         let idx_hig = elem.get_vertices().get_idx(&vid_hig)?;
 
         match elem.get_shape_type() {
-            ClosedShapeType::PolyRectangle => {
-                (n >= 6).then_some(())?;
-                elem.get_vertices().dist_ok(idx_sel, idx_hig, 3)?;
-                let max_idx = idx_sel.max(idx_hig);
-                let min_idx = idx_sel.min(idx_hig);
-                if min_idx == 0 && max_idx == n - 3 {
-                    elem.get_vertices_mut().remove(&(n - 1));
-                    elem.get_vertices_mut().remove(&(n - 2));
-                    log!("Removing vertices {} and {}", n - 1, n - 2);
-                } else {
-                    if min_idx == 1 && max_idx == n - 2 {
-                        elem.get_vertices_mut().remove(&(n - 1));
-                        elem.get_vertices_mut().remove(&0);
-                        log!("Removing vertices {} and {}", n - 1, 0);
-                    } else {
-                        if min_idx == 2 && max_idx == n - 1 {
-                            elem.get_vertices_mut().remove(&1);
-                            elem.get_vertices_mut().remove(&0);
-                            log!("Removing vertices {} and {}", 0, 1);
-                        } else {
-                            elem.get_vertices_mut().remove(&(min_idx + 2));
-                            elem.get_vertices_mut().remove(&(min_idx + 1));
-                            log!("Removing vertices {} and {}", min_idx + 1, min_idx + 2);
-                        }
-                    }
-                }
-                let posvhig = elem.get_vertices().val_from_key(vid_hig)?.curr;
-                let vsel = elem.get_vertices_mut().val_mut_from_key(vid_sel)?;
-                if idx_sel % 2 == 0 {
-                    vsel.curr.y = posvhig.y;
-                } else {
-                    vsel.curr.x = posvhig.x;
-                }
-                elem.set_bezpath();
-                Some(())
-            }
             ClosedShapeType::Polygon => {
                 (n >= 4).then_some(())?;
                 elem.get_vertices().dist_ok(idx_sel, idx_hig, 2)?;

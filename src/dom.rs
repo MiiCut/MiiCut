@@ -9,7 +9,6 @@ pub enum Icons {
     Triangle,
     Square,
     Oblong,
-    PolyRectangle,
     Polygon,
 }
 impl Icons {
@@ -21,7 +20,6 @@ impl Icons {
             Triangle => "icon-triangle",
             Square => "icon-square",
             Oblong => "icon-oblong",
-            PolyRectangle => "icon-polyrectangle",
             Polygon => "icon-polygon",
         }
     }

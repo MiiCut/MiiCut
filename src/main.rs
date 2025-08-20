@@ -211,6 +211,7 @@ impl<E: Drawable> AppVars<E> {
 // Initialization
 fn create_app_vars<E: Drawable>(window: Window) -> Result<(), JsValue> {
     log!("Creating application variables");
+    log!("Initializing icons");
     let document = window.document().expect("should have a document on window");
     let c_draw: HtmlCanvasElement = init_element!(document, "mainCanvas", HtmlCanvasElement);
     let c_grid: HtmlCanvasElement = init_element!(document, "gridCanvas", HtmlCanvasElement);
@@ -227,7 +228,6 @@ fn create_app_vars<E: Drawable>(window: Window) -> Result<(), JsValue> {
     user_icons.insert(Triangle);
     user_icons.insert(Square);
     user_icons.insert(Oblong);
-    user_icons.insert(PolyRectangle);
     user_icons.insert(Polygon);
 
     let set = DataSet::<E>::new();
@@ -368,6 +368,7 @@ fn init_window<E: Drawable>(av: RefAV<E>) -> Result<(), JsValue> {
 }
 fn init_icons<E: Drawable>(av: RefAV<E>) -> Result<(), JsValue> {
     let avb = av.borrow_mut();
+
     for icon in avb.user_icons.iter() {
         let element_to_set = icon.get_element();
         set_callback(
@@ -598,34 +599,31 @@ fn update<E: Drawable>(av: RefAV<E>, user_action: UserAction) -> Result<(), MyEr
             }
             _ => {}
         },
-        Icons::Disc
-        | Icons::Triangle
-        | Icons::Square
-        | Icons::Oblong
-        | Icons::PolyRectangle
-        | Icons::Polygon => match user_action {
-            UserAction::ClickDown(button) => {
-                if button == MouseButton::Left {
-                    if let Some(e) = avb.element_on_creation.as_mut() {
-                        e.save_vertices_positions();
-                        let e_cloned = e.clone();
-                        avb.dataset.push_element(e_cloned);
-                    }
-                } else {
-                    if button == MouseButton::Right {
-                        // Right click to cancel the creation
-                        avb.element_on_creation = None;
-                        avb.go_to_arrow_tool();
+        Icons::Disc | Icons::Triangle | Icons::Square | Icons::Oblong | Icons::Polygon => {
+            match user_action {
+                UserAction::ClickDown(button) => {
+                    if button == MouseButton::Left {
+                        if let Some(e) = avb.element_on_creation.as_mut() {
+                            e.save_vertices_positions();
+                            let e_cloned = e.clone();
+                            avb.dataset.push_element(e_cloned);
+                        }
+                    } else {
+                        if button == MouseButton::Right {
+                            // Right click to cancel the creation
+                            avb.element_on_creation = None;
+                            avb.go_to_arrow_tool();
+                        }
                     }
                 }
-            }
-            UserAction::Move(_, btn_level) => {
-                if btn_level == ButtonLevel::Up {
-                    avb.move_element_on_creation();
+                UserAction::Move(_, btn_level) => {
+                    if btn_level == ButtonLevel::Up {
+                        avb.move_element_on_creation();
+                    }
                 }
+                _ => {}
             }
-            _ => {}
-        },
+        }
     }
     Ok(())
 }
@@ -926,22 +924,6 @@ fn on_icon_click<E: Drawable>(av: RefAV<E>, event: Event) {
                                 avb.element_on_creation = Some(sh);
                             }
                         }
-                        Icons::PolyRectangle => {
-                            let sh = E::new(
-                                ClosedShapeType::PolyRectangle,
-                                &[
-                                    Vec2::ZERO,
-                                    Vec2::new(100., 0.),
-                                    Vec2::new(100., 100.),
-                                    Vec2::new(50., 100.),
-                                    Vec2::new(50., 150.),
-                                    Vec2::new(0., 150.),
-                                ],
-                            );
-                            if let Some(sh) = sh {
-                                avb.element_on_creation = Some(sh);
-                            }
-                        }
                         Icons::Polygon => {
                             let sh = E::new(
                                 ClosedShapeType::Polygon,
@@ -1069,7 +1051,7 @@ fn render_drawing<E: Drawable>(av: RefAV<E>) {
         // Dimensions
         use ClosedShapeType::*;
         match e.get_shape_type() {
-            Polygon | PolyRectangle | Triangle => {
+            Polygon | Triangle => {
                 for (v1, v2) in e
                     .get_vertices()
                     .iter()

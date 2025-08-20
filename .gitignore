@@ -8,5 +8,6 @@
 # Ignore editor-specific files (optional)
 .idea/
 .vscode/
+dist/
 *.swp
 *.swo
