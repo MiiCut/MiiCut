@@ -6,10 +6,9 @@ use web_sys::{window, Document, Element, Event, EventTarget, HtmlElement};
 pub enum Icons {
     Arrow,
     Disc,
-    Triangle,
     Square,
     Oblong,
-    Polygon,
+    Poly,
 }
 impl Icons {
     pub fn id(&self) -> &'static str {
@@ -17,10 +16,9 @@ impl Icons {
         match self {
             Arrow => "icon-arrow",
             Disc => "icon-disc",
-            Triangle => "icon-triangle",
             Square => "icon-square",
             Oblong => "icon-oblong",
-            Polygon => "icon-polygon",
+            Poly => "icon-polygon",
         }
     }
     pub fn get_element(&self) -> Option<Element> {

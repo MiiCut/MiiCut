@@ -1,11 +1,11 @@
-use crate::shapes::drawable::Drawable;
+use crate::shape::ClosedShape;
 
-pub struct UndoRedo<E: Drawable> {
-    undo_stack: Vec<E>,
-    redo_stack: Vec<E>,
+pub struct UndoRedo {
+    undo_stack: Vec<ClosedShape>,
+    redo_stack: Vec<ClosedShape>,
 }
 
-impl<E: Drawable> UndoRedo<E> {
+impl UndoRedo {
     pub fn new() -> Self {
         Self {
             undo_stack: Vec::new(),
@@ -13,21 +13,21 @@ impl<E: Drawable> UndoRedo<E> {
         }
     }
 
-    pub fn undo(&mut self, nodes: &mut E) {
+    pub fn undo(&mut self, nodes: &mut ClosedShape) {
         if let Some(popped_nodes) = self.undo_stack.pop() {
             self.redo_stack.push(nodes.clone());
             *nodes = popped_nodes;
         }
     }
 
-    pub fn redo(&mut self, nodes: &mut E) {
+    pub fn redo(&mut self, nodes: &mut ClosedShape) {
         if let Some(popped_nodes) = self.redo_stack.pop() {
             self.undo_stack.push(nodes.clone());
             *nodes = popped_nodes;
         }
     }
 
-    pub fn push(&mut self, nodes: &mut E) {
+    pub fn push(&mut self, nodes: &mut ClosedShape) {
         self.undo_stack.push(nodes.clone());
         self.redo_stack.clear();
     }

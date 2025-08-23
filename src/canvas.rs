@@ -222,7 +222,7 @@ impl GridRules {
             BezPath::from_vec(v),
             Pattern::Rules,
             Colors {
-                color: Color::Rules,
+                stroke_color: Color::Rules,
                 fill_color: Color::Transparent,
             },
             texts,
@@ -262,7 +262,7 @@ impl GridRules {
             BezPath::from_vec(v),
             Pattern::GridPrimary,
             Colors {
-                color: Color::GridPrimary,
+                stroke_color: Color::GridPrimary,
                 fill_color: Color::Transparent,
             },
             vec![],
@@ -300,7 +300,7 @@ impl GridRules {
             BezPath::from_vec(v),
             Pattern::GridSecondary,
             Colors {
-                color: Color::GridSecondary,
+                stroke_color: Color::GridSecondary,
                 fill_color: Color::Transparent,
             },
             vec![],
@@ -336,15 +336,6 @@ impl Canvases {
         c_main: HtmlCanvasElement,
         drawing_size: Size,
     ) -> Result<Canvases, JsValue> {
-        // let document = window.document().expect("should have a document on window");
-
-        // let document_element = document
-        //     .document_element()
-        //     .ok_or("should have a document element")?;
-        // let css_styles = window
-        //     .get_computed_style(&document_element)
-        //     .unwrap()
-        //     .unwrap();
         let c_back_ctx = c_back
             .get_context("2d")
             .unwrap()
@@ -404,19 +395,40 @@ impl Canvases {
             self.drawing_offset,
             self.drawing_scale,
         );
-        self.draw_path(&canvas_kind, &path, pattern, colors, texts);
+        self.draw_path(
+            &canvas_kind,
+            &path,
+            pattern,
+            colors.fill_color,
+            colors.stroke_color,
+            texts,
+        );
 
         // Primary grid
         let (canvas_kind, path, pattern, colors, texts) = self
             .grid_rules
             .draw_grid_primary(self.get_drawing_size(), self.get_grid_size());
-        self.draw_path(&canvas_kind, &path, pattern, colors, texts);
+        self.draw_path(
+            &canvas_kind,
+            &path,
+            pattern,
+            colors.fill_color,
+            colors.stroke_color,
+            texts,
+        );
 
         // Secondary grid
         let (canvas_kind, path, pattern, colors, texts) = self
             .grid_rules
             .draw_grid_secondary(self.get_drawing_size(), self.get_grid_size());
-        self.draw_path(&canvas_kind, &path, pattern, colors, texts);
+        self.draw_path(
+            &canvas_kind,
+            &path,
+            pattern,
+            colors.fill_color,
+            colors.stroke_color,
+            texts,
+        );
     }
 
     pub fn clear_main_canvas(&mut self) {
@@ -439,10 +451,8 @@ impl Canvases {
             &CanvasKind::Grid,
             &helper_point_path(origin, 5.),
             Pattern::Rules,
-            Colors {
-                color: Color::Rules,
-                fill_color: Color::Transparent,
-            },
+            Color::Rules,
+            Color::Transparent,
             vec![],
         );
     }
@@ -504,7 +514,8 @@ impl Canvases {
         canvas_kind: &CanvasKind,
         path: &BezPath,
         pattern: Pattern,
-        colors: Colors,
+        fill_color: Color,
+        stroke_color: Color,
         texts: Vec<CanvasText>,
     ) {
         let ctx: &CanvasRenderingContext2d = self.get_context(&canvas_kind);
@@ -515,8 +526,8 @@ impl Canvases {
         ctx.set_line_dash(&stroke_style).unwrap();
         ctx.set_line_width(stroke_width);
 
-        ctx.set_fill_style_str(&colors.fill_color.get());
-        ctx.set_stroke_style_str(&colors.color.get());
+        ctx.set_fill_style_str(&fill_color.get());
+        ctx.set_stroke_style_str(&stroke_color.get());
 
         ctx.begin_path();
         for cst in path.iter() {
@@ -557,7 +568,7 @@ impl Canvases {
     pub fn draw_closed_path(
         &self,
         canvas_kind: &CanvasKind,
-        paths: Vec<BezPath>,
+        paths: &Vec<BezPath>,
         pattern: Pattern,
         color: Color,
         fill_color: Color,
@@ -622,7 +633,7 @@ impl Canvases {
         ctx.set_line_dash(&stroke_style).unwrap();
         ctx.set_line_width(stroke_width);
 
-        let color = Color::Red30Opacity.get();
+        let color = Color::Red30.get();
         ctx.set_fill_style_str(&color);
         ctx.set_stroke_style_str(&color);
 
@@ -732,7 +743,7 @@ impl Canvases {
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Colors {
-    pub color: Color,
+    pub stroke_color: Color,
     pub fill_color: Color,
 }
 
@@ -745,23 +756,23 @@ pub enum Color {
     Rules,
     OnCreation,
 
-    White40Opacity,
+    White40,
 
-    White80Opacity,
-    GreenA,
+    White80,
+    Green40,
 
-    Red30Opacity,
+    Red30,
     Gray,
     White,
-    Purple20Opacity,
-    Purple55Opacity,
-    Pink30Opacity,
-    Red60Opacity,
+    Purple20,
+    Purple55,
+    Pink30,
+    Red60,
     Text,
-    Gray20Opacity,
-    Gray95Opacity,
-    Olive60Opacity,
-    Black65Opacity,
+    Gray20,
+    Gray95,
+    Olive60,
+    Black65,
     Black,
     Red,
 }
@@ -775,21 +786,21 @@ impl Color {
             GridSecondary => "rgba(224,224,224,1)",
             Rules => "hsl(350, 68.90%, 52.20%)",
             OnCreation => "rgba(0,119,255,1)",
-            White40Opacity => "rgba(255,255,255,0.4)",
-            White80Opacity => "rgba(240,240,240,0.8)",
-            GreenA => "rgba(128,191,36,1)",
-            Red60Opacity => "rgba(255,0,0,0.55)",
+            White40 => "rgba(255,255,255,0.4)",
+            White80 => "rgba(240,240,240,0.8)",
+            Green40 => "rgba(128,191,36,0.4)",
+            Red60 => "rgba(255,0,0,0.55)",
             Gray => "rgba(107,114,128,1)",
             White => "rgba(255,255,255,1)",
-            Purple20Opacity => "rgba(128,0,128,0.20)",
-            Purple55Opacity => "rgba(128,0,128,0.55)",
-            Pink30Opacity => "rgba(255,192,203,0.3)",
-            Red30Opacity => "rgba(255,0,0,0.3)",
+            Purple20 => "rgba(128,0,128,0.20)",
+            Purple55 => "rgba(128,0,128,0.55)",
+            Pink30 => "rgba(255,192,203,0.3)",
+            Red30 => "rgba(255,0,0,0.3)",
             Text => "rgba(128,128,0,1)",
-            Gray20Opacity => "rgba(128,128,128,0.20)",
-            Gray95Opacity => "rgba(210, 209, 209, 0.95)",
-            Olive60Opacity => "rgba(128,128,0,0.6)",
-            Black65Opacity => "rgba(0,0,0,0.65)",
+            Gray20 => "rgba(128,128,128,0.20)",
+            Gray95 => "rgba(210, 209, 209, 0.95)",
+            Olive60 => "rgba(128,128,0,0.6)",
+            Black65 => "rgba(0,0,0,0.65)",
             Black => "rgba(0,0,0,1)",
             Red => "rgba(255,0,0,1)",
         }
@@ -825,7 +836,7 @@ impl Pattern {
             Rules => (pattern_solid, 1., false),
             OnCreation => (pattern_dashed, 1., true),
             Point => (pattern_solid, 1., true),
-            Composed(filled) => (pattern_solid, 3., *filled),
+            Composed(filled) => (pattern_solid, 5., *filled),
             Basic => (pattern_dashed, 1., false),
             Helper => (pattern_dashed, 1., false),
             Text => (pattern_solid, 1., false),

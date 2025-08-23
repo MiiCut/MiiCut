@@ -176,6 +176,7 @@ impl Minimum {
 
 #[derive(Debug, Clone)]
 pub struct Value<T: Copy + Clone + Debug> {
+    pub rounded: Option<u32>,
     pub saved: T,
     pub last: T,
     pub curr: T,
@@ -184,6 +185,7 @@ pub struct Value<T: Copy + Clone + Debug> {
 impl<T: Copy + Clone + Debug + AddAssign + Add<Output = T>> Value<T> {
     pub fn new(value: T) -> Self {
         Self {
+            rounded: None,
             saved: value,
             last: value,
             curr: value,

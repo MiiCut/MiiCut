@@ -3,13 +3,16 @@ macro_rules! log {
         web_sys::console::log_1(&format!( $( $t )* ).into())
     }
 }
-
 use crate::types::{EUId, SegBundle, Snap};
 use approx::*;
-use geo::{LineString, Polygon};
+use geo::algorithm::orient::Orient;
+use geo::orient::Direction;
+use geo::{LineString, MultiPolygon, Polygon};
+
 use kurbo::{
     flatten, Arc, BezPath, Line, ParamCurveNearest, PathEl, Point, RoundedRectRadii, Size, Vec2,
 };
+
 use std::f64::consts::PI;
 use std::{
     error::Error,
@@ -1154,76 +1157,83 @@ pub fn get_middle_from_start_end_positions(start: Vec2, end: Vec2, width: f64) -
 }
 
 pub fn bez_path_to_geo_polygon(bez_path: &BezPath) -> Polygon<f64> {
+    let mut bez_path_flat = BezPath::new();
+    flatten(bez_path, 0.15, |seg| bez_path_flat.push(seg));
+
     let mut points = Vec::new();
-    for element in bez_path.elements() {
+    let mut current_path_started = false;
+
+    for element in bez_path_flat.elements() {
         match element {
-            PathEl::MoveTo(p) | PathEl::LineTo(p) => points.push((p.x, p.y)),
+            PathEl::MoveTo(p) => {
+                if current_path_started {
+                    // Ignore new subpaths
+                    break;
+                }
+                points.push((p.x, p.y));
+                current_path_started = true;
+            }
+            PathEl::LineTo(p) => {
+                if current_path_started {
+                    points.push((p.x, p.y));
+                }
+            }
             PathEl::ClosePath => {
-                // Le polygone doit être fermé
-                if points.first() != points.last() {
+                if !points.is_empty() && points.first() != points.last() {
                     points.push(points[0]);
                 }
             }
-            _ => log!("Error: Non-linear path elements found."),
+            _ => {} // Should not happen after flatten()
         }
     }
 
     if points.len() < 3 {
         Polygon::new(LineString::new(vec![]), vec![])
     } else {
-        Polygon::new(points.into(), vec![])
+        Polygon::new(points.into(), vec![]).orient(Direction::Default)
     }
 }
-pub fn geo_polygon_to_bez_path(polygon: &Polygon<f64>) -> Vec<BezPath> {
-    let mut vec_bez_path = Vec::new();
 
-    // Convert exterior ring
-    if let Some(exterior_path) = ring_to_bez_path(polygon.exterior()) {
-        vec_bez_path.push(exterior_path);
-    }
-    // Convert interior rings (holes)
-    polygon.interiors().iter().for_each(|interior| {
-        if let Some(interior_path) = ring_to_bez_path(interior) {
-            vec_bez_path.push(interior_path);
+pub fn geo_multipolygon_to_bez_paths(multi: &MultiPolygon<f64>) -> Vec<BezPath> {
+    let mut paths = Vec::new();
+    for poly in multi.iter() {
+        // exterior
+        if let Some(p) = ring_to_bez_path(poly.exterior()) {
+            paths.push(p);
         }
-    });
-
-    vec_bez_path
-}
-
-pub fn calc_segs(bez_path: BezPath) -> BezPath {
-    let mut bez_path_flat = BezPath::new();
-    flatten(bez_path, 0.15, |s| bez_path_flat.push(s));
-    bez_path_flat
-}
-
-pub fn calc_polygon(bez_path_flat: &BezPath) -> Polygon<f64> {
-    bez_path_to_geo_polygon(bez_path_flat)
+        // interiors (holes)
+        for inner in poly.interiors() {
+            if let Some(p) = ring_to_bez_path(inner) {
+                paths.push(p);
+            }
+        }
+    }
+    paths
 }
 
 // Helper function to convert a ring (either exterior or interior) to a bezier path
 pub fn ring_to_bez_path(ring: &LineString<f64>) -> Option<BezPath> {
-    let points: Vec<_> = ring
-        .coords()
-        .map(|coord| kurbo::Point::new(coord.x, coord.y))
-        .collect();
-    if points.len() < 2 {
-        return None; // Skip invalid rings
+    let pts: Vec<_> = ring.coords().map(|c| kurbo::Point::new(c.x, c.y)).collect();
+    if pts.len() < 2 {
+        return None;
     }
 
-    let mut bez_path = BezPath::new();
-    bez_path.push(PathEl::MoveTo(points[0]));
-    points
-        .iter()
-        .skip(1)
-        .for_each(|&point| bez_path.push(PathEl::LineTo(point)));
+    let is_closed = pts.first() == pts.last();
+    let take_len = if is_closed && pts.len() > 1 {
+        pts.len() - 1
+    } else {
+        pts.len()
+    };
 
-    // Close the path if it's a closed ring
-    if points.first() == points.last() {
-        bez_path.push(PathEl::ClosePath);
+    let mut path = BezPath::new();
+    path.push(PathEl::MoveTo(pts[0]));
+    for &p in &pts[1..take_len] {
+        path.push(PathEl::LineTo(p));
     }
-
-    Some(bez_path)
+    if is_closed {
+        path.push(PathEl::ClosePath);
+    }
+    Some(path)
 }
 
 // pub fn is_near_line(point: Vec2, angle: f64, cursor: Vec2, precision: f64) -> bool {

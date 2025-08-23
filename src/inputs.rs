@@ -7,9 +7,9 @@ use strum_macros::{Display, EnumString};
 use web_sys::MouseEvent;
 
 pub enum UserAction {
-    ClickDown(MouseButton),
+    ClickDown(MouseButton, i32),
     Move(MouseButton, ButtonLevel),
-    ClickUp(MouseButton),
+    ClickUp(MouseButton, i32),
 }
 #[derive(Clone, Debug)]
 pub struct UserUI {
@@ -53,7 +53,7 @@ impl UserUI {
             moving: false,
         }
     }
-    pub fn update(
+    pub fn update_ui(
         &mut self,
         canvas_offset_x: u32,
         canvas_offset_y: u32,
@@ -83,24 +83,24 @@ impl UserUI {
             .set((self.draw_pos / self.snap.linear()).round() * self.snap.linear());
 
         match sys_mouse {
-            SystemMouse::Down => {
+            SystemMouse::Down(clicks) => {
                 self.canvas_pos_ms_dwn = self.canvas_pos;
                 self.draw_pos_down = self.draw_pos;
                 self.button_level = ButtonLevel::Down;
                 self.moving = false;
                 self.pointer.save();
-                UserAction::ClickDown(self.mouse_button)
+                UserAction::ClickDown(self.mouse_button, clicks)
             }
             SystemMouse::Move => {
                 self.moving = true;
                 UserAction::Move(self.mouse_button, self.button_level)
             }
-            SystemMouse::Up => {
+            SystemMouse::Up(clicks) => {
                 self.canvas_pos_ms_up = self.canvas_pos;
                 self.draw_pos_up = self.draw_pos;
                 self.button_level = ButtonLevel::Up;
                 self.moving = false;
-                UserAction::ClickUp(self.mouse_button)
+                UserAction::ClickUp(self.mouse_button, clicks)
             }
         }
     }
@@ -156,9 +156,9 @@ pub struct KeysStates {
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SystemMouse {
-    Down,
+    Down(i32),
     Move,
-    Up,
+    Up(i32),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]

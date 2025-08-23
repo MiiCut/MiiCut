@@ -36,59 +36,55 @@ pub fn line_path(pos1: Vec2, pos2: Vec2) -> BezPath {
     ])
 }
 
-pub fn get_shapes_colors(selected: bool, highlighted: bool) -> Colors {
+pub fn get_stroke_color(selected: bool, highlighted: bool) -> Color {
     match (selected, highlighted) {
-        (false, false) => Colors {
-            color: Color::Black,
-            fill_color: Color::Gray95Opacity,
-        },
-        (false, true) => Colors {
-            color: Color::Black,
-            fill_color: Color::Pink30Opacity,
-        },
-        (true, false) => Colors {
-            color: Color::Black,
-            fill_color: Color::Red30Opacity,
-        },
-        (true, true) => Colors {
-            color: Color::Black,
-            fill_color: Color::Red60Opacity,
-        },
+        (false, false) => Color::Gray,
+        (false, true) => Color::Green40,
+        (true, false) => Color::Red,
+        (true, true) => Color::Red,
+    }
+}
+pub fn get_fill_color(selected: bool, highlighted: bool) -> Color {
+    match (selected, highlighted) {
+        (false, false) => Color::Transparent,
+        (false, true) => Color::Green40,
+        (true, false) => Color::Red30,
+        (true, true) => Color::Red30,
     }
 }
 
 pub fn get_vertices_colors(selected: bool, highlighted: bool) -> Colors {
     match (selected, highlighted) {
         (false, false) => Colors {
-            color: Color::Black,
-            fill_color: Color::Gray95Opacity,
+            stroke_color: Color::Black,
+            fill_color: Color::Gray95,
         },
         (false, true) => Colors {
-            color: Color::Black,
-            fill_color: Color::GreenA,
+            stroke_color: Color::Black,
+            fill_color: Color::Green40,
         },
         (true, false) => Colors {
-            color: Color::Black,
-            fill_color: Color::Red30Opacity,
+            stroke_color: Color::Black,
+            fill_color: Color::Red30,
         },
         (true, true) => Colors {
-            color: Color::Black,
-            fill_color: Color::Red60Opacity,
+            stroke_color: Color::Black,
+            fill_color: Color::Red60,
         },
     }
 }
 
 pub fn get_dimension_colors() -> Colors {
     Colors {
-        color: Color::Gray20Opacity,
+        stroke_color: Color::Gray20,
         fill_color: Color::Gray,
     }
 }
 
 pub fn get_text_colors() -> Colors {
     Colors {
-        color: Color::Gray,
-        fill_color: Color::Olive60Opacity,
+        stroke_color: Color::Gray,
+        fill_color: Color::Olive60,
     }
 }
 

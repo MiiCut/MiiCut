@@ -5,8 +5,9 @@
 //     }
 // }
 use crate::{
+    dom::Icons,
     inputs::UserUI,
-    math::{snap_angle, snap_val, snap_vertex, EPSILON},
+    math::{bez_path_to_geo_polygon, snap_angle, snap_val, snap_vertex, EPSILON},
     types::{EUId, SegBundle, VUId, Value, VecRing},
 };
 use geo::{LineString, Polygon};
@@ -20,66 +21,45 @@ use std::{
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct ClosedShapes {
-    shape_type: ClosedShapeType,
+pub struct ClosedShape {
+    shape_type: Icons,
     operation: Operation,
     vertices: VecRing<VUId, Value<Vec2>>,
 
     bezpath: BezPath,
     polygon: Polygon<f64>,
 }
-impl Clone for ClosedShapes {
-    fn clone(&self) -> Self {
-        let vertices: Vec<(VUId, Value<Vec2>)> = self
-            .vertices
-            .iter()
-            .map(|(_, value)| (VUId::new(), value.clone()))
-            .collect::<Vec<_>>();
-        ClosedShapes {
-            shape_type: self.shape_type,
-            operation: self.operation,
-            vertices: VecRing::from_slice(&vertices[..]).unwrap(),
-            bezpath: self.bezpath.clone(),
-            polygon: self.polygon.clone(),
-        }
-    }
-}
-
-impl Drawable for ClosedShapes {
+impl ClosedShape {
     const TOLERANCE: f64 = 0.01;
+    const GRAB_RADIUS: f64 = 5.0;
 
-    fn op_next(&mut self) {
+    pub fn op_next(&mut self) {
         self.operation.next();
     }
-    fn op_union(&mut self) {
+    pub fn op_union(&mut self) {
         self.operation.union();
     }
-    fn op_force_union(&mut self) {
-        self.operation.force_union();
-    }
-    fn op_difference(&mut self) {
+    pub fn op_difference(&mut self) {
         self.operation.difference();
     }
 
-    fn new(shape_type: ClosedShapeType, vertices: &[Vec2]) -> Option<Self> {
+    pub fn new(shape_type: Icons, vertices: &[Vec2]) -> Option<Self> {
         let mut vertices: Vec<Vec2> = vertices.iter().cloned().collect();
         if vertices.is_empty() {
             return None;
         }
         // Sanity check
         match shape_type {
-            ClosedShapeType::Disc => {
-                if vertices.len() != 2 {
+            Icons::Arrow => {
+                return None;
+            }
+            Icons::Disc => {
+                if vertices.len() != 2 || vertices[0] == vertices[1] {
                     return None;
                 }
             }
-            ClosedShapeType::Triangle => {
-                if vertices.len() != 3 {
-                    return None;
-                }
-            }
-            ClosedShapeType::Square => {
-                if vertices.len() != 2 {
+            Icons::Square => {
+                if vertices.len() != 2 || vertices[0] == vertices[1] {
                     return None;
                 } else {
                     let bl = vertices[0].clone();
@@ -89,13 +69,16 @@ impl Drawable for ClosedShapes {
                     vertices = vec![bl, tl, tr, br];
                 }
             }
-            ClosedShapeType::Oblong => {
-                if vertices.len() != 3 {
+            Icons::Oblong => {
+                if vertices.len() != 2 || vertices[0] == vertices[1] {
                     return None;
                 }
+                let m = (vertices[0] + vertices[1]) * 0.5;
+                let dir = (vertices[1] - vertices[0]).normalize();
+                let side = m - Vec2::new(dir.y, -dir.x) * 20.;
+                vertices = vec![vertices[0], vertices[1], side];
             }
-
-            ClosedShapeType::Polygon => {
+            Icons::Poly => {
                 if vertices.len() < 3 {
                     return None;
                 }
@@ -107,7 +90,7 @@ impl Drawable for ClosedShapes {
             .collect::<Vec<_>>();
         let vertices = &vertices[..];
 
-        let mut shape = ClosedShapes {
+        let mut shape = ClosedShape {
             shape_type,
             operation: Operation::Union,
             vertices: VecRing::from_slice(vertices).unwrap(),
@@ -118,7 +101,7 @@ impl Drawable for ClosedShapes {
         Some(shape)
     }
 
-    fn get_vertex(&self, value_uid: &VUId) -> Option<&Value<Vec2>> {
+    pub fn get_vertex(&self, value_uid: &VUId) -> Option<&Value<Vec2>> {
         self.vertices.iter().find_map(
             |(uid, value)| {
                 if uid == value_uid {
@@ -129,7 +112,7 @@ impl Drawable for ClosedShapes {
             },
         )
     }
-    fn get_vertex_mut(&mut self, value_uid: &VUId) -> Option<&mut Value<Vec2>> {
+    pub fn get_vertex_mut(&mut self, value_uid: &VUId) -> Option<&mut Value<Vec2>> {
         self.vertices.iter_mut().find_map(
             |(uid, value)| {
                 if uid == value_uid {
@@ -140,22 +123,21 @@ impl Drawable for ClosedShapes {
             },
         )
     }
-    fn get_vertices(&self) -> &VecRing<VUId, Value<Vec2>> {
+    pub fn get_vertices(&self) -> &VecRing<VUId, Value<Vec2>> {
         &self.vertices
     }
-    fn get_vertices_mut(&mut self) -> &mut VecRing<VUId, Value<Vec2>> {
+    pub fn get_vertices_mut(&mut self) -> &mut VecRing<VUId, Value<Vec2>> {
         &mut self.vertices
     }
-    fn select_vertex(&mut self, user_ui: &UserUI) -> Option<VUId> {
-        for (idx, (uid, value)) in self.vertices.iter().enumerate() {
+    pub fn select_vertex(&mut self, user_ui: &UserUI) -> Option<VUId> {
+        for (_idx, (uid, value)) in self.vertices.iter().enumerate() {
             if (value.curr - user_ui.draw_pos).hypot() < Self::GRAB_RADIUS {
-                log!("Vertex idx {}", idx);
                 return Some(*uid);
             }
         }
         return None;
     }
-    fn highlight_vertex(&mut self, user_ui: &UserUI) -> Option<VUId> {
+    pub fn highlight_vertex(&mut self, user_ui: &UserUI) -> Option<VUId> {
         for (uid, value) in self.vertices.iter() {
             if (value.curr - user_ui.draw_pos).hypot() < Self::GRAB_RADIUS {
                 return Some(*uid);
@@ -163,12 +145,12 @@ impl Drawable for ClosedShapes {
         }
         return None;
     }
-    fn move_vertex(&mut self, value_uid: VUId, user_ui: &UserUI) -> bool {
+    pub fn move_vertex(&mut self, value_uid: VUId, user_ui: &UserUI) -> bool {
         let snap = user_ui.snap;
         let mut delta = user_ui.pointer.curr - user_ui.pointer.saved;
         delta = (delta / snap.linear()).round() * snap.linear();
         match self.shape_type {
-            ClosedShapeType::Disc => {
+            Icons::Disc => {
                 if self.vertices.len() != 2 {
                     return false;
                 }
@@ -215,7 +197,7 @@ impl Drawable for ClosedShapes {
                     false
                 }
             }
-            ClosedShapeType::Oblong => {
+            Icons::Oblong => {
                 if self.vertices.len() != 3 {
                     return false;
                 }
@@ -224,17 +206,17 @@ impl Drawable for ClosedShapes {
                     None => return false,
                 };
                 // Save the side radius
-                let r_saved = ((self.vertices.val(0).saved + self.vertices.val(2).saved) / 2.
-                    - self.vertices.val(1).saved)
+                let r_saved = ((self.vertices.val(0).saved + self.vertices.val(1).saved) / 2.
+                    - self.vertices.val(2).saved)
                     .hypot();
 
                 // The side is moved, this doesn't change the pos of e1, e2
-                if idx == 1 {
+                if idx == 2 {
                     if let Some(seg) =
-                        SegBundle::new(self.vertices.val(0).saved, self.vertices.val(2).saved)
+                        SegBundle::new(self.vertices.val(0).saved, self.vertices.val(1).saved)
                     {
-                        let s_d = (self.vertices.val(1).saved - seg.m).dot(seg.n);
-                        self.vertices.val_mut(1).curr =
+                        let s_d = (self.vertices.val(2).saved - seg.m).dot(seg.n);
+                        self.vertices.val_mut(2).curr =
                             seg.m + seg.n * snap_val(s_d + delta.dot(seg.n), snap);
                     } else {
                         self.vertices.val_mut(0).add(delta);
@@ -246,7 +228,7 @@ impl Drawable for ClosedShapes {
                             snap_vertex(self.vertices.val(0).saved, snap);
                         self.vertices.val_mut(0).add(delta);
                         if let Some(seg) =
-                            SegBundle::new(self.vertices.val(0).curr, self.vertices.val(2).saved)
+                            SegBundle::new(self.vertices.val(0).curr, self.vertices.val(1).saved)
                         {
                             let r = snap_val(seg.len, snap);
                             let a = snap_angle(seg.a, snap);
@@ -257,34 +239,31 @@ impl Drawable for ClosedShapes {
                         }
                     } else {
                         // e2 is moved
-                        if idx == 2 {
-                            self.vertices.val_mut(2).saved =
-                                snap_vertex(self.vertices.val(2).saved, snap);
+                        self.vertices.val_mut(1).saved =
+                            snap_vertex(self.vertices.val(1).saved, snap);
+                        self.vertices.val_mut(1).add(delta);
+                        if let Some(seg) =
+                            SegBundle::new(self.vertices.val(0).saved, self.vertices.val(1).curr)
+                        {
+                            let r = snap_val(seg.len, snap);
+                            let a = snap_angle(seg.a, snap);
+                            self.vertices.val_mut(2).curr =
+                                snap_vertex(seg.s + Vec2::new(r * a.cos(), r * a.sin()), snap);
+                        } else {
                             self.vertices.val_mut(2).add(delta);
-                            if let Some(seg) = SegBundle::new(
-                                self.vertices.val(0).saved,
-                                self.vertices.val(2).curr,
-                            ) {
-                                let r = snap_val(seg.len, snap);
-                                let a = snap_angle(seg.a, snap);
-                                self.vertices.val_mut(2).curr =
-                                    snap_vertex(seg.s + Vec2::new(r * a.cos(), r * a.sin()), snap);
-                            } else {
-                                self.vertices.val_mut(2).add(delta);
-                            }
                         }
                     }
                     // Move the side
                     if let Some(seg) =
-                        SegBundle::new(self.vertices.val(0).curr, self.vertices.val(2).curr)
+                        SegBundle::new(self.vertices.val(0).curr, self.vertices.val(1).curr)
                     {
-                        self.vertices.val_mut(1).curr = seg.m + seg.n * r_saved;
+                        self.vertices.val_mut(2).curr = seg.m + seg.n * r_saved;
                     }
                 }
                 self.set_bezpath();
                 true
             }
-            ClosedShapeType::Square => {
+            Icons::Square => {
                 let len = self.vertices.len();
                 if len != 4 {
                     return false;
@@ -357,7 +336,7 @@ impl Drawable for ClosedShapes {
                 //     return false;
                 // }
             }
-            ClosedShapeType::Polygon | ClosedShapeType::Triangle => {
+            Icons::Poly => {
                 let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                     Some(i) => i as i64,
                     None => return false,
@@ -367,20 +346,24 @@ impl Drawable for ClosedShapes {
                 self.set_bezpath();
                 true
             }
+            Icons::Arrow => {
+                // Arrow is not a closed shape, so we don't move it
+                return false;
+            }
         }
     }
-    fn move_drawable(&mut self, delta: Vec2) {
+    pub fn move_shape(&mut self, delta: Vec2) {
         for (_, value) in self.vertices.iter_mut() {
             value.add(delta);
         }
         self.set_bezpath();
     }
-    fn save_vertices_positions(&mut self) {
+    pub fn save_vertices_positions(&mut self) {
         for (_, value) in self.vertices.iter_mut() {
             value.save();
         }
     }
-    fn get_binded_elements(&self) -> HashSet<EUId> {
+    pub fn get_binded_elements(&self) -> HashSet<EUId> {
         let mut binds = HashSet::new();
         for (_, v) in self.vertices.iter() {
             binds.extend(v.bind.iter().map(|(eid, _)| *eid));
@@ -388,31 +371,39 @@ impl Drawable for ClosedShapes {
         binds
     }
 
-    fn get_shape_type(&self) -> ClosedShapeType {
+    pub fn contains(&self, pos: Vec2) -> bool {
+        self.get_bezpath().contains(pos.to_point())
+    }
+    pub fn get_shape_type(&self) -> Icons {
         self.shape_type
     }
-    fn get_bezpath(&self) -> &BezPath {
+    pub fn get_operation(&self) -> Operation {
+        self.operation
+    }
+    pub fn get_polygon(&self) -> &Polygon<f64> {
+        &self.polygon
+    }
+    pub fn get_bezpath(&self) -> &BezPath {
         &self.bezpath
     }
-    fn set_bezpath(&mut self) {
+    pub fn set_bezpath(&mut self) {
         match self.shape_type {
-            ClosedShapeType::Disc => {
+            Icons::Disc => {
                 let center = self.vertices.val(0).curr;
                 let radius = (self.vertices.val(1).curr - center).hypot();
                 self.bezpath =
                     kurbo::Circle::new(center.to_point(), radius).to_path(Self::TOLERANCE);
             }
-            ClosedShapeType::Oblong => {
+            Icons::Oblong => {
                 let e1 = self.vertices.val(0).curr;
-                let side = self.vertices.val(1).curr;
-                let e2 = self.vertices.val(2).curr;
+                let e2 = self.vertices.val(1).curr;
+                let side = self.vertices.val(2).curr;
                 let m = (e1 + e2) * 0.5;
                 let radius = (side - m).hypot();
                 let angle = (e2 - e1).atan2();
                 let mut dir = e2 - e1;
 
                 let mut path = BezPath::new();
-
                 if dir.hypot() >= EPSILON {
                     dir = dir.normalize();
                     // Perpendicular unit vector
@@ -450,7 +441,7 @@ impl Drawable for ClosedShapes {
                 }
                 self.bezpath = path;
             }
-            ClosedShapeType::Square | ClosedShapeType::Polygon | ClosedShapeType::Triangle => {
+            Icons::Square | Icons::Poly => {
                 let mut path = BezPath::new();
                 for (i, (_, value)) in self.vertices.iter().enumerate() {
                     if i == 0 {
@@ -462,6 +453,28 @@ impl Drawable for ClosedShapes {
                 path.close_path();
                 self.bezpath = path;
             }
+            Icons::Arrow => return,
+        }
+        self.update_polygon();
+    }
+    fn update_polygon(&mut self) {
+        self.polygon = bez_path_to_geo_polygon(&self.bezpath);
+    }
+}
+
+impl Clone for ClosedShape {
+    fn clone(&self) -> Self {
+        let vertices: Vec<(VUId, Value<Vec2>)> = self
+            .vertices
+            .iter()
+            .map(|(_, value)| (VUId::new(), value.clone()))
+            .collect::<Vec<_>>();
+        ClosedShape {
+            shape_type: self.shape_type,
+            operation: self.operation,
+            vertices: VecRing::from_slice(&vertices[..]).unwrap(),
+            bezpath: self.bezpath.clone(),
+            polygon: self.polygon.clone(),
         }
     }
 }
@@ -469,22 +482,17 @@ impl Drawable for ClosedShapes {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Operation {
     Union,
-    UnionForced,
     Difference,
 }
 impl Operation {
     pub fn next(&mut self) {
         match self {
-            Operation::Union => *self = Operation::UnionForced,
-            Operation::UnionForced => *self = Operation::Difference,
+            Operation::Union => *self = Operation::Difference,
             Operation::Difference => *self = Operation::Union,
         }
     }
     pub fn union(&mut self) {
         *self = Operation::Union;
-    }
-    pub fn force_union(&mut self) {
-        *self = Operation::UnionForced;
     }
     pub fn difference(&mut self) {
         *self = Operation::Difference;
@@ -494,46 +502,7 @@ impl Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Operation::Union => write!(f, "Add"),
-            Operation::UnionForced => write!(f, "Add to top"),
             Operation::Difference => write!(f, "Substract"),
         }
     }
-}
-
-#[derive(Copy, Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ClosedShapeType {
-    Disc,
-    Triangle,
-    Square,
-    Oblong,
-    Polygon,
-}
-
-pub trait Drawable: Clone + 'static {
-    const TOLERANCE: f64;
-    const GRAB_RADIUS: f64 = 5.0;
-
-    fn op_next(&mut self);
-    fn op_union(&mut self);
-    fn op_force_union(&mut self);
-    fn op_difference(&mut self);
-
-    fn new(shape_type: ClosedShapeType, vertices: &[Vec2]) -> Option<Self>;
-    fn get_vertex(&self, value_uid: &VUId) -> Option<&Value<Vec2>>;
-    fn get_vertex_mut(&mut self, value_uid: &VUId) -> Option<&mut Value<Vec2>>;
-    fn get_vertices(&self) -> &VecRing<VUId, Value<Vec2>>;
-    fn get_vertices_mut(&mut self) -> &mut VecRing<VUId, Value<Vec2>>;
-    fn select_vertex(&mut self, user_ui: &UserUI) -> Option<VUId>;
-    fn highlight_vertex(&mut self, user_ui: &UserUI) -> Option<VUId>;
-    fn move_vertex(&mut self, value_uid: VUId, user_ui: &UserUI) -> bool;
-    fn move_drawable(&mut self, delta: Vec2);
-    fn save_vertices_positions(&mut self);
-    fn get_binded_elements(&self) -> HashSet<EUId>;
-
-    fn get_shape_type(&self) -> ClosedShapeType;
-    fn contains(&self, pos: Vec2) -> bool {
-        self.get_bezpath().contains(pos.to_point())
-    }
-    fn get_bezpath(&self) -> &BezPath;
-    fn set_bezpath(&mut self);
 }
