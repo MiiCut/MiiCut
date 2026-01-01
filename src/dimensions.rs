@@ -32,7 +32,7 @@ pub fn dim_hv(
         (true, true) => {
             // Horizontal dimension
             texts.push(CanvasText::new(
-                format!("H{:4.1}", (bdl.e.x - bdl.s.x).abs()),
+                format!("H{:4.0}", (bdl.e.x - bdl.s.x).abs()),
                 TextPos::PosCustom(bdl.m + bdl.n * txt_off * 0.5 * (dim_offset)),
                 CanvasTextConfig::new(
                     get_text_colors().stroke_color,
@@ -44,7 +44,7 @@ pub fn dim_hv(
             ));
             // Vertical dimension
             texts.push(CanvasText::new(
-                format!("V{:4.1}", (bdl.e.y - bdl.s.y).abs()),
+                format!("V{:4.0}", (bdl.e.y - bdl.s.y).abs()),
                 TextPos::PosCustom(bdl.m - bdl.n * txt_off.abs() * (txt_off * dim_offset)),
                 CanvasTextConfig::new(
                     get_text_colors().stroke_color,
@@ -58,7 +58,7 @@ pub fn dim_hv(
         (true, false) => {
             // Horizontal dimension
             texts.push(CanvasText::new(
-                format!("H{:4.1}", (bdl.e.x - bdl.s.x).abs()),
+                format!("H{:4.0}", (bdl.e.x - bdl.s.x).abs()),
                 TextPos::PosCustom(bdl.m + bdl.n * txt_off * 0.5 * (dim_offset)),
                 CanvasTextConfig::new(
                     get_text_colors().stroke_color,
@@ -72,7 +72,7 @@ pub fn dim_hv(
         (false, true) => {
             // Vertical dimension
             texts.push(CanvasText::new(
-                format!("V{:4.1}", (bdl.e.y - bdl.s.y).abs()),
+                format!("V{:4.0}", (bdl.e.y - bdl.s.y).abs()),
                 TextPos::PosCustom(bdl.m - bdl.n * txt_off.abs() * (txt_off * dim_offset)),
                 CanvasTextConfig::new(
                     get_text_colors().stroke_color,
@@ -87,7 +87,8 @@ pub fn dim_hv(
     }
 
     let mut path = BezPath::new();
-    line(&mut path, bdl.s, bdl.e);
+    path.move_to(bdl.s.to_point());
+    path.line_to(bdl.e.to_point());
 
     (path, Pattern::Dim, color, texts)
 }
@@ -122,7 +123,8 @@ pub fn dim_radius(
     );
 
     let mut path = BezPath::new();
-    line(&mut path, bdl.s, bdl.e);
+    path.move_to(bdl.s.to_point());
+    path.line_to(bdl.e.to_point());
 
     // Angle label only if not ~0, ~90, or ~180 degrees
     let deg = bdl.a * 180.0 / PI;
@@ -144,9 +146,4 @@ pub fn dim_radius(
         // If angle is not needed, return only the path and first text
         (path, Dim, color, vec![text1])
     }
-}
-
-fn line(path: &mut BezPath, pt1: Vec2, pt2: Vec2) {
-    path.move_to(pt1.to_point());
-    path.line_to(pt2.to_point());
 }

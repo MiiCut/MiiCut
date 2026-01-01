@@ -471,7 +471,7 @@ impl Canvases {
 
         ctx.rotate(text.config.angle)
             .expect("Failed to rotate canvas");
-        ctx.set_font(&format!("{}px Ubuntu Mono", text.config.font_size));
+        ctx.set_font(&format!("{}px Urbanist", text.config.font_size));
         ctx.set_global_alpha(text.config.opacity);
 
         ctx.set_stroke_style_str(text.config.color.get());
@@ -494,7 +494,7 @@ impl Canvases {
 
         ctx.rotate(text.config.angle)
             .expect("Failed to rotate canvas");
-        ctx.set_font(&format!("{}px Ubuntu Mono", text.config.font_size));
+        ctx.set_font(&format!("{}px Urbanist", text.config.font_size));
         ctx.set_global_alpha(text.config.opacity);
 
         ctx.set_stroke_style_str(text.config.color.get());

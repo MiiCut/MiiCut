@@ -126,16 +126,16 @@ impl DataSet {
         for (eid, element) in self.shapes.iter_mut() {
             if let Some(vid_sel) = element.select_vertex(userui) {
                 // Check if element was already in the vertices_selected set
-                if self.vertices_selected.contains(&(*eid, vid_sel)) {
-                    // Element is already selected, remove it
-                    self.vertices_selected.remove(&(*eid, vid_sel));
-                    self.last_vertex_selected = None;
-                    selection_changed = true;
-                } else {
-                    self.vertices_selected.insert((*eid, vid_sel));
-                    self.last_vertex_selected = Some((*eid, vid_sel));
-                    selection_changed = true;
-                }
+                // if self.vertices_selected.contains(&(*eid, vid_sel)) {
+                //     // Element is already selected, remove it
+                //     self.vertices_selected.remove(&(*eid, vid_sel));
+                //     self.last_vertex_selected = None;
+                //     selection_changed = true;
+                // } else {
+                self.vertices_selected.insert((*eid, vid_sel));
+                self.last_vertex_selected = Some((*eid, vid_sel));
+                selection_changed = true;
+                // }
             }
         }
         if !selection_changed {

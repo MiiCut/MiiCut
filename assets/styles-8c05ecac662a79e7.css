@@ -212,26 +212,26 @@ canvas {
   border: 2px solid #fff;
 }
 #icon-arrow {
-  background-image: url("../assets/icon-arrow.svg");
+  background-image: url("assets/icon-arrow.svg");
 }
 #icon-disc {
-  background-image: url("../assets/icon-disc.svg");
+  background-image: url("assets/icon-disc.svg");
 }
 
 #icon-square {
-  background-image: url("../assets/icon-square.svg");
+  background-image: url("assets/icon-square.svg");
 }
 #icon-oblong {
-  background-image: url("../assets/icon-oblong.svg");
+  background-image: url("assets/icon-oblong.svg");
 }
 #icon-polygon {
-  background-image: url("../assets/icon-polygon.svg");
+  background-image: url("assets/icon-polygon.svg");
 }
 #icon-construction-line {
-  background-image: url("../assets/icon-construction-line.svg");
+  background-image: url("assets/icon-construction-line.svg");
 }
 #icon-construction-circle {
-  background-image: url("../assets/icon-construction-circle.svg");
+  background-image: url("assets/icon-construction-circle.svg");
 }
 
 /* Tooltip & Context Menu */

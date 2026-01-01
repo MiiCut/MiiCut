@@ -7,7 +7,9 @@
 use crate::{
     dom::Icons,
     inputs::UserUI,
-    math::{bez_path_to_geo_polygon, snap_angle, snap_val, snap_vertex, EPSILON},
+    math::{
+        bez_path_to_geo_polygon, bezpath_from_apices, snap_angle, snap_val, snap_vertex, EPSILON,
+    },
     types::{EUId, SegBundle, VUId, Value, VecRing},
 };
 use geo::{LineString, Polygon};
@@ -24,7 +26,7 @@ use std::{
 pub struct ClosedShape {
     shape_type: Icons,
     operation: Operation,
-    vertices: VecRing<VUId, Value<Vec2>>,
+    vertices: VecRing<VUId>,
 
     bezpath: BezPath,
     polygon: Polygon<f64>,
@@ -101,7 +103,7 @@ impl ClosedShape {
         Some(shape)
     }
 
-    pub fn get_vertex(&self, value_uid: &VUId) -> Option<&Value<Vec2>> {
+    pub fn get_vertex(&self, value_uid: &VUId) -> Option<&Value> {
         self.vertices.iter().find_map(
             |(uid, value)| {
                 if uid == value_uid {
@@ -112,7 +114,7 @@ impl ClosedShape {
             },
         )
     }
-    pub fn get_vertex_mut(&mut self, value_uid: &VUId) -> Option<&mut Value<Vec2>> {
+    pub fn get_vertex_mut(&mut self, value_uid: &VUId) -> Option<&mut Value> {
         self.vertices.iter_mut().find_map(
             |(uid, value)| {
                 if uid == value_uid {
@@ -123,10 +125,10 @@ impl ClosedShape {
             },
         )
     }
-    pub fn get_vertices(&self) -> &VecRing<VUId, Value<Vec2>> {
+    pub fn get_vertices(&self) -> &VecRing<VUId> {
         &self.vertices
     }
-    pub fn get_vertices_mut(&mut self) -> &mut VecRing<VUId, Value<Vec2>> {
+    pub fn get_vertices_mut(&mut self) -> &mut VecRing<VUId> {
         &mut self.vertices
     }
     pub fn select_vertex(&mut self, user_ui: &UserUI) -> Option<VUId> {
@@ -442,16 +444,8 @@ impl ClosedShape {
                 self.bezpath = path;
             }
             Icons::Square | Icons::Poly => {
-                let mut path = BezPath::new();
-                for (i, (_, value)) in self.vertices.iter().enumerate() {
-                    if i == 0 {
-                        path.move_to(value.curr.to_point());
-                    } else {
-                        path.line_to(value.curr.to_point());
-                    }
-                }
-                path.close_path();
-                self.bezpath = path;
+                let apices = self.vertices.get_apices(); // -> Vec<ApexType>
+                self.bezpath = bezpath_from_apices(&apices);
             }
             Icons::Arrow => return,
         }
@@ -464,7 +458,7 @@ impl ClosedShape {
 
 impl Clone for ClosedShape {
     fn clone(&self) -> Self {
-        let vertices: Vec<(VUId, Value<Vec2>)> = self
+        let vertices: Vec<(VUId, Value)> = self
             .vertices
             .iter()
             .map(|(_, value)| (VUId::new(), value.clone()))

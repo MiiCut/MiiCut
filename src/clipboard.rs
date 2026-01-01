@@ -1,11 +1,9 @@
-use kurbo::Vec2;
-
 use crate::{shape::ClosedShape, types::Value};
 
 #[derive(Clone, Debug)]
 pub struct Clipboard {
-    item_copy: Option<(ClosedShape, Value<Vec2>)>,
-    item_paste: Option<(ClosedShape, Value<Vec2>)>,
+    item_copy: Option<(ClosedShape, Value)>,
+    item_paste: Option<(ClosedShape, Value)>,
 }
 impl Clipboard {
     pub fn new() -> Self {
@@ -15,18 +13,18 @@ impl Clipboard {
         }
     }
 
-    pub fn copy(&mut self, nodes: ClosedShape, pointer_copy: Value<Vec2>) {
+    pub fn copy(&mut self, nodes: ClosedShape, pointer_copy: Value) {
         self.item_copy = Some((nodes, pointer_copy));
         self.item_paste = None;
     }
 
-    pub fn paste(&mut self, pointer: Value<Vec2>) {
+    pub fn paste(&mut self, pointer: Value) {
         if let Some(item_copy) = &self.item_copy {
             self.item_paste = Some((item_copy.0.clone(), pointer));
         }
     }
 
-    pub fn move_paste(&mut self, pointer_paste: &mut Value<Vec2>) {
+    pub fn move_paste(&mut self, pointer_paste: &mut Value) {
         if let Some(item_paste) = self.item_paste.as_mut() {
             item_paste.1 = pointer_paste.clone();
         }

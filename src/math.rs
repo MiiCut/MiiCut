@@ -2178,21 +2178,6 @@ pub fn circle_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<(Vec2, f
     (radius.abs() > EPSILON).then(|| (center, radius))
 }
 
-/// NO CORRECTION NEEDED FOR Y AXIS INVERTED
-pub fn angle_between(v: Vec2, w: Vec2) -> Option<f64> {
-    let dot = v.dot(w);
-    let mag_v = v.hypot();
-    let mag_w = w.hypot();
-
-    if mag_v == 0.0 || mag_w == 0.0 {
-        // Cannot compute angle with a zero-length vector.
-        return None;
-    }
-    // Clamp the cosine value to the range [-1.0, 1.0] to avoid errors from floating point inaccuracies.
-    let cos_theta = (dot / (mag_v * mag_w)).clamp(-1.0, 1.0);
-    Some(cos_theta.acos() * v.cross(w).signum())
-}
-
 pub fn angle0_90(angle: f64) -> f64 {
     let mut angle = angle.rem_euclid(2.0 * PI);
     if angle > PI {
@@ -2478,4 +2463,188 @@ pub fn nearest_circle_point(center: Vec2, radius: f64, p: Vec2) -> Option<Vec2> 
 
     // The intersection point on the circumference.
     Some(center + unit_dir * radius)
+}
+
+pub fn get_dad(v: Vec2, apex: Vec2, w: Vec2) -> Option<(f64, f64, f64)> {
+    let v = v - apex;
+    let w = w - apex;
+    let dv = v.hypot();
+    let dw = w.hypot();
+
+    // Early out if any leg is ~zero length
+    if dv <= EPSILON || dw <= EPSILON {
+        return None;
+    }
+
+    Some((dv, f64::atan2(v.cross(w), v.dot(w)), dw))
+}
+
+pub fn fillet_at_apex(a: Vec2, b: Vec2, c: Vec2, r: f64) -> Option<(Vec2, Vec2, Vec2)> {
+    // vectors from apex
+    let ba = a - b;
+    let bc = c - b;
+
+    // lengths (reject degenerate)
+    let la2 = ba.x * ba.x + ba.y * ba.y;
+    let lc2 = bc.x * bc.x + bc.y * bc.y;
+    if la2 == 0.0 || lc2 == 0.0 || r <= 0.0 {
+        return None;
+    }
+    let la = la2.sqrt();
+    let lc = lc2.sqrt();
+
+    // unit directions from apex toward a and c
+    let u = ba / la;
+    let v = bc / lc;
+
+    // interior angle at apex (unsigned) using atan2 for robustness
+    let theta = f64::atan2(u.cross(v), u.dot(v)).abs(); // in (0, π]
+
+    // No fillet if angle is ~0 or ~π (colinear)
+    let half = 0.5 * theta;
+    let s_half = half.sin();
+    let t_half = half.tan();
+    if s_half <= EPSILON || t_half <= EPSILON {
+        return None;
+    }
+
+    // trim distance along each edge
+    let t = r / t_half; // r * cot(theta/2)
+    if t >= la || t >= lc {
+        // fillet would overshoot the segments
+        return None;
+    }
+
+    // arc endpoints on the edges
+    let s = b + u * t; // along BA
+    let e = b + v * t; // along BC
+
+    // center along the angle bisector
+    // bisector direction is normalized (u + v). If u ≈ -v (theta≈π), this is near zero (handled above).
+    let bis = u + v;
+    let bis_len = (bis.x * bis.x + bis.y * bis.y).sqrt();
+    if bis_len <= EPSILON {
+        return None;
+    }
+    let bis_dir = bis / bis_len;
+
+    let d = r / s_half; // distance from apex to center
+    let center = b + bis_dir * d;
+
+    Some((s, center, e))
+}
+
+#[derive(Copy, Debug, Clone)]
+pub enum ApexType {
+    Vertex { a: Vec2 },
+    Arc { s: Vec2, c: Vec2, e: Vec2 }, // c = arc center
+}
+
+fn to_point(v: Vec2) -> Point {
+    Point::new(v.x, v.y)
+}
+
+// helper: atan2(y, x)
+fn angle(p: Vec2) -> f64 {
+    p.y.atan2(p.x)
+}
+
+fn normalize_sweep(mut d: f64) -> f64 {
+    // bring to (-PI, PI]
+    while d <= -PI {
+        d += 2.0 * PI;
+    }
+    while d > PI {
+        d -= 2.0 * PI;
+    }
+    d
+}
+
+fn add_circular_arc(path: &mut BezPath, center: Vec2, from: Vec2, to: Vec2) {
+    // vectors relative to center
+    let p0 = from - center;
+    let p1 = to - center;
+
+    let r0 = (p0.x * p0.x + p0.y * p0.y).sqrt();
+    let r1 = (p1.x * p1.x + p1.y * p1.y).sqrt();
+    if r0 == 0.0 || r1 == 0.0 {
+        return;
+    }
+
+    // use average radius in case of tiny numeric mismatch
+    let r = 0.5 * (r0 + r1);
+
+    let a0 = angle(p0);
+    let a1 = angle(p1);
+    let sweep = normalize_sweep(a1 - a0); // signed, shortest arc
+
+    // Ensure path current point is at `from` (caller may already have moved there)
+    // path.line_to(KPoint::new(from.x, from.y)); // uncomment if needed
+
+    let arc = Arc {
+        center: Point::new(center.x, center.y),
+        radii: Vec2::new(r, r),
+        start_angle: a0,
+        sweep_angle: sweep,
+        x_rotation: 0.0,
+    };
+    arc.to_cubic_beziers(0.01, |p1, p2, p3| {
+        path.push(PathEl::CurveTo(p1, p2, p3));
+    });
+}
+
+pub fn bezpath_from_apices(apices: &[ApexType]) -> BezPath {
+    let start_of = |apex: &ApexType| -> Vec2 {
+        match *apex {
+            ApexType::Vertex { a } => a,
+            ApexType::Arc { s, .. } => s,
+        }
+    };
+
+    // Starting point = entry of apex 0
+    let mut path = BezPath::new();
+    let start = start_of(&apices[0]);
+    path.move_to(to_point(start));
+    let mut curr = start;
+
+    let n = apices.len();
+    for i in 0..n {
+        let this = &apices[i];
+        let next_entry = start_of(&apices[(i + 1) % n]);
+
+        match *this {
+            ApexType::Vertex { a } => {
+                // We should be at 'a'. If not (only possible at i==0 when previous was arc),
+                // first line to 'a'.
+                if curr != a {
+                    path.line_to(to_point(a));
+                    curr = a;
+                }
+                // Then line to next entry
+                if curr != next_entry {
+                    path.line_to(to_point(next_entry));
+                    curr = next_entry;
+                }
+            }
+            ApexType::Arc { s, c, e } => {
+                // Ensure we're at the arc start s
+                if curr != s {
+                    path.line_to(to_point(s));
+                    curr = s;
+                }
+                // Append the circular arc s -> e with center c
+                add_circular_arc(&mut path, c, s, e);
+                curr = e;
+
+                // Then line to the next entry if needed
+                if curr != next_entry {
+                    path.line_to(to_point(next_entry));
+                    curr = next_entry;
+                }
+            }
+        }
+    }
+
+    path.close_path();
+    path
 }

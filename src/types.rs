@@ -1,22 +1,19 @@
-use crate::math::EPSILON;
+use crate::math::{fillet_at_apex, ApexType, EPSILON};
 use kurbo::Vec2;
 use std::cmp::{max, min};
 use std::collections::HashSet;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::{
-    fmt::Debug,
-    ops::{Add, AddAssign},
-};
 
 #[derive(Debug, Clone)]
-pub struct VecRing<K, V> {
-    vec: Vec<(K, V)>,
+pub struct VecRing<K> {
+    vec: Vec<(K, Value)>,
 }
-impl<K: PartialEq + Clone + Debug, V: Clone> VecRing<K, V> {
-    pub fn from_slice(slice: &[(K, V)]) -> Option<Self> {
+impl<K: PartialEq + Clone + Debug> VecRing<K> {
+    pub fn from_slice(slice: &[(K, Value)]) -> Option<Self> {
         if slice.is_empty() {
             None
         } else {
@@ -34,7 +31,7 @@ impl<K: PartialEq + Clone + Debug, V: Clone> VecRing<K, V> {
         let min_dist = diff.min(n - diff);
         (min_dist == dist).then_some(())
     }
-    pub fn insert_one_between(&mut self, key1: &K, key2: &K, kv: (K, V)) -> Option<K> {
+    pub fn insert_one_between(&mut self, key1: &K, key2: &K, kv: (K, Value)) -> Option<K> {
         let n = self.vec.len();
         if n < 2 {
             return None;
@@ -62,8 +59,8 @@ impl<K: PartialEq + Clone + Debug, V: Clone> VecRing<K, V> {
         &mut self,
         key1: &K,
         key2: &K,
-        kv1: (K, V),
-        kv2: (K, V),
+        kv1: (K, Value),
+        kv2: (K, Value),
     ) -> Option<(K, K)> {
         let n = self.vec.len();
         if n < 2 {
@@ -111,42 +108,64 @@ impl<K: PartialEq + Clone + Debug, V: Clone> VecRing<K, V> {
         let i = idx.rem_euclid(len) as usize;
         &mut self.vec[i].0
     }
-    pub fn val(&self, idx: i64) -> &V {
+    pub fn val(&self, idx: i64) -> &Value {
         let len = self.vec.len() as i64;
         let i = idx.rem_euclid(len) as usize;
         &self.vec[i].1
     }
-    pub fn val_mut(&mut self, idx: i64) -> &mut V {
+    pub fn val_mut(&mut self, idx: i64) -> &mut Value {
         let len = self.vec.len() as i64;
         let i = idx.rem_euclid(len) as usize;
         &mut self.vec[i].1
     }
-    pub fn val_from_key(&self, key: K) -> Option<&V> {
+    pub fn val_from_key(&self, key: K) -> Option<&Value> {
         self.vec.iter().find_map(|(k, v)| (k == &key).then(|| v))
     }
-    pub fn val_mut_from_key(&mut self, key: K) -> Option<&mut V> {
+    pub fn val_mut_from_key(&mut self, key: K) -> Option<&mut Value> {
         self.vec
             .iter_mut()
             .find_map(|(k, v)| (k == &key).then(|| v))
     }
-    pub fn push(&mut self, e: (K, V)) {
+    pub fn push(&mut self, e: (K, Value)) {
         self.vec.push(e);
     }
-    pub fn replace_first(&mut self, e: (K, V)) {
+    pub fn replace_first(&mut self, e: (K, Value)) {
         self.vec[0] = e;
     }
-    pub fn last_mut(&mut self) -> &mut (K, V) {
+    pub fn last_mut(&mut self) -> &mut (K, Value) {
         let len1 = self.vec.len() - 1;
         &mut self.vec[len1]
     }
     pub fn len(&self) -> usize {
         self.vec.len()
     }
-    pub fn iter(&self) -> std::slice::Iter<'_, (K, V)> {
+    pub fn iter(&self) -> std::slice::Iter<'_, (K, Value)> {
         self.vec.iter()
     }
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, (K, V)> {
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, (K, Value)> {
         self.vec.iter_mut()
+    }
+    pub fn get_apices(&self) -> Vec<ApexType> {
+        let n = self.vec.len();
+        assert!(n >= 3);
+        let mut out = Vec::with_capacity(n);
+
+        for i in 0..n {
+            let im1 = if i == 0 { n - 1 } else { i - 1 };
+            let ip1 = if i + 1 == n { 0 } else { i + 1 };
+            let a = &self.vec[im1].1;
+            let b = &self.vec[i].1;
+            let c = &self.vec[ip1].1;
+
+            let apex = b
+                .rounded
+                .and_then(|r| fillet_at_apex(a.curr, b.curr, c.curr, r as f64))
+                .map(|(s, center, e)| ApexType::Arc { s, c: center, e })
+                .unwrap_or(ApexType::Vertex { a: b.curr });
+
+            out.push(apex);
+        }
+        out
     }
 }
 
@@ -175,17 +194,19 @@ impl Minimum {
 }
 
 #[derive(Debug, Clone)]
-pub struct Value<T: Copy + Clone + Debug> {
+pub struct Value {
     pub rounded: Option<u32>,
-    pub saved: T,
-    pub last: T,
-    pub curr: T,
+    pub last_rounded: Option<u32>,
+    pub saved: Vec2,
+    pub last: Vec2,
+    pub curr: Vec2,
     pub bind: HashSet<(EUId, VUId)>,
 }
-impl<T: Copy + Clone + Debug + AddAssign + Add<Output = T>> Value<T> {
-    pub fn new(value: T) -> Self {
+impl Value {
+    pub fn new(value: Vec2) -> Self {
         Self {
             rounded: None,
+            last_rounded: None,
             saved: value,
             last: value,
             curr: value,
@@ -195,11 +216,23 @@ impl<T: Copy + Clone + Debug + AddAssign + Add<Output = T>> Value<T> {
     pub fn save(&mut self) {
         self.saved = self.curr;
     }
-    pub fn add(&mut self, value: T) {
+    pub fn add(&mut self, value: Vec2) {
         self.curr = self.saved + value;
     }
-    pub fn set(&mut self, value: T) {
+    pub fn set(&mut self, value: Vec2) {
         self.curr = value;
+    }
+    pub fn change_apex_type(&mut self) {
+        if self.rounded.is_none() {
+            if self.last_rounded.is_none() {
+                self.rounded = Some(10);
+            } else {
+                self.rounded = self.last_rounded;
+            }
+        } else {
+            self.last_rounded = self.rounded;
+            self.rounded = None;
+        }
     }
 }
 
@@ -211,8 +244,8 @@ pub struct Snap {
 impl Snap {
     pub fn new() -> Self {
         Self {
-            linear: SnapValue::SnapMin,
-            angle: SnapValue::SnapMin,
+            linear: SnapValue::SnapMax,
+            angle: SnapValue::SnapMax,
         }
     }
     pub fn linear(&self) -> f64 {

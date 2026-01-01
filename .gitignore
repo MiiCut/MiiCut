@@ -1,8 +1,5 @@
-
-/index.html
-
-# Ignore other common Rust build artifacts
-/target/
+# Ignore common Rust build artifacts
+target/
 /**/*.wasm.d
 
 # Ignore editor-specific files (optional)

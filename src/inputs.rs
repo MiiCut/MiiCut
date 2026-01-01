@@ -13,7 +13,7 @@ pub enum UserAction {
 }
 #[derive(Clone, Debug)]
 pub struct UserUI {
-    pub pointer: Value<Vec2>,
+    pub pointer: Value,
     pub keys_states: KeysStates,
 
     pub snap: Snap,
@@ -35,7 +35,7 @@ pub struct UserUI {
 impl UserUI {
     pub fn new() -> Self {
         Self {
-            pointer: Value::<Vec2>::new(Vec2::ZERO),
+            pointer: Value::new(Vec2::ZERO),
             keys_states: KeysStates::default(),
             snap: Snap::new(),
             active: false,
@@ -127,6 +127,10 @@ pub enum Keys {
     ALower,
     #[strum(serialize = "A")]
     AUpper,
+    #[strum(serialize = "i")]
+    ILower,
+    #[strum(serialize = "I")]
+    IUpper,
     #[strum(serialize = "b")]
     BLower,
     #[strum(serialize = "c")]
@@ -145,6 +149,15 @@ pub enum Keys {
     SUpper,
     #[strum(serialize = "t")]
     TLower,
+    // Arrows
+    #[strum(serialize = "ArrowUp", serialize = "Up", serialize = "↑")]
+    ArrowUp,
+    #[strum(serialize = "ArrowDown", serialize = "Down", serialize = "↓")]
+    ArrowDown,
+    #[strum(serialize = "ArrowLeft", serialize = "Left", serialize = "←")]
+    ArrowLeft,
+    #[strum(serialize = "ArrowRight", serialize = "Right", serialize = "→")]
+    ArrowRight,
 }
 
 #[derive(Default, Copy, Clone, Debug, PartialEq)]
