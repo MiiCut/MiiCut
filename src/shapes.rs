@@ -4,9 +4,87 @@ use crate::math::{geo_multipolygon_to_bez_paths, snap_vertex};
 use crate::shape::{ClosedShape, Operation};
 use crate::types::{EUId, Snap, VUId, Value};
 use geo::algorithm::unary_union;
-use geo::{BooleanOps, MultiPolygon};
-use kurbo::BezPath;
+use geo::{BooleanOps, LineString, MultiPolygon};
+use kurbo::{BezPath, Vec2};
 use std::collections::{HashMap, HashSet};
+
+pub struct CutParams {
+    pub feed_xy: f64,               // mm/min
+    pub pierce_delay_s: f64,        // secondes (0.0 si none)
+    pub torch_on_m3: &'static str,  // "M3" ou "M3 Sxxx" selon contrôleur
+    pub torch_off_m5: &'static str, // "M5"
+}
+
+fn ring_to_points(ring: &LineString<f64>) -> Vec<(f64, f64)> {
+    let coords = ring.0.as_slice();
+    if coords.is_empty() {
+        return vec![];
+    }
+
+    let mut pts: Vec<(f64, f64)> = coords.iter().map(|c| (c.x, c.y)).collect();
+    if pts.len() >= 2 && pts.first() == pts.last() {
+        pts.pop();
+    }
+    pts
+}
+pub fn multipolygon_to_plasma_gcode(mp: &MultiPolygon<f64>, p: &CutParams) -> String {
+    let mut out = String::new();
+
+    // Header minimal (mm, absolu)
+    out.push_str("G21 ; mm\n");
+    out.push_str("G90 ; absolute\n");
+    out.push_str("G94 ; feed per minute\n");
+    out.push_str(p.torch_off_m5);
+    out.push('\n');
+
+    for poly in mp.0.iter() {
+        // 1) trous d'abord
+        for hole in poly.interiors() {
+            let pts = ring_to_points(hole);
+            if pts.len() >= 2 {
+                append_plasma_contour(&mut out, &pts, p);
+            }
+        }
+        // 2) extérieur ensuite
+        let ext = ring_to_points(poly.exterior());
+        if ext.len() >= 2 {
+            append_plasma_contour(&mut out, &ext, p);
+        }
+    }
+
+    // Footer
+    out.push_str(p.torch_off_m5);
+    out.push('\n');
+    out.push_str("M2\n");
+    out
+}
+fn append_plasma_contour(out: &mut String, pts: &[(f64, f64)], p: &CutParams) {
+    let (x0, y0) = pts[0];
+
+    // Torch OFF + déplacement rapide vers début contour
+    out.push_str(p.torch_off_m5);
+    out.push('\n');
+    out.push_str(&format!("G0 X{:.3} Y{:.3}\n", x0, y0));
+
+    // Torch ON + délai de perçage
+    out.push_str(p.torch_on_m3);
+    out.push('\n');
+    if p.pierce_delay_s > 0.0 {
+        out.push_str(&format!("G4 P{:.3}\n", p.pierce_delay_s));
+    }
+
+    // Coupe
+    out.push_str(&format!("G1 F{:.1}\n", p.feed_xy));
+    for &(x, y) in &pts[1..] {
+        out.push_str(&format!("G1 X{:.3} Y{:.3}\n", x, y));
+    }
+    // fermer
+    out.push_str(&format!("G1 X{:.3} Y{:.3}\n", x0, y0));
+
+    // Torch OFF (immédiat après contour)
+    out.push_str(p.torch_off_m5);
+    out.push('\n');
+}
 
 #[derive(Debug)]
 pub struct DataSet {
@@ -121,10 +199,10 @@ impl DataSet {
         false
     }
 
-    pub fn select_vertices(&mut self, userui: &UserUI) -> bool {
+    pub fn select_vertices(&mut self, draw_pos: Vec2) -> bool {
         let mut selection_changed = false;
         for (eid, element) in self.shapes.iter_mut() {
-            if let Some(vid_sel) = element.select_vertex(userui) {
+            if let Some(vid_sel) = element.select_vertex(draw_pos) {
                 // Check if element was already in the vertices_selected set
                 // if self.vertices_selected.contains(&(*eid, vid_sel)) {
                 //     // Element is already selected, remove it
@@ -185,11 +263,11 @@ impl DataSet {
         //     }
         // }
     }
-    pub fn highlight_vertices(&mut self, userui: &UserUI) -> bool {
+    pub fn highlight_vertices(&mut self, draw_pos: Vec2) -> bool {
         self.vertices_highlighted.clear();
         let mut highlight_changed = false;
         for (eid, element) in self.shapes.iter_mut() {
-            if let Some(vid_sel) = element.highlight_vertex(userui) {
+            if let Some(vid_sel) = element.highlight_vertex(draw_pos) {
                 self.vertices_highlighted.insert((*eid, vid_sel));
                 highlight_changed = true;
             }

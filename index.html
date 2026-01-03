@@ -1,77 +1,129 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>MiiCut</title>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MiiCut</title>
 
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Urbanist:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Urbanist:ital,wght@0,100..900;1,100..900&display=swap"
+      rel="stylesheet"
+    />
 
-  <link data-trunk rel="css" href="./static/styles.css"/>
-  <link data-trunk rel="copy-dir" href="./assets"/>
-  <link data-trunk rel="rust" />
-  <base data-trunk-public-url/>
-</head>
-<body>
-  <input type="file" id="file-input" style="display: none;" />
-  <div id="color-tailwind"></div>
-  
-  <!-- Top Menu -->
-  <div id="top-menu" class="top-menu">
-    <div id="menuTitle">
-      &nbsp;MiiCut 0.1.0
-    </div>
-    <div class="dropdown">
-      <button class="dropbtn">File</button>
-      <div class="dropdown-content">
-        <a href="#" id="load-option">Load SVG path</a>
-        <a href="#" id="save-option">Save drawing (TBD)</a>
+    <link data-trunk rel="css" href="static/styles.css" />
+    <link data-trunk rel="copy-dir" href="./assets" />
+    <link data-trunk rel="rust" />
+    <base data-trunk-public-url />
+  </head>
+  <body>
+    <input type="file" id="file-input" style="display: none" />
+    <div id="color-tailwind"></div>
+
+    <!-- Top Menu -->
+    <div id="top-menu" class="top-menu">
+      <div id="menuTitle">&nbsp;MiiCut 0.1.0</div>
+      <div class="dropdown">
+        <button class="dropbtn">File</button>
+        <div class="dropdown-content">
+          <a href="#" id="load-option">Load SVG path</a>
+          <a href="#" id="save-option">Save drawing (TBD)</a>
+        </div>
       </div>
     </div>
-  </div>
-  
-  <!-- Main container for panels and canvas -->
-  <div id="main-container">
-    <!-- Left Toolbar Panel -->
-    <div class="left-panel" id="left-panel">
-      <div class="icon-container">
-        <div id="icon-arrow" class="icon icon-selected" data-tooltip="Select element, move the canvas"></div>
-        <div class="icon-separator"></div>
-        <div id="icon-disc" class="icon" data-tooltip="Draw a disc"></div>
-        <div id="icon-square" class="icon" data-tooltip="Draw a square"></div>
-        <div id="icon-oblong" class="icon" data-tooltip="Draw a oblong shape"></div>
-        <div id="icon-polygon" class="icon" data-tooltip="Draw a polygon"></div>
-        <div class="icon-separator"></div>
-        <div id="icon-construction-line" class="icon" data-tooltip="Construction line"></div>
-        <div id="icon-construction-circle" class="icon" data-tooltip="Construction circle"></div>
+
+    <!-- Main container for panels and canvas -->
+    <div id="main-container">
+      <!-- Left Toolbar Panel -->
+      <div class="left-panel" id="left-panel">
+        <div id="draw-icons" class="icon-container">
+          <div
+            id="icon-arrow"
+            class="icon icon-selected"
+            data-tooltip="Select element, move the canvas"
+          ></div>
+          <div class="icon-separator"></div>
+          <div id="icon-disc" class="icon" data-tooltip="Draw a disc"></div>
+          <div id="icon-square" class="icon" data-tooltip="Draw a square"></div>
+          <div
+            id="icon-oblong"
+            class="icon"
+            data-tooltip="Draw a oblong shape"
+          ></div>
+          <div
+            id="icon-polygon"
+            class="icon"
+            data-tooltip="Draw a polygon"
+          ></div>
+          <div class="icon-separator"></div>
+          <div
+            id="icon-construction-line"
+            class="icon"
+            data-tooltip="Construction line"
+          ></div>
+          <div
+            id="icon-construction-circle"
+            class="icon"
+            data-tooltip="Construction circle"
+          ></div>
+        </div>
+        <div id="gcode-icons" class="icon-container"></div>
+        <!-- Tabs en bas du panneau gauche -->
+        <div id="view-tabs" class="left-tabs">
+          <button id="tab-draw" class="tab active">Draw</button>
+          <button id="tab-gcode" class="tab">G-code</button>
+        </div>
+      </div>
+
+      <!-- Zone centrale (tabs + vues) -->
+      <div id="workspace">
+        <div id="views-container">
+          <div id="view-draw" class="view active">
+            <div id="canvas-container">
+              <canvas id="backgroundCanvas"></canvas>
+              <canvas id="gridCanvas"></canvas>
+              <canvas id="mainCanvas"></canvas>
+              <div id="cm-shape" class="context-menu"></div>
+            </div>
+          </div>
+
+          <div id="view-gcode" class="view">
+            <div id="gcode-split">
+              <div id="gcode-left">
+                <div id="gcode-canvas-wrap">
+                  <canvas id="gcodeCanvas"></canvas>
+                </div>
+              </div>
+
+              <div id="gcode-splitter"></div>
+
+              <div id="gcode-right">
+                <div id="gcode-right-toolbar"></div>
+                <pre id="gcode-text"></pre>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-    
-    <!-- Canvas Container -->
-    <div id="canvas-container">
-      <canvas id="backgroundCanvas"></canvas>
-      <canvas id="gridCanvas"></canvas>
-      <canvas id="mainCanvas"></canvas>
-      <div id="cm-shape" class="context-menu"></div>
+
+    <div id="settingsPanel">
+      <form id="worksheetSettings">
+        <label
+          >Work sheet Width:
+          <input type="number" id="worksheetWidthInput" />
+        </label>
+        <br />
+        <label
+          >Work sheet Height:
+          <input type="number" id="worksheetHeightInput" />
+        </label>
+        <br />
+        <button type="button" id="applyWorksheetSettings">Apply</button>
+      </form>
     </div>
-  </div>
-  
-  <div id="settingsPanel">
-    <form id="worksheetSettings">
-      <label>Work sheet Width:
-        <input type="number" id="worksheetWidthInput">
-      </label>
-      <br>
-      <label>Work sheet Height:
-        <input type="number" id="worksheetHeightInput">
-      </label>
-      <br>
-      <button type="button" id="applyWorksheetSettings">Apply</button>
-    </form>
-  </div>
-  <div id="modalBackdrop"></div>
-  <div id="tooltip" class="tooltip"></div>
-</body>
+    <div id="modalBackdrop"></div>
+    <div id="tooltip" class="tooltip"></div>
+  </body>
 </html>

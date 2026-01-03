@@ -16,7 +16,7 @@ fn looks_ascii(buf: &[u8]) -> bool {
 pub struct CncLink {
     pub base_http: String, // ex "http://192.168.1.36"
     pub ws_url: String,    // ex "ws://192.168.1.36:81/"
-    ws: WebSocket,
+    _ws: WebSocket,
 }
 
 impl CncLink {
@@ -37,7 +37,7 @@ impl CncLink {
             onopen.forget();
         }
 
-        // onmessage (UNIQUE)
+        // onmessage
         {
             let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |e: MessageEvent| {
                 let data = e.data();
@@ -122,7 +122,7 @@ impl CncLink {
         Ok(Self {
             base_http: base_http.to_string(),
             ws_url: ws_url.to_string(),
-            ws,
+            _ws: ws,
         })
     }
 

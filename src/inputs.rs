@@ -55,8 +55,7 @@ impl UserUI {
     }
     pub fn update_ui(
         &mut self,
-        canvas_offset_x: u32,
-        canvas_offset_y: u32,
+        origin: Vec2,
         drawing_offset: Vec2,
         drawing_scale: f64,
         mouse_event: &MouseEvent,
@@ -73,8 +72,8 @@ impl UserUI {
         }
         self.mouse_client = Vec2::new(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
         self.canvas_pos = Vec2::new(
-            self.mouse_client.x - canvas_offset_x as f64,
-            self.mouse_client.y - canvas_offset_y as f64,
+            self.mouse_client.x - origin.x,
+            self.mouse_client.y - origin.y,
         );
         self.draw_pos = to_draw(self.canvas_pos, drawing_scale, drawing_offset);
 

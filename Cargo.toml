@@ -50,4 +50,5 @@ features = [
     "Event",
     "BinaryType",
     "Response",
+    "DomTokenList",
 ]

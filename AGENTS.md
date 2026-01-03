@@ -1,0 +1,25 @@
+# Rust/src
+
+In the src folder where the rust code lives:
+
+- Crate names are prefixed with `codex-`. For example, the `core` folder's crate is named `codex-core`
+- When using format! and you can inline variables into {}, always do that.
+- Install any commands the repo relies on (for example `just`, `rg`, or `cargo-insta`) if they aren't already available before running instructions here.
+- Never add or modify any code related to `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` or `CODEX_SANDBOX_ENV_VAR`.
+  - You operate in a sandbox where `CODEX_SANDBOX_NETWORK_DISABLED=1` will be set whenever you use the `shell` tool. Any existing code that uses `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` was authored with this fact in mind. It is often used to early exit out of tests that the author knew you would not be able to run given your sandbox limitations.
+  - Similarly, when you spawn a process using Seatbelt (`/usr/bin/sandbox-exec`), `CODEX_SANDBOX=seatbelt` will be set on the child process. Integration tests that want to run Seatbelt themselves cannot be run under Seatbelt, so checks for `CODEX_SANDBOX=seatbelt` are also often used to early exit out of tests, as appropriate.
+- Always collapse if statements per https://rust-lang.github.io/rust-clippy/master/index.html#collapsible_if
+- Always inline format! args when possible per https://rust-lang.github.io/rust-clippy/master/index.html#uninlined_format_args
+- Use method references over closures when possible per https://rust-lang.github.io/rust-clippy/master/index.html#redundant_closure_for_method_calls
+- When writing tests, prefer comparing the equality of entire objects over fields one by one.
+- When making a change that adds or changes an API, ensure that the documentation in the `docs/` folder is up to date if applicable.
+- external/index2.html is an external file not in the project
+
+Run `just fmt` (in `src` directory) automatically after making Rust code changes; do not ask for approval to run it. Before finalizing a change to `src`, run `just fix -p <project>` (in `src` directory) to fix any linter issues in the code. Prefer scoping with `-p` to avoid slow workspace‑wide Clippy builds; only run `just fix` without `-p` if you changed shared crates. Additionally, run the tests:
+
+### Text wrapping
+
+- Always use textwrap::wrap to wrap plain strings.
+- If you have a ratatui Line and you want to wrap it, use the helpers in tui/src/wrapping.rs, e.g. word_wrap_lines / word_wrap_line.
+- If you need to indent wrapped lines, use the initial_indent / subsequent_indent options from RtOptions if you can, rather than writing custom logic.
+- If you have a list of lines and you need to prefix them all with some prefix (optionally different on the first vs subsequent lines), use the `prefix_lines` helper from line_utils.

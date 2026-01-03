@@ -2,6 +2,38 @@ use kurbo::Vec2;
 use wasm_bindgen::prelude::*;
 use web_sys::{window, Document, Element, Event, EventTarget, HtmlElement};
 
+use wasm_bindgen::JsCast;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum Tabs {
+    Draw,
+    Gcode,
+}
+
+impl Tabs {
+    pub fn id(&self) -> &'static str {
+        match self {
+            Tabs::Draw => "tab-draw",
+            Tabs::Gcode => "tab-gcode",
+        }
+    }
+
+    pub fn view_id(&self) -> &'static str {
+        match self {
+            Tabs::Draw => "view-draw",
+            Tabs::Gcode => "view-gcode",
+        }
+    }
+
+    pub fn get_element(&self) -> Option<Element> {
+        document().get_element_by_id(self.id())
+    }
+
+    pub fn get_html_element(&self) -> Option<HtmlElement> {
+        self.get_element()?.dyn_into().ok()
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Icons {
     Arrow,

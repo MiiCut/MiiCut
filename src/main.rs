@@ -15,6 +15,7 @@ pub mod clipboard;
 pub mod cnc_link;
 pub mod dimensions;
 pub mod dom;
+pub mod gcode;
 pub mod inputs;
 pub mod math;
 pub mod prefab;
@@ -22,30 +23,28 @@ pub mod shape;
 pub mod shapes;
 pub mod types;
 pub mod undoredo;
+
+use crate::canvas::Canvas;
 use crate::cnc_link::CncLink;
 use crate::dom::*;
+use crate::gcode::gcode_to_segments;
+use crate::gcode::Seg;
 use crate::math::*;
-use crate::prefab::get_fill_color;
-use crate::prefab::get_stroke_color;
-use crate::prefab::get_text_colors;
 use crate::prefab::line_path;
+use crate::shapes::multipolygon_to_plasma_gcode;
+use crate::shapes::CutParams;
 use crate::types::EUId;
 use crate::types::VUId;
-use canvas::{
-    CanvasKind, CanvasText, CanvasTextConfig, Canvases, Color, Pattern, TextAlign, TextPos,
-};
-use clipboard::*;
+use canvas::{CanvasKind, CanvasText, CanvasTextConfig, Color, Pattern, TextAlign, TextPos};
 use dimensions::dim_hv;
-use dimensions::dim_radius;
 use inputs::Keys;
 use inputs::SystemMouse;
 use inputs::*;
+use kurbo::{BezPath, PathEl, Point};
 use kurbo::{Size, Vec2};
 use prefab::get_vertices_colors;
 use prefab::point_path;
 use shape::ClosedShape;
-use shapes::DataSet;
-use std::cell::RefMut;
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::{cell::RefCell, rc::Rc};
@@ -54,7 +53,6 @@ use svg::read;
 use types::Binding;
 use types::Couple;
 use types::SegBundle;
-use undoredo::UndoRedo;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
@@ -62,21 +60,7 @@ use web_sys::{
     window, Document, Element, Event, FileReader, HtmlCanvasElement, HtmlElement, HtmlInputElement,
     KeyboardEvent, MouseEvent, WheelEvent, Window,
 };
-
 type RefAV = Rc<RefCell<AppVars>>;
-
-fn cnc_send(av: RefAV, cmd: String) {
-    // Clone the Rc while the RefCell borrow is alive, then drop the borrow before async.
-    let cnc = { av.borrow().cnc.clone() };
-
-    if let Some(cnc) = cnc {
-        spawn_local(async move {
-            let _ = cnc.send_http_cmd(&cmd).await;
-        });
-    } else {
-        log!("[CNC] Not connected");
-    }
-}
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -87,24 +71,22 @@ fn main() {
 #[allow(dead_code)]
 struct AppVars {
     element_on_creation: Option<(Icons, Vec<Vec2>)>,
-    dataset: DataSet,
-    clipboard: Clipboard,
-    undo_redo: UndoRedo,
 
     // DOM
     window: Window,
     document: Document,
     top_menu: HtmlElement,
     left_panel: HtmlElement,
-    canvases: Canvases,
     user_icons: HashSet<Icons>,
     tooltip: HtmlElement,
     icon_selected: Icons,
+    canvases: [Canvas; CanvasKind::COUNT],
+    active_canvas: CanvasKind,
+    active_view: Tabs,
 
-    // Inputs
-    user_ui: UserUI,
-    pointer_on_canvas: bool,
-
+    last_gcode: Option<String>,
+    gcode_auto_center: bool,
+    gcode_auto_fit: bool,
     //
     cnc: Option<Rc<CncLink>>,
 }
@@ -116,42 +98,58 @@ impl AppVars {
     }
     fn ctrl_c_pressed(&mut self) {
         if let Icons::Arrow = self.icon_selected.clone() {
-            if self.dataset.shapes_selected.len() == 1 {
-                let eid = *self.dataset.shapes_selected.iter().next().unwrap();
-                if let Some(elem) = self.dataset.get_element(eid) {
-                    self.clipboard
-                        .copy(elem.clone(), self.user_ui.pointer.clone());
+            let canvas_user = self.get_user_canvas_mut();
+            if canvas_user.dataset.shapes_selected.len() == 1 {
+                let eid = *canvas_user.dataset.shapes_selected.iter().next().unwrap();
+                if let Some(elem) = canvas_user.dataset.get_element(eid) {
+                    canvas_user
+                        .clipboard
+                        .copy(elem.clone(), canvas_user.get_user_ui().pointer.clone());
                 }
             }
         }
     }
     fn ctrl_v_pressed(&mut self) {
         if let Icons::Arrow = self.icon_selected.clone() {
-            if self.dataset.shapes_selected.len() == 1 {
-                self.clipboard.paste(self.user_ui.pointer.clone());
+            let canvas_user = self.get_user_canvas_mut();
+            if canvas_user.dataset.shapes_selected.len() == 1 {
+                canvas_user
+                    .clipboard
+                    .paste(canvas_user.get_user_ui().pointer.clone());
             }
         }
     }
     fn del_back_pressed(&mut self) {
         if let Icons::Arrow = self.icon_selected {
-            if !self.dataset.delete_selected_elements() {
-                let vs_sel: Vec<(EUId, VUId)> =
-                    self.dataset.vertices_selected.iter().copied().collect();
+            let canvas_user = self.get_user_canvas_mut();
+            if !canvas_user.dataset.delete_selected_elements() {
+                let vs_sel: Vec<(EUId, VUId)> = canvas_user
+                    .dataset
+                    .vertices_selected
+                    .iter()
+                    .copied()
+                    .collect();
                 if vs_sel.len() == 1 {
-                    self.dataset.delete_vertex(vs_sel[0].0, vs_sel[0].1);
-                    self.dataset.calc_final_polygon();
+                    canvas_user.dataset.delete_vertex(vs_sel[0].0, vs_sel[0].1);
+                    canvas_user.dataset.calc_final_polygon();
                 }
             }
         }
     }
     fn space_pressed(&mut self) {
         if let Icons::Arrow = self.icon_selected {
+            let canvas_user = self.get_user_canvas_mut();
             // Change operation of the selected shape
-            let elems_sel: Vec<EUId> = self.dataset.shapes_selected.iter().copied().collect();
+            let elems_sel: Vec<EUId> = canvas_user
+                .dataset
+                .shapes_selected
+                .iter()
+                .copied()
+                .collect();
             if elems_sel.len() == 1 {
-                if let Some(elem) = self.dataset.get_element_mut(elems_sel[0]) {
+                if let Some(elem) = canvas_user.dataset.get_element_mut(elems_sel[0]) {
                     elem.op_next();
-                    self.dataset.calc_final_polygon();
+                    canvas_user.dataset.calc_final_polygon();
                     return;
                 }
             }
@@ -159,16 +157,24 @@ impl AppVars {
             // If #vertices selected = 2:
             // same shape, try to add vertex between
             // different shape: bind/unbind
-            let vs_sel: Vec<(EUId, VUId)> =
-                self.dataset.vertices_selected.iter().copied().collect();
+            let vs_sel: Vec<(EUId, VUId)> = canvas_user
+                .dataset
+                .vertices_selected
+                .iter()
+                .copied()
+                .collect();
             if vs_sel.len() == 2 {
                 let (eid1, vid1) = vs_sel[0];
                 let (eid2, vid2) = vs_sel[1];
                 if eid1 == eid2 {
                     // Vertices belong to the same shape
-                    self.dataset.create_vertices_between(eid1, vid1, eid2, vid2);
+                    canvas_user
+                        .dataset
+                        .create_vertices_between(eid1, vid1, eid2, vid2);
                 } else {
-                    self.dataset.bind_unbind_vertices(eid1, vid1, eid2, vid2);
+                    canvas_user
+                        .dataset
+                        .bind_unbind_vertices(eid1, vid1, eid2, vid2);
                 }
                 return;
             }
@@ -176,31 +182,42 @@ impl AppVars {
             // If #vertices selected = 1: change apex type
             if vs_sel.len() == 1 {
                 let (eid, vid) = vs_sel[0];
-                if let Some(elem) = self.dataset.get_element_mut(eid) {
+                if let Some(elem) = canvas_user.dataset.get_element_mut(eid) {
                     if let Some(v) = elem.get_vertex_mut(&vid) {
                         // Change the apex type of the vertex
                         v.change_apex_type();
                         elem.set_bezpath();
-                        self.dataset.calc_final_polygon();
+                        canvas_user.dataset.calc_final_polygon();
                     }
                 }
             }
         }
     }
     fn s_pressed(&mut self) {
-        self.user_ui.snap.next_linear();
+        self.canvases[self.active_canvas.idx()]
+            .get_user_ui_mut()
+            .snap
+            .next_linear();
     }
     fn a_pressed(&mut self) {
-        self.user_ui.snap.next_angle();
+        self.canvases[self.active_canvas.idx()]
+            .get_user_ui_mut()
+            .snap
+            .next_angle();
     }
 
     fn change_vertex_radius(&mut self, inc: i32) {
         if let Icons::Arrow = self.icon_selected {
-            let vs_sel: Vec<(EUId, VUId)> =
-                self.dataset.vertices_selected.iter().copied().collect();
+            let canvas_user = self.get_user_canvas_mut();
+            let vs_sel: Vec<(EUId, VUId)> = canvas_user
+                .dataset
+                .vertices_selected
+                .iter()
+                .copied()
+                .collect();
             if vs_sel.len() == 1 {
                 let (eid, vid) = vs_sel[0];
-                if let Some(elem) = self.dataset.get_element_mut(eid) {
+                if let Some(elem) = canvas_user.dataset.get_element_mut(eid) {
                     if let Some(v) = elem.get_vertex_mut(&vid) {
                         if let Some(round) = v.rounded.as_mut() {
                             log!("round: {}", round);
@@ -208,7 +225,7 @@ impl AppVars {
                             if res > 0 {
                                 *round = res as u32;
                                 elem.set_bezpath();
-                                self.dataset.calc_final_polygon();
+                                canvas_user.dataset.calc_final_polygon();
                             }
                         }
                     }
@@ -217,21 +234,19 @@ impl AppVars {
         }
     }
     fn arrow_up_pressed(&mut self) {
-        let inc = self.user_ui.snap.linear() as i32;
+        let inc = self.canvases[self.active_canvas.idx()]
+            .get_user_ui()
+            .snap
+            .linear() as i32;
         self.change_vertex_radius(inc);
     }
     fn arrow_down_pressed(&mut self) {
-        let inc = -(self.user_ui.snap.linear() as i32);
+        let inc = -(self.canvases[self.active_canvas.idx()]
+            .get_user_ui()
+            .snap
+            .linear() as i32);
         self.change_vertex_radius(inc);
     }
-
-    // fn arrow_left_pressed(&mut self) {
-    //     self.user_ui.snap.angle();
-    // }
-
-    // fn arrow_right_pressed(&mut self) {
-    //     self.user_ui.snap.angle();
-    // }
 
     fn undo(&mut self) {
         // // Temporarily take ownership of `undo_redo`
@@ -271,42 +286,55 @@ impl AppVars {
                 .expect("Failed to set class attribute");
         }
     }
-    fn update_inputs(&mut self, mouse_event: MouseEvent, sys_mouse: SystemMouse) -> UserAction {
-        self.user_ui.update_ui(
-            get_element_width(&self.left_panel),
-            get_element_height(&self.top_menu),
-            self.canvases.get_drawing_offset(),
-            self.canvases.get_drawing_scale(),
-            &mouse_event,
-            sys_mouse,
-        )
-    }
+
     fn set_element_select_vertex(&mut self) -> bool {
-        self.dataset.select_vertices(&self.user_ui)
+        let canvas_user = self.get_user_canvas_mut();
+        canvas_user
+            .dataset
+            .select_vertices(canvas_user.get_user_ui().draw_pos)
     }
     fn set_select_elements(&mut self) {
-        self.dataset.select_elements(&self.user_ui);
-    }
-    fn set_element_highlight_vertex(&mut self) -> bool {
-        self.dataset.highlight_vertices(&self.user_ui)
+        self.get_user_canvas_mut().select_elements();
     }
     fn set_highlight_elements(&mut self) {
-        self.dataset.highlight_elements(&self.user_ui);
+        self.get_user_canvas_mut().highlight_elements();
+    }
+    fn set_element_highlight_vertex(&mut self) -> bool {
+        self.get_user_canvas_mut().highlight_vertices()
     }
     fn set_move_elements(&mut self) -> bool {
-        self.dataset.move_elements(&self.user_ui)
+        self.get_user_canvas_mut().move_elements()
     }
     fn set_move_vertices_selected(&mut self) -> bool {
-        if let Some((last_eid, last_vid)) = self.dataset.last_vertex_selected {
-            self.dataset.get_element_mut(last_eid).map(|e| {
-                return e.move_vertex(last_vid, &self.user_ui);
-            });
-        }
-        false
+        self.get_user_canvas_mut().move_vertices_selected()
     }
-    fn move_canvas(&mut self) {
-        self.canvases
-            .move_drawing_offset(self.user_ui.pointer.curr - self.user_ui.pointer.saved);
+
+    fn get_user_canvas(&self) -> &Canvas {
+        match self.active_canvas {
+            CanvasKind::Gcode => &self.canvases[CanvasKind::Gcode.idx()],
+            CanvasKind::Draw => &self.canvases[CanvasKind::Draw.idx()],
+            CanvasKind::Background => &self.canvases[CanvasKind::Draw.idx()],
+            CanvasKind::Grid => &self.canvases[CanvasKind::Draw.idx()],
+        }
+    }
+    fn get_user_canvas_mut(&mut self) -> &mut Canvas {
+        match self.active_canvas {
+            CanvasKind::Gcode => &mut self.canvases[CanvasKind::Gcode.idx()],
+            CanvasKind::Draw => &mut self.canvases[CanvasKind::Draw.idx()],
+            CanvasKind::Background => &mut self.canvases[CanvasKind::Draw.idx()],
+            CanvasKind::Grid => &mut self.canvases[CanvasKind::Draw.idx()],
+        }
+    }
+    fn update_canvas_inputs(
+        &mut self,
+        mouse_event: MouseEvent,
+        sys_mouse: SystemMouse,
+    ) -> UserAction {
+        let c_draw_origin = Vec2::new(
+            get_element_width(&self.left_panel) as f64,
+            get_element_height(&self.top_menu) as f64,
+        );
+        self.canvases[self.active_canvas.idx()].update_ui(c_draw_origin, &mouse_event, sys_mouse)
     }
 }
 
@@ -319,11 +347,17 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     let c_draw: HtmlCanvasElement = init_element!(document, "mainCanvas", HtmlCanvasElement);
     let c_grid: HtmlCanvasElement = init_element!(document, "gridCanvas", HtmlCanvasElement);
     let c_back: HtmlCanvasElement = init_element!(document, "backgroundCanvas", HtmlCanvasElement);
+    let c_gcode: HtmlCanvasElement = init_element!(document, "gcodeCanvas", HtmlCanvasElement);
     let tooltip: HtmlElement = init_element!(document, "tooltip", HtmlElement);
     let left_panel: HtmlElement = init_element!(document, "left-panel", HtmlElement);
     let top_menu: HtmlElement = init_element!(document, "top-menu", HtmlElement);
-    let canvases = Canvases::new(c_back, c_grid, c_draw, Size::new(3000., 1500.))?;
-
+    let canvases: [Canvas; CanvasKind::COUNT] = [
+        Canvas::new(c_back, Size::new(3000., 1500.))?, // Background
+        Canvas::new(c_grid, Size::new(3000., 1500.))?, // Grid
+        Canvas::new(c_draw, Size::new(3000., 1500.))?, // Draw
+        Canvas::new(c_gcode, Size::new(3000., 1500.))?, // Gcode
+    ];
+    let active_canvas = CanvasKind::Draw;
     let mut user_icons: HashSet<Icons> = HashSet::new();
     use Icons::*;
     user_icons.insert(Arrow);
@@ -332,43 +366,46 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     user_icons.insert(Oblong);
     user_icons.insert(Poly);
 
-    let set = DataSet::new();
     let cnc: Option<Rc<CncLink>> = CncLink::connect("http://192.168.1.36", "ws://192.168.1.36:81/")
         .ok()
         .map(Rc::new);
 
     let app_vars = Rc::new(RefCell::new(AppVars {
         element_on_creation: None,
-        dataset: set,
-        clipboard: Clipboard::new(),
-        undo_redo: UndoRedo::new(),
         window: window,
         document,
         top_menu,
         left_panel,
         canvases,
+        active_canvas,
+        active_view: Tabs::Draw,
         //
         user_icons,
         tooltip,
         icon_selected: Icons::Arrow,
-        user_ui: UserUI::new(),
-        pointer_on_canvas: false,
+
+        last_gcode: None,
+        gcode_auto_center: false,
+        gcode_auto_fit: false,
         cnc,
     }));
 
     init_menu(app_vars.clone())?;
     // init_context_menu(app_vars.clone())?;
+    init_tabs(app_vars.clone())?;
+    init_gcode_splitter(app_vars.clone())?;
     init_icons(app_vars.clone())?;
     init_status(app_vars.clone())?;
-    init_canvas(app_vars.clone())?;
+    init_draw_canvas(app_vars.clone())?;
+    init_gcode_canvas(app_vars.clone())?;
     init_window(app_vars.clone())?;
     resize_canvases(app_vars.clone());
 
     let av = app_vars;
 
-    reset_origin(av.clone());
+    draw_reset_origin(av.clone());
     draw_grid_and_rules(av.clone());
-    render_drawing(av.clone());
+    render_draw_view(av.clone());
 
     Ok(())
 }
@@ -427,6 +464,110 @@ fn init_window(av: RefAV) -> Result<(), JsValue> {
 
     Ok(())
 }
+fn init_tabs(av: RefAV) -> Result<(), JsValue> {
+    // Comme pour tes icônes
+    let tabs: HashSet<Tabs> = [Tabs::Draw, Tabs::Gcode].into_iter().collect();
+
+    for tab in tabs.iter() {
+        let el = tab
+            .get_element()
+            .unwrap_or_else(|| panic!("Tab element not found: {}", tab.id()));
+        log!("Found tab element: {}", tab.id());
+        // On passe la tab choisie via une closure (recommandé)
+        let tab_copy = *tab;
+        set_callback(
+            av.clone(),
+            "click".into(),
+            &el,
+            Box::new(move |av, _evt| on_tab_click(av, tab_copy)),
+        )?;
+    }
+
+    Ok(())
+}
+fn init_gcode_splitter(av: RefAV) -> Result<(), wasm_bindgen::JsValue> {
+    let window: Window = web_sys::window().unwrap();
+    let document = window.document().unwrap();
+
+    let split: HtmlElement = document
+        .get_element_by_id("gcode-split")
+        .unwrap()
+        .dyn_into()?;
+    let left: HtmlElement = document
+        .get_element_by_id("gcode-left")
+        .unwrap()
+        .dyn_into()?;
+    let splitter: HtmlElement = document
+        .get_element_by_id("gcode-splitter")
+        .unwrap()
+        .dyn_into()?;
+
+    let dragging = std::rc::Rc::new(std::cell::Cell::new(false));
+
+    // mousedown
+    {
+        let dragging = dragging.clone();
+        let on_down = Closure::<dyn FnMut(MouseEvent)>::new(move |e: MouseEvent| {
+            e.prevent_default();
+            dragging.set(true);
+        });
+        splitter.add_event_listener_with_callback("mousedown", on_down.as_ref().unchecked_ref())?;
+        on_down.forget();
+    }
+
+    // mousemove
+    {
+        let dragging = dragging.clone();
+        let split = split.clone();
+        let left = left.clone();
+        let av2 = av.clone();
+
+        let on_move = Closure::<dyn FnMut(MouseEvent)>::new(move |e: MouseEvent| {
+            if !dragging.get() {
+                return;
+            }
+
+            let rect = split.get_bounding_client_rect();
+            let x = (e.client_x() as f64) - rect.left(); // position dans le split
+            let w = rect.width();
+
+            // clamps
+            let min_left = 200.0;
+            let min_right = 260.0;
+            let max_left = (w - min_right).max(min_left);
+
+            let new_left = x.clamp(min_left, max_left);
+
+            let _ = left
+                .style()
+                .set_property("width", &format!("{:.0}px", new_left));
+
+            // Important: recalcul tailles canvas (throttle simple: ici à chaque move)
+            let mut avb = av2.borrow_mut();
+            if let Some(left) = avb.document.get_element_by_id("gcode-left") {
+                let rect = left.get_bounding_client_rect();
+                let gw = rect.width().max(1.0) as u32;
+                let gh = rect.height().max(1.0) as u32;
+                avb.canvases[CanvasKind::Gcode.idx()].resize(gw, gh);
+            }
+        });
+
+        window.add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref())?;
+        on_move.forget();
+    }
+
+    // mouseup
+    {
+        let dragging = dragging.clone();
+        let on_up = Closure::<dyn FnMut(MouseEvent)>::new(move |_| {
+            dragging.set(false);
+        });
+        window.add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref())?;
+        on_up.forget();
+    }
+
+    Ok(())
+}
 fn init_icons(av: RefAV) -> Result<(), JsValue> {
     let avb = av.borrow_mut();
 
@@ -454,42 +595,83 @@ fn init_icons(av: RefAV) -> Result<(), JsValue> {
 
     Ok(())
 }
-fn init_canvas(av: RefAV) -> Result<(), JsValue> {
+fn init_draw_canvas(av: RefAV) -> Result<(), JsValue> {
     log!("Initializing canvas");
-    let pam = av.borrow_mut();
-    let c_draw = pam.canvases.get_main_canvas();
+    let avb = av.borrow_mut();
+    let c_draw = avb.canvases[CanvasKind::Draw.idx()].get_canvas();
     set_callback(
         av.clone(),
         "mousedown".into(),
         c_draw,
-        Box::new(on_mouse_down),
+        Box::new(on_draw_mouse_down),
     )?;
     set_callback(
         av.clone(),
         "contextmenu".into(),
         c_draw,
-        Box::new(on_context_menu),
+        Box::new(on_draw_context_menu),
     )?;
     set_callback(
         av.clone(),
         "mousemove".into(),
         c_draw,
-        Box::new(on_mouse_move),
+        Box::new(on_draw_mouse_move),
     )?;
-    set_callback(av.clone(), "mouseup".into(), c_draw, Box::new(on_mouse_up))?;
+    set_callback(
+        av.clone(),
+        "mouseup".into(),
+        c_draw,
+        Box::new(on_draw_mouse_up),
+    )?;
     set_callback(
         av.clone(),
         "mouseenter".into(),
         c_draw,
-        Box::new(on_mouse_enter),
+        Box::new(on_draw_mouse_enter),
     )?;
     set_callback(
         av.clone(),
         "mouseleave".into(),
         c_draw,
-        Box::new(on_mouse_leave),
+        Box::new(on_draw_mouse_leave),
     )?;
-    set_callback(av.clone(), "wheel".into(), c_draw, Box::new(on_mouse_wheel))?;
+    set_callback(
+        av.clone(),
+        "wheel".into(),
+        c_draw,
+        Box::new(on_draw_mouse_wheel),
+    )?;
+    Ok(())
+}
+fn init_gcode_canvas(av: RefAV) -> Result<(), JsValue> {
+    let avb = av.borrow();
+    let c = avb.canvases[CanvasKind::Gcode.idx()].get_canvas();
+
+    set_callback(
+        av.clone(),
+        "wheel".into(),
+        c,
+        Box::new(on_gcode_mouse_wheel),
+    )?;
+    set_callback(
+        av.clone(),
+        "contextmenu".into(),
+        c,
+        Box::new(on_gcode_context_menu),
+    )?;
+    set_callback(
+        av.clone(),
+        "mousedown".into(),
+        c,
+        Box::new(on_gcode_mouse_down),
+    )?;
+    set_callback(
+        av.clone(),
+        "mousemove".into(),
+        c,
+        Box::new(on_gcode_mouse_move),
+    )?;
+    set_callback(av.clone(), "mouseup".into(), c, Box::new(on_gcode_mouse_up))?;
     Ok(())
 }
 fn init_menu(av: RefAV) -> Result<(), JsValue> {
@@ -547,7 +729,6 @@ fn init_menu(av: RefAV) -> Result<(), JsValue> {
 
     Ok(())
 }
-
 fn init_status(av: RefAV) -> Result<(), JsValue> {
     let pam = av.borrow_mut();
     let _document = pam.document.clone();
@@ -626,8 +807,10 @@ fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
         Icons::Arrow => match user_action {
             UserAction::ClickDown(button, _clicks) => {
                 if button == MouseButton::Left {
-                    avb.canvases.save_drawing_offset();
-                    avb.dataset.save_elements_positions();
+                    avb.canvases[CanvasKind::Draw.idx()].save_offset();
+                    avb.canvases[CanvasKind::Draw.idx()]
+                        .dataset
+                        .save_elements_positions();
                     if !avb.set_element_select_vertex() {
                         avb.set_select_elements();
                     }
@@ -638,7 +821,9 @@ fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
                     if !avb.set_element_highlight_vertex() {
                         avb.set_highlight_elements();
                     }
-                    avb.dataset.calc_final_polygon();
+                    avb.canvases[CanvasKind::Draw.idx()]
+                        .dataset
+                        .calc_final_polygon();
                 } else {
                     // Elements and vertices selection are mutual exclusive
                     // Moving is done on selected objects
@@ -651,18 +836,23 @@ fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
                             }
                         }
                         MouseButton::Right => {
-                            avb.move_canvas();
+                            avb.canvases[CanvasKind::Draw.idx()].move_offset();
                         }
                         _ => {}
                     }
                 }
             }
             UserAction::ClickUp(_, _) => {
-                avb.dataset.calc_final_polygon();
+                avb.canvases[CanvasKind::Draw.idx()]
+                    .dataset
+                    .calc_final_polygon();
             }
         },
         Icons::Disc | Icons::Square | Icons::Oblong | Icons::Poly => {
-            let pointer_pos = avb.user_ui.pointer.curr;
+            let pointer_pos = avb.canvases[CanvasKind::Draw.idx()]
+                .get_user_ui()
+                .pointer
+                .curr;
             match user_action {
                 UserAction::ClickDown(button, clicks) => {
                     if button == MouseButton::Left {
@@ -676,7 +866,9 @@ fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
                                         vs.push(pointer_pos);
                                         let o_e = ClosedShape::new(cs, &vs);
                                         if let Some(e) = o_e {
-                                            avb.dataset.push_element(e);
+                                            avb.canvases[CanvasKind::Draw.idx()]
+                                                .dataset
+                                                .push_element(e);
                                             avb.element_on_creation = Some((cs, vec![]));
                                         } else {
                                             log!("Error creating element: {:?}", cs);
@@ -688,7 +880,9 @@ fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
                                         if clicks == 2 {
                                             let o_e = ClosedShape::new(cs, &vs);
                                             if let Some(e) = o_e {
-                                                avb.dataset.push_element(e);
+                                                avb.canvases[CanvasKind::Draw.idx()]
+                                                    .dataset
+                                                    .push_element(e);
                                                 avb.element_on_creation = Some((cs, vec![]));
                                             } else {
                                                 log!("Error creating element: {:?}", cs);
@@ -730,7 +924,9 @@ fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
                     }
                 }
                 UserAction::ClickUp(_, _) => {
-                    avb.dataset.calc_final_polygon();
+                    avb.canvases[CanvasKind::Draw.idx()]
+                        .dataset
+                        .calc_final_polygon();
                 }
                 _ => (),
             }
@@ -739,23 +935,23 @@ fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
     Ok(())
 }
 
-fn on_mouse_move(av: RefAV, event: Event) {
+fn on_draw_mouse_move(av: RefAV, event: Event) {
     if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
         let ua = av
             .borrow_mut()
-            .update_inputs(mouse_event, SystemMouse::Move);
+            .update_canvas_inputs(mouse_event, SystemMouse::Move);
         if let Some(e) = update(av.clone(), ua).err() {
             log!("ERROR: {}", e);
         }
     }
-    render_drawing(av);
+    render_draw_view(av);
 }
-fn on_mouse_down(av: RefAV, event: Event) {
+fn on_draw_mouse_down(av: RefAV, event: Event) {
     if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
         let clicks = mouse_event.detail();
         let ua = av
             .borrow_mut()
-            .update_inputs(mouse_event, SystemMouse::Down(clicks));
+            .update_canvas_inputs(mouse_event, SystemMouse::Down(clicks));
         // Hide the context menu when clicking elsewhere
         display_html_element(DOMElements::ContextMenuShape, false);
         if let Some(e) = update(av.clone(), ua).err() {
@@ -763,71 +959,79 @@ fn on_mouse_down(av: RefAV, event: Event) {
         }
     }
     // update_status_bar(&mut pam);
-    render_drawing(av);
+    render_draw_view(av);
 }
-fn on_mouse_up(av: RefAV, event: Event) {
+fn on_draw_mouse_up(av: RefAV, event: Event) {
     if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
         let clicks = mouse_event.detail();
         let ua = av
             .borrow_mut()
-            .update_inputs(mouse_event, SystemMouse::Up(clicks));
+            .update_canvas_inputs(mouse_event, SystemMouse::Up(clicks));
         if let Some(e) = update(av.clone(), ua).err() {
             log!("ERROR: {}", e);
         }
     }
-    render_drawing(av);
+    render_draw_view(av);
 }
-
-fn on_mouse_wheel(av: RefAV, event: Event) {
+fn on_draw_mouse_wheel(av: RefAV, event: Event) {
     if let Ok(wheel_event) = event.dyn_into::<WheelEvent>() {
         wheel_event.prevent_default();
         let mut avb = av.borrow_mut();
 
         let zoom_factor = 0.04;
-        let old_draw_scale = avb.canvases.get_drawing_scale();
-        let old_draw_offset = avb.canvases.get_drawing_offset();
+        let old_draw_scale = avb.canvases[CanvasKind::Draw.idx()].get_scale();
+        let old_draw_offset = avb.canvases[CanvasKind::Draw.idx()].get_offset();
 
         let new_scale = if wheel_event.delta_y() < 0. {
             (old_draw_scale * (1.0 + zoom_factor)).min(10.0) // Zoom in
         } else {
             (old_draw_scale / (1.0 + zoom_factor)).max(0.5) // Zoom out
         };
-        avb.canvases.set_drawing_scale(new_scale);
+        avb.canvases[CanvasKind::Draw.idx()].set_scale(new_scale);
 
-        let canvas_pos = avb.user_ui.canvas_pos;
+        let canvas_pos = avb.canvases[CanvasKind::Draw.idx()]
+            .get_user_ui()
+            .canvas_pos;
         let old_draw_offset_rel = canvas_pos - old_draw_offset;
         let new_draw_offset = canvas_pos - old_draw_offset_rel * (new_scale / old_draw_scale);
 
-        avb.canvases.set_drawing_offset(new_draw_offset);
-
+        avb.canvases[CanvasKind::Draw.idx()].set_offset(new_draw_offset);
         drop(avb);
         draw_grid_and_rules(av.clone());
-        render_drawing(av);
+        render_draw_view(av);
     }
 }
-fn on_mouse_enter(av: RefAV, _event: Event) {
+fn on_draw_mouse_enter(av: RefAV, _event: Event) {
     let mut avb = av.borrow_mut();
-    avb.pointer_on_canvas = true;
-    let curr_pos = avb.user_ui.pointer.curr;
-    avb.user_ui.pointer.saved = curr_pos;
+    avb.canvases[CanvasKind::Draw.idx()].set_pointer_on_canvas(true);
+    let curr_pos = avb.canvases[CanvasKind::Draw.idx()]
+        .get_user_ui()
+        .pointer
+        .curr;
+    avb.canvases[CanvasKind::Draw.idx()]
+        .get_user_ui_mut()
+        .pointer
+        .saved = curr_pos;
     // if let Some(elem) = &mut avb.element_on_creation {
     //     elem.move_drawable(curr_pos);
     //     elem.save_vertices_positions();
     // }
     drop(avb);
-    render_drawing(av);
+    render_draw_view(av);
 }
-fn on_mouse_leave(av: RefAV, _event: Event) {
+fn on_draw_mouse_leave(av: RefAV, _event: Event) {
     let mut avb = av.borrow_mut();
-    avb.pointer_on_canvas = false;
+    avb.canvases[CanvasKind::Draw.idx()].set_pointer_on_canvas(false);
     avb.element_on_creation = None;
     avb.go_to_arrow_tool();
     drop(avb);
-    render_drawing(av);
+    render_draw_view(av);
 }
-
-fn on_context_menu(_av: RefAV, event: Event) {
+fn on_draw_context_menu(_av: RefAV, event: Event) {
     // Prevent the default context menu from appearing
+    event.prevent_default();
+}
+fn on_gcode_context_menu(_av: RefAV, event: Event) {
     event.prevent_default();
 }
 // fn show_context_menu(_avb: &mut RefMut<'_, AppVars>) {}
@@ -859,37 +1063,133 @@ fn on_context_menu(_av: RefAV, event: Event) {
 //     add_click_listener(&new_item, callback);
 // }
 
+fn on_gcode_mouse_move(av: RefAV, event: Event) {
+    if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
+        let ua = av
+            .borrow_mut()
+            .update_canvas_inputs(mouse_event, SystemMouse::Move);
+        let mut avb = av.borrow_mut();
+        if let UserAction::Move(MouseButton::Right, ButtonLevel::Down) = ua {
+            avb.canvases[CanvasKind::Gcode.idx()].move_offset();
+        }
+        drop(avb);
+    }
+    render_gcode_view(av);
+}
+fn on_gcode_mouse_down(av: RefAV, event: Event) {
+    if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
+        let clicks = mouse_event.detail();
+        let ua = av
+            .borrow_mut()
+            .update_canvas_inputs(mouse_event, SystemMouse::Down(clicks));
+        // Hide the context menu when clicking elsewhere
+        display_html_element(DOMElements::ContextMenuShape, false);
+        let mut avb = av.borrow_mut();
+        if let UserAction::ClickDown(MouseButton::Right, _) = ua {
+            avb.canvases[CanvasKind::Gcode.idx()].save_offset();
+        }
+        drop(avb);
+    }
+    // update_status_bar(&mut pam);
+    render_gcode_view(av);
+}
+fn on_gcode_mouse_up(av: RefAV, event: Event) {
+    if let Ok(mouse_event) = event.clone().dyn_into::<MouseEvent>() {
+        let clicks = mouse_event.detail();
+        let ua = av
+            .borrow_mut()
+            .update_canvas_inputs(mouse_event, SystemMouse::Up(clicks));
+        drop(ua);
+    }
+    render_gcode_view(av);
+}
+fn on_gcode_mouse_wheel(av: RefAV, event: Event) {
+    if let Ok(wheel_event) = event.dyn_into::<WheelEvent>() {
+        wheel_event.prevent_default();
+        let mut avb = av.borrow_mut();
+
+        let zoom_factor = 0.04;
+        let old_draw_scale = avb.canvases[CanvasKind::Gcode.idx()].get_scale();
+        let old_draw_offset = avb.canvases[CanvasKind::Gcode.idx()].get_offset();
+
+        let new_scale = if wheel_event.delta_y() < 0. {
+            (old_draw_scale * (1.0 + zoom_factor)).min(10.0) // Zoom in
+        } else {
+            (old_draw_scale / (1.0 + zoom_factor)).max(0.5) // Zoom out
+        };
+        avb.canvases[CanvasKind::Gcode.idx()].set_scale(new_scale);
+
+        let canvas_pos = avb.canvases[CanvasKind::Gcode.idx()]
+            .get_user_ui()
+            .canvas_pos;
+        let old_draw_offset_rel = canvas_pos - old_draw_offset;
+        let new_draw_offset = canvas_pos - old_draw_offset_rel * (new_scale / old_draw_scale);
+
+        avb.canvases[CanvasKind::Gcode.idx()].set_offset(new_draw_offset);
+
+        drop(avb);
+        draw_grid_and_rules(av.clone());
+        render_gcode_view(av);
+    }
+}
+
 ///////////////
 // Window events
+fn cnc_send(av: RefAV, cmd: String) {
+    // Clone the Rc while the RefCell borrow is alive, then drop the borrow before async.
+    let cnc = { av.borrow().cnc.clone() };
+
+    if let Some(cnc) = cnc {
+        spawn_local(async move {
+            let _ = cnc.send_http_cmd(&cmd).await;
+        });
+    } else {
+        log!("[CNC] Not connected");
+    }
+}
+
 fn resize_canvases(av: RefAV) {
-    log!("resize--called");
+    log!("resize all canvases");
     let mut avb = av.borrow_mut();
-    let window_width = avb
-        .window
-        .inner_width()
-        .expect("Failed to get window width")
-        .as_f64()
-        .expect("Width is not a number") as u32;
-    let window_height = avb
-        .window
-        .inner_height()
-        .expect("Failed to get window height")
-        .as_f64()
-        .expect("Height is not a number") as u32;
+    let active_canvas = avb.active_canvas;
+
+    let window_width = avb.window.inner_width().unwrap().as_f64().unwrap() as u32;
+    let window_height = avb.window.inner_height().unwrap().as_f64().unwrap() as u32;
+
     let offset_start_x = get_element_width(&avb.left_panel);
     let offset_start_y = get_element_height(&avb.top_menu);
-    let width = window_width - offset_start_x;
-    let height = window_height - offset_start_y;
-    // log!("resize sizes: ({},{})", width, height);
-    avb.canvases.resize_canvases(width, height);
+
+    let main_w = window_width - offset_start_x;
+    let main_h = window_height - offset_start_y;
+
+    // Canvas de dessin (stack)
+    avb.canvases[CanvasKind::Background.idx()].resize(main_w, main_h);
+    avb.canvases[CanvasKind::Grid.idx()].resize(main_w, main_h);
+    avb.canvases[CanvasKind::Draw.idx()].resize(main_w, main_h);
+
+    // Canvas G-code (panneau gauche du split)
+    if active_canvas == CanvasKind::Gcode {
+        if let Some(left) = avb.document.get_element_by_id("gcode-left") {
+            let rect = left.get_bounding_client_rect();
+            let gw = rect.width().max(1.0) as u32;
+            let gh = rect.height().max(1.0) as u32;
+            avb.canvases[CanvasKind::Gcode.idx()].resize(gw, gh);
+        }
+    }
 
     drop(avb);
+
+    // Redraw selon vue
     draw_grid_and_rules(av.clone());
-    render_drawing(av);
+    if active_canvas == CanvasKind::Gcode {
+        render_gcode_view(av);
+    } else {
+        render_draw_view(av);
+    }
 }
 fn on_window_resize(av: RefAV, _event: Event) {
     resize_canvases(av.clone());
-    render_drawing(av);
+    render_draw_view(av);
 }
 fn on_window_click(_pa: RefAV, _event: Event) {}
 fn on_window_keydown(av: RefAV, event: Event) {
@@ -897,31 +1197,33 @@ fn on_window_keydown(av: RefAV, event: Event) {
     if let Ok(keyboard_event) = event.dyn_into::<KeyboardEvent>() {
         if let Some(key) = Keys::from_str(&keyboard_event.key()).ok() {
             let mut avb = av.borrow_mut();
+
+            let canvas = avb.get_user_canvas_mut();
             use Keys::*;
             match key {
                 Control | Meta => {
                     log!("control pressed");
-                    avb.user_ui.keys_states.ctrl_cmd_pressed = true;
+                    canvas.get_user_ui_mut().keys_states.ctrl_cmd_pressed = true;
                 }
                 Shift => {
                     log!("shift pressed");
-                    avb.user_ui.keys_states.shift_pressed = true;
+                    canvas.get_user_ui_mut().keys_states.shift_pressed = true;
                 }
                 Alt => {
                     log!("alt pressed");
-                    avb.user_ui.keys_states.alt_pressed = true;
+                    canvas.get_user_ui_mut().keys_states.alt_pressed = true;
                 }
                 Delete | Backspace => avb.del_back_pressed(),
                 Escape => avb.esc_pressed(),
                 // Copy and paste
                 CLower => {
-                    if avb.user_ui.keys_states.ctrl_cmd_pressed {
+                    if canvas.get_user_ui().keys_states.ctrl_cmd_pressed {
                         log!("ctrl-c pressed");
                         avb.ctrl_c_pressed();
                     }
                 }
                 VLower => {
-                    if avb.user_ui.keys_states.ctrl_cmd_pressed {
+                    if canvas.get_user_ui().keys_states.ctrl_cmd_pressed {
                         log!("ctrl-v pressed");
                         avb.ctrl_v_pressed();
                     }
@@ -929,13 +1231,13 @@ fn on_window_keydown(av: RefAV, event: Event) {
 
                 // Undo and Redo
                 ZLower => {
-                    if avb.user_ui.keys_states.ctrl_cmd_pressed {
+                    if canvas.get_user_ui().keys_states.ctrl_cmd_pressed {
                         log!("ctrl-z pressed");
                         avb.undo();
                     }
                 }
                 ZUpper | YLower => {
-                    if avb.user_ui.keys_states.ctrl_cmd_pressed {
+                    if canvas.get_user_ui().keys_states.ctrl_cmd_pressed {
                         log!("ctrl-Z pressed or ctrl-y pressed");
                         avb.redo();
                     }
@@ -959,23 +1261,23 @@ fn on_window_keydown(av: RefAV, event: Event) {
                 ArrowLeft => {
                     // Jog X -1mm (responses will arrive on websocket)
                     let cmd = "$J=G91 X-1 F200".to_string();
-                    drop(avb);
                     cnc_send(av.clone(), cmd);
-                    render_drawing(av);
+                    drop(avb);
+                    render_draw_view(av);
                     return;
                 }
                 ArrowRight => {
                     // Jog X +1mm
                     let cmd = "$J=G91 X1 F200".to_string();
-                    drop(avb);
                     cnc_send(av.clone(), cmd);
-                    render_drawing(av);
+                    drop(avb);
+                    render_draw_view(av);
                     return;
                 }
                 _ => (),
             };
             drop(avb);
-            render_drawing(av);
+            render_draw_view(av);
         }
     }
 }
@@ -983,29 +1285,98 @@ fn on_window_keyup(av: RefAV, event: Event) {
     if let Ok(keyboard_event) = event.dyn_into::<KeyboardEvent>() {
         if let Some(key) = Keys::from_str(&keyboard_event.key()).ok() {
             let mut avb = av.borrow_mut();
+            let canvas = avb.get_user_canvas_mut();
             use Keys::*;
             match key {
                 Control | Meta => {
                     log!("control released");
-                    avb.user_ui.keys_states.ctrl_cmd_pressed = false;
+                    canvas.get_user_ui_mut().keys_states.ctrl_cmd_pressed = false;
                 }
                 Shift => {
                     log!("shift released");
-                    avb.user_ui.keys_states.shift_pressed = false;
+                    canvas.get_user_ui_mut().keys_states.shift_pressed = false;
                 }
                 Alt => {
                     log!("alt released");
-                    avb.user_ui.keys_states.alt_pressed = false;
+                    canvas.get_user_ui_mut().keys_states.alt_pressed = false;
                 }
                 _ => (),
             }
             drop(avb);
-            render_drawing(av);
+            render_draw_view(av);
         }
     }
 }
 ///////////////
 // Icons events
+fn on_tab_click(av: RefAV, selected: Tabs) {
+    let mut avb = av.borrow_mut();
+
+    // UI: active tab + view
+    for t in [Tabs::Draw, Tabs::Gcode] {
+        if let Some(btn) = t.get_element() {
+            let cl = btn.class_list();
+            let _ = if t == selected {
+                cl.add_1("active")
+            } else {
+                cl.remove_1("active")
+            };
+        }
+        if let Some(view) = document().get_element_by_id(t.view_id()) {
+            let cl = view.class_list();
+            let _ = if t == selected {
+                cl.add_1("active")
+            } else {
+                cl.remove_1("active")
+            };
+        }
+    }
+    // Mode panneau gauche
+    if let Some(left_panel) = avb.document.get_element_by_id("left-panel") {
+        let cl = left_panel.class_list();
+        match selected {
+            Tabs::Gcode => {
+                let _ = cl.add_1("gcode-mode");
+            }
+            Tabs::Draw => {
+                let _ = cl.remove_1("gcode-mode");
+            }
+        }
+    }
+
+    avb.active_view = selected;
+
+    // Recalculer le g-code
+    match avb.active_view {
+        Tabs::Draw => {
+            avb.active_canvas = CanvasKind::Draw;
+        }
+        Tabs::Gcode => {
+            avb.active_canvas = CanvasKind::Gcode;
+        }
+    }
+
+    if let Tabs::Gcode = selected {
+        let params = CutParams {
+            feed_xy: 1200.0,
+            pierce_delay_s: 0.3,
+            torch_on_m3: "M3",
+            torch_off_m5: "M5",
+        };
+
+        let gcode = multipolygon_to_plasma_gcode(
+            &avb.canvases[CanvasKind::Draw.idx()].dataset.final_polygon,
+            &params,
+        );
+        avb.last_gcode = Some(gcode);
+        avb.gcode_auto_center = true;
+        avb.gcode_auto_fit = true;
+    }
+
+    drop(avb);
+
+    resize_canvases(av.clone());
+}
 fn on_icon_click(av: RefAV, event: Event) {
     let mut avb = av.borrow_mut();
     if let Some(target) = event.target() {
@@ -1013,8 +1384,8 @@ fn on_icon_click(av: RefAV, event: Event) {
             if let Some(id) = element.get_attribute("id") {
                 if let Some(icon) = avb.user_icons.iter().find(|&&k| k.id() == id).cloned() {
                     avb.icon_selected = icon;
-                    avb.dataset.shapes_highlighted.clear();
-                    avb.dataset.shapes_selected.clear();
+                    avb.get_user_canvas_mut().dataset.shapes_highlighted.clear();
+                    avb.get_user_canvas_mut().dataset.shapes_selected.clear();
                     avb.user_icons
                         .iter()
                         .for_each(|icon| avb.html_deselect_icons(*icon));
@@ -1030,7 +1401,7 @@ fn on_icon_click(av: RefAV, event: Event) {
         }
     }
     drop(avb);
-    render_drawing(av);
+    render_draw_view(av);
 }
 fn on_icon_mouseover(av: RefAV, event: Event) {
     let avb = av.borrow_mut();
@@ -1069,246 +1440,77 @@ fn on_icon_mouseout(av: RefAV, _event: Event) {
 
 ///////////////
 // Rendering
-fn reset_origin(av: RefAV) {
-    av.borrow_mut().canvases.reset_origin();
+fn draw_reset_origin(av: RefAV) {
+    av.borrow_mut().get_user_canvas_mut().reset_origin();
 }
 
 fn draw_grid_and_rules(av: RefAV) {
-    av.borrow_mut().canvases.draw_origin();
+    av.borrow_mut().get_user_canvas_mut().draw_origin();
 }
 
-fn may_be_draw_radiuses(avb: &RefMut<'_, AppVars>, e: &ClosedShape) {
-    let text_color = get_text_colors().stroke_color;
-    let text_cfg = CanvasTextConfig::new(text_color, 0., TextAlign::Center, 14, 0.8);
-    for apex_type in e.get_vertices().get_apices().iter() {
-        if let ApexType::Arc { s, c, e: _e } = apex_type {
-            let r = (*s - *c).length();
-            let text2 = CanvasText::new(
-                format!("R{:.0}", r),
-                TextPos::PosCustom(*c),
-                text_cfg.clone(),
-            );
-            avb.canvases.draw_text(&CanvasKind::Draw, &text2);
-        }
-    }
-}
-
-fn draw_dimensions(avb: &RefMut<'_, AppVars>, e: &ClosedShape) {
-    match e.get_shape_type() {
-        Icons::Disc => {
-            let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
-            if v.len() == 2 {
-                if let Some(seg) = SegBundle::new(v[0], v[1]) {
-                    // Draw the radius segment
-                    let (path, pattern, colors, text) =
-                        dim_radius(seg, avb.canvases.get_canvas_infos(), true, true);
-                    avb.canvases.draw_path(
-                        &CanvasKind::Draw,
-                        &path,
-                        pattern,
-                        colors.fill_color,
-                        colors.stroke_color,
-                        text,
-                    );
-                }
-            }
-        }
-        Icons::Square => {
-            for (v1, v2) in e
-                .get_vertices()
-                .iter()
-                .zip(e.get_vertices().iter().cycle().skip(1))
-                .take(2)
-                .map(|(v1, v2)| (v1.1.curr, v2.1.curr))
-            {
-                if let Some(seg) = SegBundle::new(v1, v2) {
-                    let (path, pattern, colors, text) =
-                        dim_hv(seg, avb.canvases.get_canvas_infos());
-                    avb.canvases.draw_path(
-                        &CanvasKind::Draw,
-                        &path,
-                        pattern,
-                        colors.fill_color,
-                        colors.stroke_color,
-                        text,
-                    );
-                }
-            }
-        }
-        Icons::Oblong => {
-            let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
-            if v.len() == 3 {
-                if let Some(seg1) = SegBundle::new(v[0], v[1]) {
-                    // Draw the main segment
-                    let (path, pattern, colors, text) =
-                        dim_radius(seg1, avb.canvases.get_canvas_infos(), false, true);
-                    avb.canvases.draw_path(
-                        &CanvasKind::Draw,
-                        &path,
-                        pattern,
-                        colors.fill_color,
-                        colors.stroke_color,
-                        text,
-                    );
-                    // Draw the radius segment
-                    if let Some(seg2) = SegBundle::new(seg1.m, v[2]) {
-                        let (path, pattern, colors, text) =
-                            dim_radius(seg2, avb.canvases.get_canvas_infos(), true, false);
-                        avb.canvases.draw_path(
-                            &CanvasKind::Draw,
-                            &path,
-                            pattern,
-                            colors.fill_color,
-                            colors.stroke_color,
-                            text,
-                        );
-                    }
-                }
-            }
-        }
-        Icons::Poly => {
-            for (v1, v2) in e
-                .get_vertices()
-                .iter()
-                .zip(e.get_vertices().iter().cycle().skip(1))
-                .map(|(v1, v2)| (v1.1.curr, v2.1.curr))
-            {
-                if let Some(seg) = SegBundle::new(v1, v2) {
-                    let (path, pattern, colors, text) =
-                        dim_hv(seg, avb.canvases.get_canvas_infos());
-                    avb.canvases.draw_path(
-                        &CanvasKind::Draw,
-                        &path,
-                        pattern,
-                        colors.fill_color,
-                        colors.stroke_color,
-                        text,
-                    );
-                }
-            }
-        }
-        Icons::Arrow => (),
-    }
-}
-
-fn draw_vertices(avb: &RefMut<'_, AppVars>, e: &ClosedShape) {
-    for (vid, vertex) in e.get_vertices().iter() {
-        let vid_sel = avb
-            .dataset
-            .vertices_selected
-            .iter()
-            .any(|&(_, sel_vid)| &sel_vid == vid);
-        let vid_high = avb
-            .dataset
-            .vertices_highlighted
-            .iter()
-            .any(|&(_, high_vid)| &high_vid == vid);
-
-        let colors = get_vertices_colors(vid_sel, vid_high);
-        avb.canvases.draw_path(
-            &CanvasKind::Draw,
-            &point_path(vertex.curr, 1.),
-            Pattern::Point,
-            colors.fill_color,
-            colors.stroke_color,
-            vec![],
-        );
-    }
-}
-
-fn draw_paths_creation(avb: &RefMut<'_, AppVars>, e: &ClosedShape) {
-    let stroke_color = get_stroke_color(false, false);
-    let path = e.get_bezpath();
-    avb.canvases.draw_path(
-        &CanvasKind::Draw,
-        path,
-        Pattern::OnCreation,
-        Color::Gray95,
-        stroke_color,
-        vec![],
-    );
-}
-
-fn draw_paths_set(avb: &RefMut<'_, AppVars>, eid: &EUId, e: &ClosedShape) {
-    let stroke_color = get_stroke_color(
-        avb.dataset.shapes_selected.contains(eid),
-        avb.dataset.shapes_highlighted.contains(eid),
-    );
-    let fill_color = get_fill_color(
-        avb.dataset.shapes_selected.contains(eid),
-        avb.dataset.shapes_highlighted.contains(eid),
-    );
-    let path = e.get_bezpath();
-    avb.canvases.draw_path(
-        &CanvasKind::Draw,
-        path,
-        Pattern::Point,
-        fill_color,
-        stroke_color,
-        vec![],
-    );
-}
-
-fn render_drawing(av: RefAV) {
+fn render_draw_informations(av: RefAV) {
     let mut avb = av.borrow_mut();
+    let canvas_draw = &mut avb.canvases[CanvasKind::Draw.idx()];
+    let c_size = canvas_draw.get_canvas_size();
+    let pos = canvas_draw.get_user_ui().pointer.curr;
+    canvas_draw.direct_text(&CanvasText::new(
+        format!("({:.2},{:.2})", pos.x, pos.y),
+        TextPos::PosCustom(Vec2::new(c_size.width - 200., c_size.height - 10.)),
+        CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
+    ));
+    canvas_draw.direct_text(&CanvasText::new(
+        format!(
+            "Snap linear: {:.0} mm",
+            canvas_draw.get_user_ui().snap.linear(),
+        ),
+        TextPos::PosCustom(Vec2::new(0., c_size.height - 30.)),
+        CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
+    ));
+    canvas_draw.direct_text(&CanvasText::new(
+        format!("Snap angle: {:.0}°", canvas_draw.get_user_ui().snap.angle()),
+        TextPos::PosCustom(Vec2::new(0., c_size.height - 10.)),
+        CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
+    ));
+}
+
+fn render_draw_view(av: RefAV) {
+    let mut avb = av.borrow_mut();
+    let element_on_creation = avb.element_on_creation.clone();
+    let canvas_draw = &mut avb.canvases[CanvasKind::Draw.idx()];
     // use IconsShapes::*;
     // Get the Performance API
     // let performance = window().unwrap().performance().unwrap();
     // let start_time = performance.now();
 
-    avb.canvases.clear_main_canvas();
+    canvas_draw.clear();
 
     // Draw full contour
-    let full_path: &Vec<kurbo::BezPath> = avb.dataset.get_final_paths();
-    avb.canvases.draw_closed_path(
-        &CanvasKind::Draw,
-        full_path,
-        Pattern::Composed(true),
-        Color::Black,
-        Color::Gray20,
-        vec![],
-    );
+    canvas_draw.draw_closed_path(Pattern::Composed(true), Color::Black, Color::Gray20, vec![]);
 
-    if !avb.user_ui.keys_states.alt_pressed {
+    if !canvas_draw.get_user_ui().keys_states.alt_pressed {
         // Draw the elements (shapes outlines)
-        for (eid, e) in avb.dataset.shapes.iter() {
-            draw_paths_set(&avb, eid, e);
-        }
+        canvas_draw.draw_paths_sets();
 
         // Draw radiuses -if any- for square and polygon
-        for e in avb.dataset.shapes.values() {
-            match e.get_shape_type() {
-                Icons::Square | Icons::Poly => may_be_draw_radiuses(&avb, e),
-                _ => (),
-            }
-        }
+        canvas_draw.may_be_draw_radiuses();
+
         // Draw vertices, dimensions and get the bind on the same time
-        let mut binds = Binding::<(EUId, VUId)>::new();
-        for (eid, e) in avb.dataset.shapes.iter() {
-            draw_vertices(&avb, e);
-            draw_dimensions(&avb, e);
-            for (vid, vertex) in e.get_vertices().iter() {
-                // If the vertex is bound to other vertices, store the binding
-                binds.extend(vertex.bind.iter().map(|(eid2, vid2)| {
-                    Couple((eid.clone(), vid.clone()), (eid2.clone(), vid2.clone()))
-                }));
-            }
-        }
+        let binds: Binding<(EUId, VUId)> = canvas_draw.draw_vertices();
+
         // Draw the binds dimensions
         for Couple((eid1, vid1), (eid2, vid2)) in binds.iter() {
             // Get elements e1 and e2
             if let (Some(e1), Some(e2)) = (
-                avb.dataset.get_element(*eid1),
-                avb.dataset.get_element(*eid2),
+                canvas_draw.dataset.get_element(*eid1),
+                canvas_draw.dataset.get_element(*eid2),
             ) {
                 // Get vertices v1 and v2
                 if let (Some(v1), Some(v2)) = (e1.get_vertex(vid1), e2.get_vertex(vid2)) {
                     // Draw the binding segment
                     if let Some(seg) = SegBundle::new(v1.curr, v2.curr) {
                         let (path, pattern, colors, text) =
-                            dim_hv(seg, avb.canvases.get_canvas_infos());
-                        avb.canvases.draw_path(
-                            &CanvasKind::Draw,
+                            dim_hv(seg, canvas_draw.get_canvas_infos());
+                        canvas_draw.draw_path(
                             &path,
                             pattern,
                             colors.fill_color,
@@ -1327,35 +1529,35 @@ fn render_drawing(av: RefAV) {
     // }
 
     // Draw element on creation if any
-    if let Some((cs, mut vs)) = avb.element_on_creation.clone() {
+
+    if let Some((cs, mut vs)) = element_on_creation {
         match cs {
             Icons::Disc | Icons::Square | Icons::Oblong => {
                 if vs.len() == 1 {
-                    vs.push(avb.user_ui.pointer.curr);
+                    vs.push(canvas_draw.get_user_ui().pointer.curr);
                     if let Some(e) = ClosedShape::new(cs, &vs) {
-                        draw_paths_creation(&avb, &e);
-                        draw_vertices(&avb, &e);
-                        draw_dimensions(&avb, &e);
+                        canvas_draw.draw_paths_creation(&e);
+                        canvas_draw.draw_vs(&e);
+                        canvas_draw.draw_dimensions(&e);
                     }
                 }
             }
             Icons::Poly => {
                 if vs.len() > 2 {
-                    vs.push(avb.user_ui.pointer.curr);
+                    vs.push(canvas_draw.get_user_ui().pointer.curr);
                     if let Some(e) = ClosedShape::new(cs, &vs) {
-                        draw_paths_creation(&avb, &e);
-                        draw_vertices(&avb, &e);
-                        draw_dimensions(&avb, &e);
+                        canvas_draw.draw_paths_creation(&e);
+                        canvas_draw.draw_vs(&e);
+                        canvas_draw.draw_dimensions(&e);
                     }
                 } else {
-                    vs.push(avb.user_ui.pointer.curr);
+                    vs.push(canvas_draw.get_user_ui().pointer.curr);
                     if vs.len() >= 2 {
                         let colors = get_vertices_colors(false, false);
                         for (i, v) in vs.iter().enumerate() {
                             if i < vs.len() - 1 {
                                 // Line
-                                avb.canvases.draw_path(
-                                    &CanvasKind::Draw,
+                                canvas_draw.draw_path(
                                     &line_path(vs[i], vs[i + 1]),
                                     Pattern::OnCreation,
                                     colors.fill_color,
@@ -1365,9 +1567,8 @@ fn render_drawing(av: RefAV) {
                                 // Dimension
                                 if let Some(seg) = SegBundle::new(vs[i], vs[i + 1]) {
                                     let (path, pattern, colors, text) =
-                                        dim_hv(seg, avb.canvases.get_canvas_infos());
-                                    avb.canvases.draw_path(
-                                        &CanvasKind::Draw,
+                                        dim_hv(seg, canvas_draw.get_canvas_infos());
+                                    canvas_draw.draw_path(
                                         &path,
                                         pattern,
                                         colors.fill_color,
@@ -1376,8 +1577,7 @@ fn render_drawing(av: RefAV) {
                                     );
                                 }
                             }
-                            avb.canvases.draw_path(
-                                &CanvasKind::Draw,
+                            canvas_draw.draw_path(
                                 &point_path(*v, 1.),
                                 Pattern::Point,
                                 colors.fill_color,
@@ -1393,39 +1593,125 @@ fn render_drawing(av: RefAV) {
     }
 
     // Draw the pointer
-    avb.canvases.draw_pointer(avb.user_ui.pointer.curr);
+    canvas_draw.draw_pointer(canvas_draw.get_user_ui().pointer.curr);
 
     drop(avb);
-    render_informations(av);
+    render_draw_informations(av);
 }
 
-fn render_informations(av: RefAV) {
-    let avb = av.borrow_mut();
-    // avb.canvases.clear_background_canvas();
-    let c_size = avb.canvases.get_canvas_size();
-    let pos = avb.user_ui.pointer.curr;
-    avb.canvases.direct_text(
-        &CanvasKind::Draw,
-        &CanvasText::new(
-            format!("({:.2},{:.2})", pos.x, pos.y),
-            TextPos::PosCustom(Vec2::new(c_size.width - 200., c_size.height - 10.)),
-            CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
-        ),
-    );
-    avb.canvases.direct_text(
-        &CanvasKind::Draw,
-        &CanvasText::new(
-            format!("Snap linear: {:.0} mm", avb.user_ui.snap.linear(),),
-            TextPos::PosCustom(Vec2::new(0., c_size.height - 30.)),
-            CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
-        ),
-    );
-    avb.canvases.direct_text(
-        &CanvasKind::Draw,
-        &CanvasText::new(
-            format!("Snap angle: {:.0}°", avb.user_ui.snap.angle()),
-            TextPos::PosCustom(Vec2::new(0., c_size.height - 10.)),
-            CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 20, 0.4),
-        ),
-    );
+fn render_gcode_view(av: RefAV) {
+    let mut avb = av.borrow_mut();
+    let gcode: String = {
+        // Ici on clone le gcode, à voir si on peut éviter ça plus tard (volume de données ?)
+        avb.last_gcode.clone().unwrap_or_default()
+    };
+
+    if let Some(el) = avb.document.get_element_by_id("gcode-text") {
+        let el: web_sys::HtmlElement = el.dyn_into().ok().unwrap();
+        el.set_inner_text(&gcode);
+    }
+
+    let segs = gcode_to_segments(&gcode);
+
+    // Dessine seulement les segments de coupe (torch ON)
+    let gcode_action = if avb.gcode_auto_fit {
+        avb.gcode_auto_center = false;
+        avb.gcode_auto_fit = false;
+        Some(true)
+    } else if avb.gcode_auto_center {
+        avb.gcode_auto_center = false;
+        Some(false)
+    } else {
+        None
+    };
+
+    if let Some(do_fit) = gcode_action {
+        let canvas_gcode = &mut avb.canvases[CanvasKind::Gcode.idx()];
+        if do_fit {
+            fit_gcode_canvas(canvas_gcode, &segs);
+        } else {
+            center_gcode_canvas(canvas_gcode, &segs);
+        }
+    }
+    let canvas_gcode = &mut avb.canvases[CanvasKind::Gcode.idx()];
+    canvas_gcode.clear();
+
+    for s in segs.into_iter().filter(|s| s.cut) {
+        let p = seg_to_path(s);
+        log!("G-code path: {:?}", p);
+        canvas_gcode.draw_path(&p, Pattern::Basic, Color::Transparent, Color::Black, vec![]);
+    }
+}
+
+fn seg_to_path(s: Seg) -> BezPath {
+    BezPath::from_vec(vec![
+        PathEl::MoveTo(Point::new(s.x1, s.y1)),
+        PathEl::LineTo(Point::new(s.x2, s.y2)),
+    ])
+}
+
+fn center_gcode_canvas(canvas: &mut Canvas, segs: &[Seg]) {
+    if segs.is_empty() {
+        return;
+    }
+
+    let mut min_x = segs[0].x1.min(segs[0].x2);
+    let mut max_x = segs[0].x1.max(segs[0].x2);
+    let mut min_y = segs[0].y1.min(segs[0].y2);
+    let mut max_y = segs[0].y1.max(segs[0].y2);
+
+    for s in segs.iter() {
+        let sx_min = s.x1.min(s.x2);
+        let sx_max = s.x1.max(s.x2);
+        let sy_min = s.y1.min(s.y2);
+        let sy_max = s.y1.max(s.y2);
+        min_x = min_x.min(sx_min);
+        max_x = max_x.max(sx_max);
+        min_y = min_y.min(sy_min);
+        max_y = max_y.max(sy_max);
+    }
+
+    let center = Vec2::new((min_x + max_x) * 0.5, (min_y + max_y) * 0.5);
+    let size = canvas.get_canvas_size();
+    let canvas_center = Vec2::new(size.width * 0.5, size.height * 0.5);
+    let offset = canvas_center - center * canvas.get_scale();
+    canvas.set_offset(offset);
+}
+
+fn fit_gcode_canvas(canvas: &mut Canvas, segs: &[Seg]) {
+    if segs.is_empty() {
+        return;
+    }
+
+    let mut min_x = segs[0].x1.min(segs[0].x2);
+    let mut max_x = segs[0].x1.max(segs[0].x2);
+    let mut min_y = segs[0].y1.min(segs[0].y2);
+    let mut max_y = segs[0].y1.max(segs[0].y2);
+
+    for s in segs.iter() {
+        let sx_min = s.x1.min(s.x2);
+        let sx_max = s.x1.max(s.x2);
+        let sy_min = s.y1.min(s.y2);
+        let sy_max = s.y1.max(s.y2);
+        min_x = min_x.min(sx_min);
+        max_x = max_x.max(sx_max);
+        min_y = min_y.min(sy_min);
+        max_y = max_y.max(sy_max);
+    }
+
+    let bbox_w = (max_x - min_x).max(1.0);
+    let bbox_h = (max_y - min_y).max(1.0);
+
+    let size = canvas.get_canvas_size();
+    let pad = 20.0;
+    let avail_w = (size.width - pad * 2.0).max(1.0);
+    let avail_h = (size.height - pad * 2.0).max(1.0);
+
+    let scale = (avail_w / bbox_w).min(avail_h / bbox_h).clamp(0.5, 10.0);
+    canvas.set_scale(scale);
+
+    let center = Vec2::new((min_x + max_x) * 0.5, (min_y + max_y) * 0.5);
+    let canvas_center = Vec2::new(size.width * 0.5, size.height * 0.5);
+    let offset = canvas_center - center * scale;
+    canvas.set_offset(offset);
 }

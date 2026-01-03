@@ -108,7 +108,7 @@ html {
 
 /* Left Panel (Toolbar) */
 .left-panel {
-  width: 60px;
+  width: 50px;
   background-color: #eee;
   overflow-y: auto;
   overflow-x: hidden;
@@ -122,7 +122,8 @@ html {
 }
 
 /* Canvas Layers */
-canvas {
+/* Canvas layers UNIQUEMENT dans le conteneur de dessin empilé */
+#canvas-container canvas {
   cursor: default;
   outline: none;
   display: block;
@@ -263,4 +264,230 @@ canvas {
 }
 .context-menu a:hover {
   background-color: #f7f7f7;
+}
+
+#workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* évite certains débordements */
+}
+
+#view-tabs {
+  flex: 0 0 auto; /* hauteur du contenu uniquement */
+}
+
+#views-container {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+.view {
+  display: none;
+  width: 100%;
+  height: 100%;
+}
+
+.view.active {
+  display: block;
+}
+
+.left-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%; /*ou 100% si parent full-height*/
+}
+
+.icon-container {
+  flex: 1; /* prend tout l’espace disponible au-dessus */
+}
+
+.left-tabs {
+  border-top: 1px solid #aaa;
+  padding: 8px 0;
+  background: linear-gradient(#f0f0f0, #d9d9d9);
+}
+
+.left-tabs .tab {
+  width: 90%;
+  height: 36px;
+  margin: 6px 0;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid #888;
+  border-radius: 4px;
+  background: linear-gradient(#ffffff, #d0d0d0);
+  color: #222;
+  box-shadow: inset 0 1px 0 #fff;
+}
+
+.left-tabs .tab:hover {
+  background: linear-gradient(#ffffff, #bcbcbc);
+}
+
+.left-tabs .tab.active {
+  background: linear-gradient(#3b3b3b, #1f1f1f);
+  color: #ffea00;
+  border-color: #000;
+  box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.8);
+}
+
+/* G-code split layout */
+#gcode-split {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* left: ~3/4 */
+#gcode-left {
+  flex: 3 1 0;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+/* right: ~1/4 */
+#gcode-right {
+  flex: 1 1 0;
+  min-width: 260px; /* garde un panneau utilisable */
+  max-width: 45%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+/* zone canvas à gauche */
+#gcode-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* le canvas doit remplir son conteneur */
+#view-gcode #gcodeCanvas {
+  position: static !important;
+  width: 100%;
+  height: 100%;
+}
+
+/* toolbar + zone texte à droite */
+#gcode-right-toolbar {
+  flex: 0 0 auto;
+  padding: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+#gcode-text {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre;
+}
+#view-gcode {
+  height: 100%;
+}
+
+#gcode-split {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+#gcode-left {
+  flex: 0 0 auto;
+  width: 75%;
+  min-width: 200px;
+  min-height: 0;
+  position: relative;
+}
+
+#gcode-right {
+  flex: 1 1 auto;
+  min-width: 260px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+#gcode-splitter {
+  flex: 0 0 10px; /* largeur réelle */
+  cursor: col-resize !important; /* force le curseur */
+  background: rgba(0, 0, 0, 0.1); /* visible */
+  z-index: 9999;
+}
+
+#gcode-splitter:hover {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+#gcode-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* Autoriser la sélection/copie du G-code */
+#view-gcode #gcode-text {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
+#gcode-text {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  white-space: pre;
+}
+
+/* par défaut visibles */
+#draw-icons {
+  display: block;
+}
+
+#view-tabs {
+  margin-top: auto; /* ← pousse le bloc en bas */
+}
+#gcode-icons {
+  display: none;
+}
+
+.left-panel.gcode-mode #draw-icons {
+  display: none;
+}
+.left-panel.gcode-mode #gcode-icons {
+  display: block;
+}
+
+/* Canvas layers uniquement pour la vue dessin */
+#view-draw canvas {
+  cursor: default;
+  outline: none;
+  display: block;
+  border: none;
+  margin: 0;
+  padding: 0;
+  position: absolute;
+  background-color: transparent;
+}
+#view-gcode #gcodeCanvas {
+  position: static;
+  width: 100%;
+  height: 100%;
+  display: block;
 }

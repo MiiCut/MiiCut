@@ -1,5 +1,6 @@
 use crate::shape::ClosedShape;
 
+#[derive(Debug)]
 pub struct UndoRedo {
     undo_stack: Vec<ClosedShape>,
     redo_stack: Vec<ClosedShape>,

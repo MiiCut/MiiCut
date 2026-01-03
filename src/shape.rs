@@ -131,17 +131,17 @@ impl ClosedShape {
     pub fn get_vertices_mut(&mut self) -> &mut VecRing<VUId> {
         &mut self.vertices
     }
-    pub fn select_vertex(&mut self, user_ui: &UserUI) -> Option<VUId> {
+    pub fn select_vertex(&mut self, draw_pos: Vec2) -> Option<VUId> {
         for (_idx, (uid, value)) in self.vertices.iter().enumerate() {
-            if (value.curr - user_ui.draw_pos).hypot() < Self::GRAB_RADIUS {
+            if (value.curr - draw_pos).hypot() < Self::GRAB_RADIUS {
                 return Some(*uid);
             }
         }
         return None;
     }
-    pub fn highlight_vertex(&mut self, user_ui: &UserUI) -> Option<VUId> {
+    pub fn highlight_vertex(&mut self, draw_pos: Vec2) -> Option<VUId> {
         for (uid, value) in self.vertices.iter() {
-            if (value.curr - user_ui.draw_pos).hypot() < Self::GRAB_RADIUS {
+            if (value.curr - draw_pos).hypot() < Self::GRAB_RADIUS {
                 return Some(*uid);
             }
         }
