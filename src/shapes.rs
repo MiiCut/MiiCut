@@ -277,6 +277,7 @@ impl DataSet {
 
     pub fn select_elements(&mut self, userui: &UserUI) {
         // Select the nodes whose element contains the position
+        log!("Selecting elements at position {:?}", userui.draw_pos);
         if !userui.keys_states.shift_pressed {
             let mut shapes_selected = HashSet::new();
             for (eid, elem) in &self.shapes {
@@ -433,8 +434,16 @@ impl DataSet {
         let mut diffs: Vec<geo::Polygon<f64>> = Vec::new();
         for s in self.shapes.values() {
             match s.get_operation() {
-                Operation::Union => unions.push(s.get_polygon().clone()),
-                Operation::Difference => diffs.push(s.get_polygon().clone()),
+                Operation::Union => {
+                    for poly in s.get_polygon().iter() {
+                        unions.push(poly.clone());
+                    }
+                }
+                Operation::Difference => {
+                    for poly in s.get_polygon().iter() {
+                        diffs.push(poly.clone());
+                    }
+                }
             }
         }
         let poly_union = unary_union(&unions);

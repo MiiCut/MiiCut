@@ -33,6 +33,7 @@ use crate::math::*;
 use crate::prefab::line_path;
 use crate::shapes::multipolygon_to_plasma_gcode;
 use crate::shapes::CutParams;
+use crate::shapes::DataSet;
 use crate::types::EUId;
 use crate::types::VUId;
 use canvas::{CanvasKind, CanvasText, CanvasTextConfig, Color, Pattern, TextAlign, TextPos};
@@ -40,16 +41,18 @@ use dimensions::dim_hv;
 use inputs::Keys;
 use inputs::SystemMouse;
 use inputs::*;
-use kurbo::{BezPath, PathEl, Point};
+use js_sys::{Array, Date, Reflect, JSON};
+use kurbo::{BezPath, PathEl, Point, Shape};
 use kurbo::{Size, Vec2};
 use prefab::get_vertices_colors;
 use prefab::point_path;
 use shape::ClosedShape;
+use shape::Operation;
+use shape::TextData;
+use shape::TextFont;
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::{cell::RefCell, rc::Rc};
-use svg::node::element::path::Data;
-use svg::read;
 use types::Binding;
 use types::Couple;
 use types::SegBundle;
@@ -57,8 +60,9 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{
-    window, Document, Element, Event, FileReader, HtmlCanvasElement, HtmlElement, HtmlInputElement,
-    KeyboardEvent, MouseEvent, WheelEvent, Window,
+    window, Blob, BlobPropertyBag, Document, Element, Event, FileReader, HtmlAnchorElement,
+    HtmlCanvasElement, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent, Url, WheelEvent,
+    Window,
 };
 type RefAV = Rc<RefCell<AppVars>>;
 
@@ -96,6 +100,13 @@ impl AppVars {
         self.element_on_creation = None;
         self.go_to_arrow_tool();
     }
+    fn ctrl_s_pressed(&mut self) {
+        if let Some(element) = self.document.get_element_by_id("save-option") {
+            if let Ok(button) = element.dyn_into::<HtmlElement>() {
+                button.click();
+            }
+        }
+    }
     fn ctrl_c_pressed(&mut self) {
         if let Icons::Arrow = self.icon_selected.clone() {
             let canvas_user = self.get_user_canvas_mut();
@@ -118,6 +129,49 @@ impl AppVars {
                     .paste(canvas_user.get_user_ui().pointer.clone());
             }
         }
+    }
+    fn edit_text_at(&mut self, pos: Vec2) -> bool {
+        let canvas = &mut self.canvases[CanvasKind::Draw.idx()];
+        let shift_pressed = canvas.get_user_ui().keys_states.shift_pressed;
+        for (_eid, shape) in canvas.dataset.shapes.iter_mut() {
+            if shape.get_shape_type() != Icons::Text {
+                continue;
+            }
+            if !shape.contains(pos) {
+                continue;
+            }
+            if shift_pressed {
+                let auto_fit = shape.get_text().map(|text| !text.auto_fit).unwrap_or(false);
+                shape.set_text_autofit(auto_fit);
+                canvas.dataset.calc_final_polygon();
+                return true;
+            }
+            shape.ensure_text_scale();
+            let current = shape
+                .get_text()
+                .map(|text| text.text.as_str())
+                .unwrap_or("");
+            let edited = self
+                .window
+                .prompt_with_message_and_default("Edit text", current)
+                .ok()
+                .flatten();
+            if let Some(new_text) = edited {
+                shape.set_text_value(new_text);
+                shape.fit_text_bbox_width_to_content();
+                canvas.dataset.calc_final_polygon();
+            }
+            canvas.dataset.shapes_selected.clear();
+            canvas.dataset.shapes_highlighted.clear();
+            canvas.dataset.vertices_selected.clear();
+            canvas.dataset.vertices_highlighted.clear();
+            canvas
+                .dataset
+                .shapes_selector
+                .refresh_selectable_elems(HashSet::new());
+            return true;
+        }
+        false
     }
     fn del_back_pressed(&mut self) {
         if let Icons::Arrow = self.icon_selected {
@@ -309,7 +363,7 @@ impl AppVars {
         self.get_user_canvas_mut().move_vertices_selected()
     }
 
-    fn get_user_canvas(&self) -> &Canvas {
+    fn _get_user_canvas(&self) -> &Canvas {
         match self.active_canvas {
             CanvasKind::Gcode => &self.canvases[CanvasKind::Gcode.idx()],
             CanvasKind::Draw => &self.canvases[CanvasKind::Draw.idx()],
@@ -365,6 +419,7 @@ fn create_app_vars(window: Window) -> Result<(), JsValue> {
     user_icons.insert(Square);
     user_icons.insert(Oblong);
     user_icons.insert(Poly);
+    user_icons.insert(Text);
 
     let cnc: Option<Rc<CncLink>> = CncLink::connect("http://192.168.1.36", "ws://192.168.1.36:81/")
         .ok()
@@ -675,11 +730,16 @@ fn init_gcode_canvas(av: RefAV) -> Result<(), JsValue> {
     Ok(())
 }
 fn init_menu(av: RefAV) -> Result<(), JsValue> {
-    let avb = av.borrow_mut();
-    let document = avb.document.clone();
+    let document = av.borrow().document.clone();
 
     let load_element = document.get_element_by_id("load-option").unwrap();
     let load_element: HtmlElement = load_element.dyn_into::<HtmlElement>()?;
+
+    let save_element = document.get_element_by_id("save-option").unwrap();
+    let save_element: HtmlElement = save_element.dyn_into::<HtmlElement>()?;
+
+    let export_svg_element = document.get_element_by_id("export-svg").unwrap();
+    let export_svg_element: HtmlElement = export_svg_element.dyn_into::<HtmlElement>()?;
 
     let file_input = document.get_element_by_id("file-input").unwrap();
     let file_input: HtmlInputElement = file_input.dyn_into::<HtmlInputElement>()?;
@@ -693,7 +753,45 @@ fn init_menu(av: RefAV) -> Result<(), JsValue> {
     load_element.add_event_listener_with_callback("click", on_load.as_ref().unchecked_ref())?;
     on_load.forget();
 
-    drop(avb);
+    let document_clone = document.clone();
+    let av_clone = av.clone();
+    let on_save = Closure::wrap(Box::new(move || {
+        let canvas = &av_clone.borrow().canvases[CanvasKind::Draw.idx()];
+        let export_info = make_export_info(&document_clone);
+        let meta = ExportMeta {
+            title: export_info.title.clone(),
+            timestamp: export_info.timestamp.clone(),
+            canvas_size: canvas.get_size(),
+            canvas_scale: canvas.get_scale(),
+            canvas_offset: canvas.get_offset(),
+        };
+
+        let json = build_json_from_dataset(&canvas.dataset, &meta);
+        if let Some(json) = json {
+            let filename = format!("{}.json", export_info.basename);
+            trigger_download(&document_clone, &filename, &json, "application/json");
+        }
+    }) as Box<dyn FnMut()>);
+
+    save_element.add_event_listener_with_callback("click", on_save.as_ref().unchecked_ref())?;
+    on_save.forget();
+
+    let document_clone = document.clone();
+    let av_clone = av.clone();
+    let on_export_svg = Closure::wrap(Box::new(move || {
+        let canvas = &av_clone.borrow().canvases[CanvasKind::Draw.idx()];
+        let export_info = make_export_info(&document_clone);
+
+        let svg = build_svg_from_dataset(&canvas.dataset);
+        if let Some(svg) = svg {
+            let filename = format!("{}.svg", export_info.basename);
+            trigger_download(&document_clone, &filename, &svg, "image/svg+xml");
+        }
+    }) as Box<dyn FnMut()>);
+
+    export_svg_element
+        .add_event_listener_with_callback("click", on_export_svg.as_ref().unchecked_ref())?;
+    on_export_svg.forget();
 
     let on_file_select = Closure::wrap(Box::new(move || {
         let av_clone = av.clone();
@@ -708,8 +806,7 @@ fn init_menu(av: RefAV) -> Result<(), JsValue> {
                     let file_reader: FileReader = target.dyn_into().unwrap();
                     if let Some(result) = file_reader.result().unwrap().as_string() {
                         log!("File content loaded!");
-                        // Convert the SVG content to your shapes
-                        convert_svg_to_shapes(av_clone.clone(), result);
+                        load_json_to_dataset(av_clone.clone(), result);
                     }
                 }) as Box<dyn FnMut(_)>);
 
@@ -720,6 +817,7 @@ fn init_menu(av: RefAV) -> Result<(), JsValue> {
 
                 file_reader.read_as_text(&file).unwrap();
             }
+            file_input.set_value("");
         }
     }) as Box<dyn FnMut()>);
 
@@ -728,6 +826,335 @@ fn init_menu(av: RefAV) -> Result<(), JsValue> {
     on_file_select.forget();
 
     Ok(())
+}
+
+fn build_svg_from_dataset(dataset: &DataSet) -> Option<String> {
+    let mut paths: Vec<BezPath> = Vec::new();
+
+    for shape in dataset.shapes.values() {
+        if shape.get_shape_type() == Icons::Text {
+            paths.extend(geo_multipolygon_to_bez_paths(shape.get_polygon()));
+        } else if !shape.get_bezpath().is_empty() {
+            paths.push(shape.get_bezpath().clone());
+        }
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+
+    for path in &paths {
+        if path.is_empty() {
+            continue;
+        }
+        let bbox = path.bounding_box();
+        min_x = min_x.min(bbox.x0);
+        min_y = min_y.min(bbox.y0);
+        max_x = max_x.max(bbox.x1);
+        max_y = max_y.max(bbox.y1);
+    }
+
+    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+        return None;
+    }
+
+    let width = (max_x - min_x).max(1.0);
+    let height = (max_y - min_y).max(1.0);
+
+    let mut svg = String::new();
+    svg.push_str(&format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\">\n",
+        min_x, min_y, width, height
+    ));
+    svg.push_str("  <g fill=\"none\" stroke=\"black\" stroke-width=\"1\">\n");
+    for path in paths {
+        svg.push_str(&format!("    <path d=\"{}\" />\n", path.to_svg()));
+    }
+    svg.push_str("  </g>\n</svg>\n");
+    Some(svg)
+}
+
+fn build_json_from_dataset(dataset: &DataSet, meta: &ExportMeta) -> Option<String> {
+    if dataset.shapes.is_empty() {
+        return None;
+    }
+
+    let mut out = String::from("{\"version\":1,\"meta\":{");
+    out.push_str("\"title\":\"");
+    out.push_str(&json_escape(&meta.title));
+    out.push_str("\",\"timestamp\":\"");
+    out.push_str(&json_escape(&meta.timestamp));
+    out.push_str("\",\"canvas\":{");
+    out.push_str(&format!(
+        "\"size\":[{:.6},{:.6}],\"scale\":{:.6},\"offset\":[{:.6},{:.6}]",
+        meta.canvas_size.width,
+        meta.canvas_size.height,
+        meta.canvas_scale,
+        meta.canvas_offset.x,
+        meta.canvas_offset.y
+    ));
+    out.push_str("}},\"shapes\":[");
+    let mut first_shape = true;
+
+    let mut shapes: Vec<_> = dataset.shapes.iter().collect();
+    shapes.sort_by_key(|(id, _)| **id);
+    for (eid, shape) in shapes {
+        if !first_shape {
+            out.push(',');
+        }
+        first_shape = false;
+
+        out.push_str("{\"id\":");
+        out.push_str(&format!("{eid}"));
+        out.push_str(",\"type\":\"");
+        out.push_str(icon_to_name(shape.get_shape_type()));
+        out.push_str("\",\"operation\":\"");
+        out.push_str(operation_to_name(shape.get_operation()));
+        out.push_str("\",\"vertices\":[");
+
+        let mut first_vertex = true;
+        for (_, value) in shape.get_vertices().iter() {
+            if !first_vertex {
+                out.push(',');
+            }
+            first_vertex = false;
+            out.push_str("{\"x\":");
+            out.push_str(&format!("{:.6}", value.curr.x));
+            out.push_str(",\"y\":");
+            out.push_str(&format!("{:.6}", value.curr.y));
+            out.push_str(",\"rounded\":");
+            match value.rounded {
+                Some(rounded) => out.push_str(&rounded.to_string()),
+                None => out.push_str("null"),
+            }
+            out.push('}');
+        }
+        out.push(']');
+
+        if let Some(text) = shape.get_text() {
+            out.push_str(",\"text\":{\"value\":\"");
+            out.push_str(&json_escape(&text.text));
+            out.push_str("\",\"font\":\"");
+            out.push_str(text_font_to_name(&text.font));
+            out.push_str("\",\"scale\":");
+            match text.scale {
+                Some(scale) => out.push_str(&format!("{:.6}", scale)),
+                None => out.push_str("null"),
+            }
+            out.push_str(",\"auto_fit\":");
+            out.push_str(if text.auto_fit { "true" } else { "false" });
+            out.push('}');
+        }
+
+        out.push('}');
+    }
+
+    out.push_str("]}");
+    Some(out)
+}
+
+fn get_prop(value: &JsValue, name: &str) -> Option<JsValue> {
+    Reflect::get(value, &JsValue::from_str(name)).ok()
+}
+
+fn get_string(value: &JsValue, name: &str) -> Option<String> {
+    get_prop(value, name).and_then(|val| val.as_string())
+}
+
+fn get_f64(value: &JsValue, name: &str) -> Option<f64> {
+    get_prop(value, name).and_then(|val| val.as_f64())
+}
+
+fn get_vec2_array(value: &JsValue, name: &str) -> Option<Vec2> {
+    let arr_value = get_prop(value, name)?;
+    let arr = Array::from(&arr_value);
+    if arr.length() < 2 {
+        return None;
+    }
+    let x = arr.get(0).as_f64()?;
+    let y = arr.get(1).as_f64()?;
+    Some(Vec2::new(x, y))
+}
+
+fn name_to_icon(name: &str) -> Option<Icons> {
+    match name {
+        "arrow" => Some(Icons::Arrow),
+        "disc" => Some(Icons::Disc),
+        "square" => Some(Icons::Square),
+        "oblong" => Some(Icons::Oblong),
+        "poly" => Some(Icons::Poly),
+        "text" => Some(Icons::Text),
+        _ => None,
+    }
+}
+
+fn name_to_operation(name: String) -> Option<Operation> {
+    match name.as_str() {
+        "union" => Some(Operation::Union),
+        "difference" => Some(Operation::Difference),
+        _ => None,
+    }
+}
+
+fn name_to_text_font(name: String) -> Option<TextFont> {
+    match name.as_str() {
+        "stencilia" => Some(TextFont::Stencilia),
+        "urbanist" => Some(TextFont::Urbanist),
+        _ => None,
+    }
+}
+
+fn trigger_download(document: &Document, filename: &str, contents: &str, mime: &str) {
+    let parts = Array::new();
+    parts.push(&JsValue::from_str(contents));
+
+    let options = BlobPropertyBag::new();
+    options.set_type(mime);
+
+    let blob = match Blob::new_with_str_sequence_and_options(&parts, &options) {
+        Ok(blob) => blob,
+        Err(_) => return,
+    };
+    let url = match Url::create_object_url_with_blob(&blob) {
+        Ok(url) => url,
+        Err(_) => return,
+    };
+
+    if let Some(body) = document.body() {
+        if let Ok(el) = document.create_element("a") {
+            if let Ok(link) = el.dyn_into::<HtmlAnchorElement>() {
+                link.set_href(&url);
+                link.set_download(filename);
+                let _ = body.append_child(&link);
+                link.click();
+                let _ = body.remove_child(&link);
+            }
+        }
+    }
+    let _ = Url::revoke_object_url(&url);
+}
+
+struct ExportMeta {
+    title: String,
+    timestamp: String,
+    canvas_size: Size,
+    canvas_scale: f64,
+    canvas_offset: Vec2,
+}
+
+struct ExportInfo {
+    title: String,
+    timestamp: String,
+    basename: String,
+}
+
+fn make_export_info(document: &Document) -> ExportInfo {
+    let raw_title = document.title();
+    let title = if raw_title.trim().is_empty() {
+        "drawing".to_string()
+    } else {
+        raw_title
+    };
+    let timestamp = timestamp_string();
+    let base = sanitize_filename(&title);
+    let basename = if base.is_empty() {
+        format!("drawing-{}", timestamp)
+    } else {
+        format!("{}-{}", base, timestamp)
+    };
+    ExportInfo {
+        title,
+        timestamp,
+        basename,
+    }
+}
+
+fn sanitize_filename(input: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in input.chars() {
+        let c = if ch.is_ascii_alphanumeric() {
+            Some(ch.to_ascii_lowercase())
+        } else if ch == ' ' || ch == '-' || ch == '_' {
+            Some('-')
+        } else {
+            None
+        };
+        if let Some(c) = c {
+            if c == '-' {
+                if !last_dash && !out.is_empty() {
+                    out.push(c);
+                    last_dash = true;
+                }
+            } else {
+                out.push(c);
+                last_dash = false;
+            }
+        }
+    }
+    if out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+fn timestamp_string() -> String {
+    let date = Date::new_0();
+    let year = date.get_full_year() as i32;
+    let month = (date.get_month() + 1) as i32;
+    let day = date.get_date() as i32;
+    let hours = date.get_hours() as i32;
+    let minutes = date.get_minutes() as i32;
+    let seconds = date.get_seconds() as i32;
+    format!(
+        "{:04}{:02}{:02}-{:02}{:02}{:02}",
+        year, month, day, hours, minutes, seconds
+    )
+}
+
+fn icon_to_name(icon: Icons) -> &'static str {
+    match icon {
+        Icons::Arrow => "arrow",
+        Icons::Disc => "disc",
+        Icons::Square => "square",
+        Icons::Oblong => "oblong",
+        Icons::Poly => "poly",
+        Icons::Text => "text",
+    }
+}
+
+fn operation_to_name(operation: Operation) -> &'static str {
+    match operation {
+        Operation::Union => "union",
+        Operation::Difference => "difference",
+    }
+}
+
+fn text_font_to_name(font: &TextFont) -> &'static str {
+    match font {
+        TextFont::Stencilia => "stencilia",
+        TextFont::Urbanist => "urbanist",
+    }
+}
+
+fn json_escape(input: &str) -> String {
+    let mut out = String::new();
+    for ch in input.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 fn init_status(av: RefAV) -> Result<(), JsValue> {
     let pam = av.borrow_mut();
@@ -769,44 +1196,117 @@ fn set_callback(
 
     Ok(())
 }
-fn convert_svg_to_shapes(_av: RefAV, svg_data: String) {
-    // Process the SVG content using svg::read
-    let mut content = svg_data;
-    for event in read(&mut content).unwrap() {
-        match event {
-            svg::parser::Event::Tag(svg::node::element::tag::Path, _, attributes) => {
-                if let Some(data) = attributes.get("d") {
-                    let data = Data::parse(data).unwrap();
-                    for command in data.iter() {
-                        match command {
-                            svg::node::element::path::Command::Move(..) => {
-                                log!("Move command: {:?}", command);
-                            }
-                            svg::node::element::path::Command::Line(..) => {
-                                log!("Line command: {:?}", command);
-                            }
-                            svg::node::element::path::Command::QuadraticCurve(..) => {
-                                log!("Quad command: {:?}", command);
-                            }
-                            svg::node::element::path::Command::CubicCurve(..) => {
-                                log!("Cubic command: {:?}", command);
-                            }
-                            _ => log!("Unknown command: {:?}", command),
-                        }
-                    }
-                }
+
+fn load_json_to_dataset(av: RefAV, json_data: String) {
+    let Ok(value) = JSON::parse(&json_data) else {
+        log!("Invalid JSON file.");
+        return;
+    };
+    let Some(shapes_value) = get_prop(&value, "shapes") else {
+        log!("Missing shapes array.");
+        return;
+    };
+
+    let shapes_array = Array::from(&shapes_value);
+    if shapes_array.length() == 0 {
+        log!("No shapes in file.");
+        return;
+    }
+
+    let mut avb = av.borrow_mut();
+    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+    canvas.dataset = DataSet::new();
+
+    if let Some(meta_value) = get_prop(&value, "meta") {
+        if let Some(canvas_value) = get_prop(&meta_value, "canvas") {
+            if let Some(scale) = get_f64(&canvas_value, "scale") {
+                canvas.set_scale(scale);
             }
-            _ => {}
+            if let Some(offset) = get_vec2_array(&canvas_value, "offset") {
+                canvas.set_offset(offset);
+            }
         }
     }
+
+    for shape_value in shapes_array.iter() {
+        let Some(shape_type) =
+            get_string(&shape_value, "type").and_then(|name| name_to_icon(&name))
+        else {
+            continue;
+        };
+        let operation = get_string(&shape_value, "operation")
+            .and_then(name_to_operation)
+            .unwrap_or(Operation::Union);
+
+        let Some(vertices_value) = get_prop(&shape_value, "vertices") else {
+            continue;
+        };
+        let vertices_array = Array::from(&vertices_value);
+        if vertices_array.length() == 0 {
+            continue;
+        }
+
+        let mut vertices = Vec::new();
+        let mut rounded = Vec::new();
+        for vertex_value in vertices_array.iter() {
+            let Some(x) = get_f64(&vertex_value, "x") else {
+                continue;
+            };
+            let Some(y) = get_f64(&vertex_value, "y") else {
+                continue;
+            };
+            vertices.push(Vec2::new(x, y));
+            let rounded_value = get_prop(&vertex_value, "rounded")
+                .and_then(|val| val.as_f64())
+                .map(|val| val as u32);
+            rounded.push(rounded_value);
+        }
+
+        let text_data = if shape_type == Icons::Text {
+            let text_value = get_prop(&shape_value, "text")
+                .and_then(|val| get_string(&val, "value"))
+                .unwrap_or_else(|| "TEXT".to_string());
+            let font_value = get_prop(&shape_value, "text")
+                .and_then(|val| get_string(&val, "font"))
+                .and_then(name_to_text_font)
+                .unwrap_or(TextFont::Stencilia);
+            let scale_value = get_prop(&shape_value, "text").and_then(|val| get_f64(&val, "scale"));
+            let auto_fit = get_prop(&shape_value, "text")
+                .and_then(|val| get_prop(&val, "auto_fit"))
+                .and_then(|val| val.as_bool())
+                .unwrap_or(false);
+            Some(TextData::new(text_value, font_value, scale_value, auto_fit))
+        } else {
+            None
+        };
+
+        let Some(shape) =
+            ClosedShape::from_raw(shape_type, operation, vertices, &rounded, text_data)
+        else {
+            continue;
+        };
+
+        canvas.dataset.push_element(shape);
+    }
+
+    canvas.dataset.calc_final_polygon();
+
+    drop(avb);
+    render_draw_view(av.clone());
 }
 
 fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
     let mut avb = av.borrow_mut();
     match avb.icon_selected {
         Icons::Arrow => match user_action {
-            UserAction::ClickDown(button, _clicks) => {
+            UserAction::ClickDown(button, clicks) => {
                 if button == MouseButton::Left {
+                    if clicks == 2 {
+                        let draw_pos = avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
+                        if avb.edit_text_at(draw_pos) {
+                            return Ok(());
+                        }
+                    }
                     avb.canvases[CanvasKind::Draw.idx()].save_offset();
                     avb.canvases[CanvasKind::Draw.idx()]
                         .dataset
@@ -848,7 +1348,7 @@ fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
                     .calc_final_polygon();
             }
         },
-        Icons::Disc | Icons::Square | Icons::Oblong | Icons::Poly => {
+        Icons::Disc | Icons::Square | Icons::Oblong | Icons::Poly | Icons::Text => {
             let pointer_pos = avb.canvases[CanvasKind::Draw.idx()]
                 .get_user_ui()
                 .pointer
@@ -896,6 +1396,27 @@ fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
                                         avb.element_on_creation = Some((cs, vs));
                                     }
                                 }
+                                Icons::Text => {
+                                    if vs.is_empty() {
+                                        vs.push(pointer_pos);
+                                        avb.element_on_creation = Some((cs, vs));
+                                    } else {
+                                        vs.push(pointer_pos);
+                                        if let Some(e) = ClosedShape::new_text(
+                                            "TEXT".to_string(),
+                                            TextFont::Stencilia,
+                                            vs[0],
+                                            vs[1],
+                                        ) {
+                                            avb.canvases[CanvasKind::Draw.idx()]
+                                                .dataset
+                                                .push_element(e);
+                                            avb.element_on_creation = Some((cs, vec![]));
+                                        } else {
+                                            log!("Error creating text element");
+                                        }
+                                    }
+                                }
                                 _ => {}
                             }
                         }
@@ -906,6 +1427,15 @@ fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
                                     Icons::Poly => {
                                         if vs.len() == 0 {
                                             // Right click to cancel the creation
+                                            avb.element_on_creation = None;
+                                            avb.go_to_arrow_tool();
+                                        } else {
+                                            vs.pop();
+                                            avb.element_on_creation = Some((cs, vs));
+                                        }
+                                    }
+                                    Icons::Text => {
+                                        if vs.is_empty() {
                                             avb.element_on_creation = None;
                                             avb.go_to_arrow_tool();
                                         } else {
@@ -1261,16 +1791,17 @@ fn on_window_keydown(av: RefAV, event: Event) {
                 ArrowLeft => {
                     // Jog X -1mm (responses will arrive on websocket)
                     let cmd = "$J=G91 X-1 F200".to_string();
-                    cnc_send(av.clone(), cmd);
                     drop(avb);
+                    cnc_send(av.clone(), cmd);
                     render_draw_view(av);
                     return;
                 }
                 ArrowRight => {
                     // Jog X +1mm
                     let cmd = "$J=G91 X1 F200".to_string();
-                    cnc_send(av.clone(), cmd);
                     drop(avb);
+                    cnc_send(av.clone(), cmd);
+
                     render_draw_view(av);
                     return;
                 }
@@ -1542,6 +2073,18 @@ fn render_draw_view(av: RefAV) {
                     }
                 }
             }
+            Icons::Text => {
+                if vs.len() == 1 {
+                    vs.push(canvas_draw.get_user_ui().pointer.curr);
+                    if let Some(e) =
+                        ClosedShape::new_text("TEXT".to_string(), TextFont::Stencilia, vs[0], vs[1])
+                    {
+                        canvas_draw.draw_paths_creation(&e);
+                        canvas_draw.draw_vs(&e);
+                        canvas_draw.draw_dimensions(&e);
+                    }
+                }
+            }
             Icons::Poly => {
                 if vs.len() > 2 {
                     vs.push(canvas_draw.get_user_ui().pointer.curr);
@@ -1638,7 +2181,6 @@ fn render_gcode_view(av: RefAV) {
 
     for s in segs.into_iter().filter(|s| s.cut) {
         let p = seg_to_path(s);
-        log!("G-code path: {:?}", p);
         canvas_gcode.draw_path(&p, Pattern::Basic, Color::Transparent, Color::Black, vec![]);
     }
 }

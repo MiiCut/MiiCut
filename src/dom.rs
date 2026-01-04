@@ -41,6 +41,7 @@ pub enum Icons {
     Square,
     Oblong,
     Poly,
+    Text,
 }
 impl Icons {
     pub fn id(&self) -> &'static str {
@@ -51,6 +52,7 @@ impl Icons {
             Square => "icon-square",
             Oblong => "icon-oblong",
             Poly => "icon-polygon",
+            Text => "icon-text",
         }
     }
     pub fn get_element(&self) -> Option<Element> {

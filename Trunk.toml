@@ -9,8 +9,3 @@ no_autoreload = true
 [watch]
 watch = ["index.html", "src", "static", "assets"]
 ignore = ["target", ".git"]
-
-[[hooks]]
-stage = "pre_build"
-command = "sh"
-command_arguments = ["-lc", "mkdir -p target/trunk-dist/.stage"]

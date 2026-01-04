@@ -570,7 +570,7 @@ impl Canvas {
             .rotate(text.config.angle)
             .expect("Failed to rotate canvas");
         self.ctx
-            .set_font(&format!("{}px Urbanist", text.config.font_size));
+            .set_font(&format!("{}px Stencilia", text.config.font_size));
         self.ctx.set_global_alpha(text.config.opacity);
 
         self.ctx.set_stroke_style_str(text.config.color.get());
@@ -595,7 +595,7 @@ impl Canvas {
             .rotate(text.config.angle)
             .expect("Failed to rotate canvas");
         self.ctx
-            .set_font(&format!("{}px Urbanist", text.config.font_size));
+            .set_font(&format!("{}px Stencilia", text.config.font_size));
         self.ctx.set_global_alpha(text.config.opacity);
 
         self.ctx.set_stroke_style_str(text.config.color.get());
@@ -781,7 +781,7 @@ impl Canvas {
                     }
                 }
             }
-            Icons::Square => {
+            Icons::Square | Icons::Text => {
                 for (v1, v2) in e
                     .get_vertices()
                     .iter()

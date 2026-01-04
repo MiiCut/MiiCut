@@ -12,7 +12,10 @@ use crate::{
     },
     types::{EUId, SegBundle, VUId, Value, VecRing},
 };
-use geo::{LineString, Polygon};
+use geo::algorithm::bounding_rect::BoundingRect;
+use geo::algorithm::contains::Contains;
+use geo::algorithm::orient::Orient;
+use geo::{orient::Direction, LineString, MultiPolygon, Point, Polygon};
 use kurbo::{Arc, BezPath, Circle, PathEl, Shape, Vec2};
 use std::{collections::HashSet, hash::Hash};
 use std::{
@@ -20,6 +23,55 @@ use std::{
     fmt::{Debug, Display},
     vec,
 };
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TextFont {
+    Stencilia,
+    Urbanist,
+}
+impl TextFont {
+    fn data(&self) -> &'static [u8] {
+        match self {
+            TextFont::Stencilia => include_bytes!("../assets/stencilia/Stencilia-A.ttf"),
+            TextFont::Urbanist => include_bytes!("../assets/urbanist/Urbanist-Variable.ttf"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TextData {
+    pub text: String,
+    pub font: TextFont,
+    pub scale: Option<f64>,
+    pub auto_fit: bool,
+    cached_text: String,
+    cached_font: TextFont,
+    cached_scale_override: Option<f64>,
+    cached_auto_fit: bool,
+    cached_bbox_min: Vec2,
+    cached_bbox_max: Vec2,
+    cached_polygon: Option<MultiPolygon<f64>>,
+}
+impl TextData {
+    pub fn new(text: String, font: TextFont, scale: Option<f64>, auto_fit: bool) -> Self {
+        Self {
+            text,
+            font,
+            scale,
+            auto_fit,
+            cached_text: String::new(),
+            cached_font: TextFont::Stencilia,
+            cached_scale_override: None,
+            cached_auto_fit: false,
+            cached_bbox_min: Vec2::ZERO,
+            cached_bbox_max: Vec2::ZERO,
+            cached_polygon: None,
+        }
+    }
+    fn invalidate_cache(&mut self) {
+        self.cached_polygon = None;
+    }
+}
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -29,7 +81,8 @@ pub struct ClosedShape {
     vertices: VecRing<VUId>,
 
     bezpath: BezPath,
-    polygon: Polygon<f64>,
+    polygon: MultiPolygon<f64>,
+    text: Option<TextData>,
 }
 impl ClosedShape {
     const TOLERANCE: f64 = 0.01;
@@ -85,6 +138,9 @@ impl ClosedShape {
                     return None;
                 }
             }
+            Icons::Text => {
+                return None;
+            }
         }
         let vertices = vertices
             .iter()
@@ -97,7 +153,74 @@ impl ClosedShape {
             operation: Operation::Union,
             vertices: VecRing::from_slice(vertices).unwrap(),
             bezpath: BezPath::new(),
-            polygon: Polygon::new(LineString::new(vec![]), vec![]),
+            polygon: MultiPolygon::new(vec![]),
+            text: None,
+        };
+        shape.set_bezpath();
+        Some(shape)
+    }
+
+    pub fn from_raw(
+        shape_type: Icons,
+        operation: Operation,
+        vertices: Vec<Vec2>,
+        rounded: &[Option<u32>],
+        text: Option<TextData>,
+    ) -> Option<Self> {
+        match shape_type {
+            Icons::Arrow => return None,
+            Icons::Disc if vertices.len() != 2 => return None,
+            Icons::Square if vertices.len() != 4 => return None,
+            Icons::Oblong if vertices.len() != 3 => return None,
+            Icons::Poly if vertices.len() < 3 => return None,
+            Icons::Text if vertices.len() != 4 => return None,
+            _ => {}
+        }
+
+        let vertices = vertices
+            .iter()
+            .map(|v| (VUId::new(), Value::new(*v)))
+            .collect::<Vec<_>>();
+        let mut shape = ClosedShape {
+            shape_type,
+            operation,
+            vertices: VecRing::from_slice(&vertices[..]).unwrap(),
+            bezpath: BezPath::new(),
+            polygon: MultiPolygon::new(vec![]),
+            text,
+        };
+
+        let count = rounded.len().min(shape.vertices.len());
+        for idx in 0..count {
+            if let Some(value) = rounded[idx] {
+                shape.vertices.val_mut(idx as i64).rounded = Some(value);
+            }
+        }
+
+        shape.set_bezpath();
+        Some(shape)
+    }
+
+    pub fn new_text(text: String, font: TextFont, p1: Vec2, p2: Vec2) -> Option<Self> {
+        if p1 == p2 {
+            return None;
+        }
+        let bl = Vec2::new(p1.x.min(p2.x), p1.y.min(p2.y));
+        let tr = Vec2::new(p1.x.max(p2.x), p1.y.max(p2.y));
+        let tl = Vec2::new(bl.x, tr.y);
+        let br = Vec2::new(tr.x, bl.y);
+        let vertices = vec![bl, tl, tr, br]
+            .iter()
+            .map(|v| (VUId::new(), Value::new(*v)))
+            .collect::<Vec<_>>();
+
+        let mut shape = ClosedShape {
+            shape_type: Icons::Text,
+            operation: Operation::Union,
+            vertices: VecRing::from_slice(&vertices[..]).unwrap(),
+            bezpath: BezPath::new(),
+            polygon: MultiPolygon::new(vec![]),
+            text: Some(TextData::new(text, font, None, false)),
         };
         shape.set_bezpath();
         Some(shape)
@@ -265,10 +388,16 @@ impl ClosedShape {
                 self.set_bezpath();
                 true
             }
-            Icons::Square => {
+            Icons::Square | Icons::Text => {
                 let len = self.vertices.len();
                 if len != 4 {
                     return false;
+                }
+                if self.shape_type == Icons::Text {
+                    if let Some(text) = self.text.as_mut() {
+                        text.scale = None;
+                        text.invalidate_cache();
+                    }
                 }
                 let i = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                     Some(i) => i as i64,
@@ -374,6 +503,10 @@ impl ClosedShape {
     }
 
     pub fn contains(&self, pos: Vec2) -> bool {
+        if self.shape_type == Icons::Text {
+            let bbox = self.bezpath.bounding_box();
+            return bbox.contains(pos.to_point());
+        }
         self.get_bezpath().contains(pos.to_point())
     }
     pub fn get_shape_type(&self) -> Icons {
@@ -382,11 +515,119 @@ impl ClosedShape {
     pub fn get_operation(&self) -> Operation {
         self.operation
     }
-    pub fn get_polygon(&self) -> &Polygon<f64> {
+    pub fn get_polygon(&self) -> &MultiPolygon<f64> {
         &self.polygon
     }
     pub fn get_bezpath(&self) -> &BezPath {
         &self.bezpath
+    }
+    pub fn get_text(&self) -> Option<&TextData> {
+        self.text.as_ref()
+    }
+    pub fn set_text_value(&mut self, text: String) {
+        if let Some(data) = self.text.as_mut() {
+            if !data.auto_fit && data.scale.is_none() && !self.bezpath.is_empty() {
+                let bbox = self.bezpath.bounding_box();
+                if !bbox.is_zero_area() {
+                    let bbox_min = Vec2::new(bbox.x0, bbox.y0);
+                    let bbox_max = Vec2::new(bbox.x1, bbox.y1);
+                    if let Some(scale) =
+                        text_scale_for_bbox(&data.text, data.font.clone(), bbox_min, bbox_max)
+                    {
+                        data.scale = Some(scale);
+                    }
+                }
+            }
+            data.text = text;
+            data.invalidate_cache();
+            self.set_bezpath();
+        }
+    }
+    pub fn set_text_autofit(&mut self, enabled: bool) {
+        if let Some(data) = self.text.as_mut() {
+            data.auto_fit = enabled;
+            if enabled {
+                data.scale = None;
+            }
+            data.invalidate_cache();
+            self.set_bezpath();
+        }
+    }
+    pub fn ensure_text_scale(&mut self) {
+        if let Some(data) = self.text.as_ref() {
+            if data.auto_fit || data.scale.is_some() {
+                return;
+            }
+        }
+        self.set_bezpath();
+    }
+    pub fn fit_text_bbox_width_to_content(&mut self) {
+        if self.shape_type != Icons::Text {
+            return;
+        }
+        let Some(text) = self.text.as_ref() else {
+            return;
+        };
+        if text.auto_fit {
+            return;
+        }
+        let Some(scale) = text.scale else {
+            return;
+        };
+        let Some(desired_w) = text_width_for_scale(&text.text, text.font.clone(), scale) else {
+            return;
+        };
+        if self.vertices.len() < 4 || self.bezpath.is_empty() {
+            return;
+        }
+        let bbox = self.bezpath.bounding_box();
+        if bbox.is_zero_area() {
+            return;
+        }
+        let center_x = (bbox.x0 + bbox.x1) * 0.5;
+        let half_w = desired_w * 0.5;
+        let min_x = center_x - half_w;
+        let max_x = center_x + half_w;
+        let min_y = bbox.y0;
+        let max_y = bbox.y1;
+
+        let corners = [
+            Vec2::new(min_x, min_y),
+            Vec2::new(min_x, max_y),
+            Vec2::new(max_x, max_y),
+            Vec2::new(max_x, min_y),
+        ];
+        for (idx, corner) in corners.iter().enumerate() {
+            let value = self.vertices.val_mut(idx as i64);
+            value.curr = *corner;
+            value.saved = *corner;
+            value.last = *corner;
+        }
+        self.set_bezpath();
+    }
+    pub fn fit_text_bbox_to_polygon(&mut self) {
+        if self.shape_type != Icons::Text {
+            return;
+        }
+        let Some(rect) = self.polygon.bounding_rect() else {
+            return;
+        };
+        if self.vertices.len() < 4 {
+            return;
+        }
+        let bl = Vec2::new(rect.min().x, rect.min().y);
+        let tr = Vec2::new(rect.max().x, rect.max().y);
+        let tl = Vec2::new(bl.x, tr.y);
+        let br = Vec2::new(tr.x, bl.y);
+        let corners = [bl, tl, tr, br];
+
+        for (idx, corner) in corners.iter().enumerate() {
+            let value = self.vertices.val_mut(idx as i64);
+            value.curr = *corner;
+            value.saved = *corner;
+            value.last = *corner;
+        }
+        self.set_bezpath();
     }
     pub fn set_bezpath(&mut self) {
         match self.shape_type {
@@ -447,13 +688,318 @@ impl ClosedShape {
                 let apices = self.vertices.get_apices(); // -> Vec<ApexType>
                 self.bezpath = bezpath_from_apices(&apices);
             }
+            Icons::Text => {
+                let apices = self.vertices.get_apices();
+                self.bezpath = bezpath_from_apices(&apices);
+                self.update_text_polygon();
+                return;
+            }
             Icons::Arrow => return,
         }
         self.update_polygon();
     }
     fn update_polygon(&mut self) {
-        self.polygon = bez_path_to_geo_polygon(&self.bezpath);
+        let poly = bez_path_to_geo_polygon(&self.bezpath);
+        self.polygon = MultiPolygon::new(vec![poly]);
     }
+
+    fn update_text_polygon(&mut self) {
+        let Some(text) = self.text.as_mut() else {
+            self.polygon = MultiPolygon::new(vec![]);
+            return;
+        };
+        if self.vertices.len() < 4 || self.bezpath.is_empty() {
+            self.polygon = MultiPolygon::new(vec![]);
+            return;
+        }
+        let bbox = self.bezpath.bounding_box();
+        if bbox.is_zero_area() {
+            self.polygon = MultiPolygon::new(vec![]);
+            return;
+        }
+        let bbox_min = Vec2::new(bbox.x0, bbox.y0);
+        let bbox_max = Vec2::new(bbox.x1, bbox.y1);
+
+        let scale_override = if text.auto_fit { None } else { text.scale };
+        let cache_hit = text.cached_polygon.is_some()
+            && text.cached_text == text.text
+            && text.cached_font == text.font
+            && text.cached_scale_override == scale_override
+            && text.cached_auto_fit == text.auto_fit
+            && text.cached_bbox_min == bbox_min
+            && text.cached_bbox_max == bbox_max;
+
+        if cache_hit {
+            self.polygon = text
+                .cached_polygon
+                .clone()
+                .unwrap_or_else(|| MultiPolygon::new(vec![]));
+            return;
+        }
+
+        let (poly, scale) = text_to_multipolygon(
+            &text.text,
+            text.font.clone(),
+            bbox_min,
+            bbox_max,
+            scale_override,
+        );
+        self.polygon = poly.clone();
+        text.cached_polygon = Some(poly);
+        text.cached_text = text.text.clone();
+        text.cached_font = text.font.clone();
+        text.cached_scale_override = scale_override;
+        text.cached_auto_fit = text.auto_fit;
+        text.cached_bbox_min = bbox_min;
+        text.cached_bbox_max = bbox_max;
+
+        if text.scale.is_none() && !text.auto_fit {
+            text.scale = Some(scale);
+        }
+    }
+}
+
+struct GlyphBuilder {
+    contours: Vec<BezPath>,
+    current: Option<BezPath>,
+    scale: f64,
+    offset: Vec2,
+}
+impl GlyphBuilder {
+    fn new(scale: f64, offset: Vec2) -> Self {
+        Self {
+            contours: Vec::new(),
+            current: None,
+            scale,
+            offset,
+        }
+    }
+    fn finish(mut self) -> Vec<BezPath> {
+        if let Some(path) = self.current.take() {
+            if !path.is_empty() {
+                self.contours.push(path);
+            }
+        }
+        self.contours
+    }
+    fn pt(&self, x: f32, y: f32) -> kurbo::Point {
+        kurbo::Point::new(
+            self.offset.x + (x as f64) * self.scale,
+            self.offset.y - (y as f64) * self.scale,
+        )
+    }
+}
+impl ttf_parser::OutlineBuilder for GlyphBuilder {
+    fn move_to(&mut self, x: f32, y: f32) {
+        if let Some(path) = self.current.take() {
+            if !path.is_empty() {
+                self.contours.push(path);
+            }
+        }
+        let mut path = BezPath::new();
+        path.push(PathEl::MoveTo(self.pt(x, y)));
+        self.current = Some(path);
+    }
+    fn line_to(&mut self, x: f32, y: f32) {
+        let pt = self.pt(x, y);
+        if let Some(path) = self.current.as_mut() {
+            path.push(PathEl::LineTo(pt));
+        }
+    }
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        let pt1 = self.pt(x1, y1);
+        let pt2 = self.pt(x, y);
+        if let Some(path) = self.current.as_mut() {
+            path.push(PathEl::QuadTo(pt1, pt2));
+        }
+    }
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        let pt1 = self.pt(x1, y1);
+        let pt2 = self.pt(x2, y2);
+        let pt3 = self.pt(x, y);
+        if let Some(path) = self.current.as_mut() {
+            path.push(PathEl::CurveTo(pt1, pt2, pt3));
+        }
+    }
+    fn close(&mut self) {
+        if let Some(path) = self.current.as_mut() {
+            path.push(PathEl::ClosePath);
+        }
+    }
+}
+
+fn text_to_multipolygon(
+    text: &str,
+    font: TextFont,
+    bbox_min: Vec2,
+    bbox_max: Vec2,
+    scale_override: Option<f64>,
+) -> (MultiPolygon<f64>, f64) {
+    let Ok(face) = ttf_parser::Face::parse(font.data(), 0) else {
+        return (MultiPolygon::new(vec![]), 0.0);
+    };
+    let bbox_w = (bbox_max.x - bbox_min.x).max(EPSILON);
+    let bbox_h = (bbox_max.y - bbox_min.y).max(EPSILON);
+
+    let asc = face.ascender() as f64;
+    let desc = face.descender() as f64;
+    let text_height = (asc - desc).max(1.0);
+
+    let mut advances: Vec<(ttf_parser::GlyphId, f64)> = Vec::new();
+    let mut advance_total = 0.0;
+
+    for ch in text.chars() {
+        if ch == '\n' {
+            continue;
+        }
+        if let Some(gid) = face.glyph_index(ch) {
+            advances.push((gid, advance_total));
+            let adv = face.glyph_hor_advance(gid).unwrap_or(0) as f64;
+            advance_total += adv;
+        } else {
+            let adv = face.units_per_em() as f64 * 0.5;
+            advance_total += adv;
+        }
+    }
+    if advance_total <= EPSILON {
+        return (MultiPolygon::new(vec![]), 0.0);
+    }
+
+    let scale = scale_override.unwrap_or((bbox_w / advance_total).min(bbox_h / text_height));
+    let scaled_w = advance_total * scale;
+    let scaled_h = text_height * scale;
+    let top_y = bbox_min.y + (bbox_h - scaled_h) * 0.5;
+    let offset_y = top_y + asc * scale;
+    let offset_x = bbox_min.x + (bbox_w - scaled_w) * 0.5;
+
+    let mut rings: Vec<LineString<f64>> = Vec::new();
+    for (gid, advance_x) in advances {
+        let offset = Vec2::new(offset_x + advance_x * scale, offset_y);
+        let mut builder = GlyphBuilder::new(scale, offset);
+        face.outline_glyph(gid, &mut builder);
+        let contours = builder.finish();
+        for contour in contours {
+            let poly = bez_path_to_geo_polygon(&contour);
+            let ring = poly.exterior().clone();
+            if ring.0.len() >= 4 {
+                rings.push(ring);
+            }
+        }
+    }
+
+    (rings_to_multipolygon(rings), scale)
+}
+
+fn text_scale_for_bbox(text: &str, font: TextFont, bbox_min: Vec2, bbox_max: Vec2) -> Option<f64> {
+    let Ok(face) = ttf_parser::Face::parse(font.data(), 0) else {
+        return None;
+    };
+    let bbox_w = (bbox_max.x - bbox_min.x).max(EPSILON);
+    let bbox_h = (bbox_max.y - bbox_min.y).max(EPSILON);
+    let asc = face.ascender() as f64;
+    let desc = face.descender() as f64;
+    let text_height = (asc - desc).max(1.0);
+
+    let mut advance_total = 0.0;
+    for ch in text.chars() {
+        if ch == '\n' {
+            continue;
+        }
+        if let Some(gid) = face.glyph_index(ch) {
+            let adv = face.glyph_hor_advance(gid).unwrap_or(0) as f64;
+            advance_total += adv;
+        } else {
+            let adv = face.units_per_em() as f64 * 0.5;
+            advance_total += adv;
+        }
+    }
+    if advance_total <= EPSILON {
+        return None;
+    }
+    Some((bbox_w / advance_total).min(bbox_h / text_height))
+}
+
+fn text_width_for_scale(text: &str, font: TextFont, scale: f64) -> Option<f64> {
+    let Ok(face) = ttf_parser::Face::parse(font.data(), 0) else {
+        return None;
+    };
+    let mut advance_total = 0.0;
+    for ch in text.chars() {
+        if ch == '\n' {
+            continue;
+        }
+        if let Some(gid) = face.glyph_index(ch) {
+            let adv = face.glyph_hor_advance(gid).unwrap_or(0) as f64;
+            advance_total += adv;
+        } else {
+            let adv = face.units_per_em() as f64 * 0.5;
+            advance_total += adv;
+        }
+    }
+    if advance_total <= EPSILON {
+        return None;
+    }
+    Some(advance_total * scale)
+}
+
+fn rings_to_multipolygon(rings: Vec<LineString<f64>>) -> MultiPolygon<f64> {
+    if rings.is_empty() {
+        return MultiPolygon::new(vec![]);
+    }
+    let mut outers: Vec<usize> = Vec::new();
+    let mut holes: Vec<(usize, LineString<f64>)> = Vec::new();
+    let mut areas: Vec<f64> = Vec::new();
+
+    for ring in &rings {
+        areas.push(ring_signed_area(ring).abs());
+    }
+
+    for (i, ring) in rings.iter().enumerate() {
+        let pt = ring.0.first().copied().unwrap_or_default();
+        let mut container: Option<usize> = None;
+        for (j, outer) in rings.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let poly = Polygon::new(outer.clone(), vec![]);
+            if poly.contains(&Point::new(pt.x, pt.y)) {
+                if container.is_none() || areas[j] < areas[container.unwrap()] {
+                    container = Some(j);
+                }
+            }
+        }
+        if let Some(idx) = container {
+            holes.push((idx, ring.clone()));
+        } else {
+            outers.push(i);
+        }
+    }
+
+    let mut polys = Vec::new();
+    for outer_idx in outers {
+        let mut inner = Vec::new();
+        for (idx, ring) in holes.iter() {
+            if *idx == outer_idx {
+                inner.push(ring.clone());
+            }
+        }
+        let poly = Polygon::new(rings[outer_idx].clone(), inner).orient(Direction::Default);
+        polys.push(poly);
+    }
+
+    MultiPolygon::new(polys)
+}
+
+fn ring_signed_area(ring: &LineString<f64>) -> f64 {
+    let pts = &ring.0;
+    if pts.len() < 3 {
+        return 0.0;
+    }
+    let mut area = 0.0;
+    for i in 0..pts.len() - 1 {
+        area += pts[i].x * pts[i + 1].y - pts[i + 1].x * pts[i].y;
+    }
+    area * 0.5
 }
 
 impl Clone for ClosedShape {
@@ -469,6 +1015,7 @@ impl Clone for ClosedShape {
             vertices: VecRing::from_slice(&vertices[..]).unwrap(),
             bezpath: self.bezpath.clone(),
             polygon: self.polygon.clone(),
+            text: self.text.clone(),
         }
     }
 }

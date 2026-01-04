@@ -5,20 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>MiiCut</title>
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Urbanist:ital,wght@0,100..900;1,100..900&display=swap"
-      rel="stylesheet"
-    />
+    <link rel="stylesheet" href="assets/urbanist/urbanist.css" />
 
     <link data-trunk rel="css" href="static/styles.css" />
     <link data-trunk rel="copy-dir" href="./assets" />
     <link data-trunk rel="rust" />
     <base data-trunk-public-url />
+    <script>
+      document.fonts?.load("16px Stencilia");
+    </script>
   </head>
   <body>
-    <input type="file" id="file-input" style="display: none" />
+    <input type="file" id="file-input" accept=".json" style="display: none" />
     <div id="color-tailwind"></div>
 
     <!-- Top Menu -->
@@ -27,8 +25,10 @@
       <div class="dropdown">
         <button class="dropbtn">File</button>
         <div class="dropdown-content">
-          <a href="#" id="load-option">Load SVG path</a>
-          <a href="#" id="save-option">Save drawing (TBD)</a>
+          <a href="#" id="load-option">Load file</a>
+          <a href="#" id="save-option">Save file</a>
+          <div class="dropdown-separator"></div>
+          <a href="#" id="export-svg">Export to SVG</a>
         </div>
       </div>
     </div>
@@ -56,6 +56,7 @@
             class="icon"
             data-tooltip="Draw a polygon"
           ></div>
+          <div id="icon-text" class="icon" data-tooltip="Draw text"></div>
           <div class="icon-separator"></div>
           <div
             id="icon-construction-line"
