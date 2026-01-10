@@ -7,14 +7,25 @@
 
     <link rel="stylesheet" href="assets/urbanist/urbanist.css" />
 
-    <link data-trunk rel="css" href="static/styles.css" />
-    <link data-trunk rel="copy-dir" href="./assets" />
-    <link data-trunk rel="rust" />
-    <base data-trunk-public-url />
+    <link rel="stylesheet" href="/styles-add665ce6cc7b418.css" integrity="sha384-lMzR4dhZTJlfzw4K2TUjoAVBuvTV/TnLhXPbI5mDh5K1gC5H2CyQ8YaFJk3oGexx"/>
+    
+    
+<script type="module">
+import init, * as bindings from '/MiiCut-61370ade5839b76b.js';
+const wasm = await init({ module_or_path: '/MiiCut-61370ade5839b76b_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+    <base href="/" />
     <script>
       document.fonts?.load("16px Stencilia");
     </script>
-  </head>
+  <link rel="modulepreload" href="/MiiCut-61370ade5839b76b.js" crossorigin="anonymous" integrity="sha384-+6BYKdg+yiPc2KOvQQsR13lfO5OyExMLmdF0B0OpdF51/eayqGrS8uuI4EkAN1gS"><link rel="preload" href="/MiiCut-61370ade5839b76b_bg.wasm" crossorigin="anonymous" integrity="sha384-7XjGXWomQojUGZKsjpvNScnp7W0b1xu1digIj64SFpx8Olk6myFd/IKJrlJHbHen" as="fetch" type="application/wasm"></head>
   <body>
     <input type="file" id="file-input" accept=".json" style="display: none" />
     <input type="file" id="svg-input" accept=".svg" style="display: none" />
