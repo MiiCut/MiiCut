@@ -8,6 +8,7 @@ use wasm_bindgen::JsCast;
 pub enum Tabs {
     Draw,
     Gcode,
+    Toolpath,
 }
 
 impl Tabs {
@@ -15,6 +16,7 @@ impl Tabs {
         match self {
             Tabs::Draw => "tab-draw",
             Tabs::Gcode => "tab-gcode",
+            Tabs::Toolpath => "tab-toolpath",
         }
     }
 
@@ -22,6 +24,7 @@ impl Tabs {
         match self {
             Tabs::Draw => "view-draw",
             Tabs::Gcode => "view-gcode",
+            Tabs::Toolpath => "view-toolpath",
         }
     }
 
@@ -35,17 +38,18 @@ impl Tabs {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum Icons {
+pub enum ShapeType {
     Arrow,
     Disc,
     Square,
     Oblong,
     Poly,
     Text,
+    Svg,
 }
-impl Icons {
+impl ShapeType {
     pub fn id(&self) -> &'static str {
-        use Icons::*;
+        use ShapeType::*;
         match self {
             Arrow => "icon-arrow",
             Disc => "icon-disc",
@@ -53,6 +57,7 @@ impl Icons {
             Oblong => "icon-oblong",
             Poly => "icon-polygon",
             Text => "icon-text",
+            Svg => "icon-svg",
         }
     }
     pub fn get_element(&self) -> Option<Element> {
@@ -70,7 +75,7 @@ impl Icons {
 pub enum DOMElements {
     ContextMenuShape,
     ContextMenuShapeToogle,
-    Icon(Icons),
+    Icon(ShapeType),
 }
 impl DOMElements {
     pub fn id(&self) -> &'static str {

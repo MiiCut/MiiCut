@@ -269,12 +269,26 @@ impl Snap {
             SnapValue::SnapMax => self.linear = SnapValue::SnapMin,
         }
     }
+    pub fn set_linear_value(&mut self, value: f64) {
+        self.linear = match value {
+            v if (v - 1.0).abs() < f64::EPSILON => SnapValue::SnapMin,
+            v if (v - 5.0).abs() < f64::EPSILON => SnapValue::SnapMed,
+            _ => SnapValue::SnapMax,
+        };
+    }
     pub fn next_angle(&mut self) {
         match self.angle {
             SnapValue::SnapMin => self.angle = SnapValue::SnapMed,
             SnapValue::SnapMed => self.angle = SnapValue::SnapMax,
             SnapValue::SnapMax => self.angle = SnapValue::SnapMin,
         }
+    }
+    pub fn set_angle_value(&mut self, value: f64) {
+        self.angle = match value {
+            v if (v - 1.0).abs() < f64::EPSILON => SnapValue::SnapMin,
+            v if (v - 5.0).abs() < f64::EPSILON => SnapValue::SnapMed,
+            _ => SnapValue::SnapMax,
+        };
     }
 }
 

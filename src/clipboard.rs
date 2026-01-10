@@ -24,6 +24,17 @@ impl Clipboard {
         }
     }
 
+    pub fn make_paste(&self, pointer: &Value) -> Option<ClosedShape> {
+        let (shape, copy_pointer) = self.item_copy.as_ref()?;
+        let delta = pointer.curr - copy_pointer.curr;
+        let mut pasted = shape.clone();
+        pasted.move_shape(delta);
+        for (_, value) in pasted.get_vertices_mut().iter_mut() {
+            value.bind.clear();
+        }
+        Some(pasted)
+    }
+
     pub fn move_paste(&mut self, pointer_paste: &mut Value) {
         if let Some(item_paste) = self.item_paste.as_mut() {
             item_paste.1 = pointer_paste.clone();

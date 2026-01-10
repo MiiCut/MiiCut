@@ -17,6 +17,7 @@
   </head>
   <body>
     <input type="file" id="file-input" accept=".json" style="display: none" />
+    <input type="file" id="svg-input" accept=".svg" style="display: none" />
     <div id="color-tailwind"></div>
 
     <!-- Top Menu -->
@@ -28,8 +29,26 @@
           <a href="#" id="load-option">Load file</a>
           <a href="#" id="save-option">Save file</a>
           <div class="dropdown-separator"></div>
+          <a href="#" id="import-svg">Import SVG</a>
+          <label class="dropdown-option" for="import-svg-single">
+            <input type="checkbox" id="import-svg-single" />
+            Import SVG as single shape
+          </label>
           <a href="#" id="export-svg">Export to SVG</a>
         </div>
+      </div>
+      <div class="dropdown">
+        <button class="dropbtn">Machine</button>
+        <div class="dropdown-content">
+          <a href="#" id="machine-load-params">Load parameters</a>
+          <a href="#" id="machine-save-params">Save parameters</a>
+        </div>
+      </div>
+      <div id="view-tabs" class="view-tabs">
+        <span class="view-title">VIEW:</span>
+        <button id="tab-draw" class="tab active">Draw</button>
+        <button id="tab-toolpath" class="tab">Toolpath</button>
+        <button id="tab-gcode" class="tab">G-code</button>
       </div>
     </div>
 
@@ -70,11 +89,6 @@
           ></div>
         </div>
         <div id="gcode-icons" class="icon-container"></div>
-        <!-- Tabs en bas du panneau gauche -->
-        <div id="view-tabs" class="left-tabs">
-          <button id="tab-draw" class="tab active">Draw</button>
-          <button id="tab-gcode" class="tab">G-code</button>
-        </div>
       </div>
 
       <!-- Zone centrale (tabs + vues) -->
@@ -105,6 +119,79 @@
               </div>
             </div>
           </div>
+
+          <div id="view-toolpath" class="view">
+            <div id="toolpath-split">
+              <div id="toolpath-left">
+                <div id="toolpath-canvas-wrap">
+                  <canvas id="toolpathCanvas"></canvas>
+                </div>
+              </div>
+
+              <div id="toolpath-splitter"></div>
+
+              <div id="toolpath-right">
+                <div id="toolpath-right-toolbar">
+                  <div class="toolpath-toolbar-title">Machine parameters</div>
+                </div>
+                <div id="toolpath-params">
+                  <label class="toolpath-field">
+                    <span class="toolpath-label"
+                      >Feed (mm/min) <em class="toolpath-note">G1 F</em></span
+                    >
+                    <input type="number" id="tp-feed" step="1" min="0" />
+                  </label>
+                  <label class="toolpath-field">
+                    <span class="toolpath-label"
+                      >Travel feed (mm/min)
+                      <em class="toolpath-note">G1 F (torch off)</em></span
+                    >
+                    <input type="number" id="tp-travel-feed" step="1" min="0" />
+                  </label>
+                  <label class="toolpath-field">
+                    <span class="toolpath-label"
+                      >Pierce delay (s)
+                      <em class="toolpath-note">G4 P</em></span
+                    >
+                    <input type="number" id="tp-pierce" step="0.1" min="0" />
+                  </label>
+                  <label class="toolpath-field">
+                    <span class="toolpath-label"
+                      >Lead-in (mm)
+                      <em class="toolpath-note">toolpath</em></span
+                    >
+                    <input type="number" id="tp-lead-in" step="1" min="0" />
+                  </label>
+                  <label class="toolpath-field">
+                    <span class="toolpath-label"
+                      >Lead-out (mm)
+                      <em class="toolpath-note">toolpath</em></span
+                    >
+                    <input type="number" id="tp-lead-out" step="1" min="0" />
+                  </label>
+                  <label class="toolpath-field">
+                    <span class="toolpath-label"
+                      >Kerf (mm)
+                      <em class="toolpath-note">toolpath offset</em></span
+                    >
+                    <input type="number" id="tp-kerf" step="0.1" min="0" />
+                  </label>
+                  <label class="toolpath-field">
+                    <span class="toolpath-label"
+                      >Torch ON <em class="toolpath-note">M3</em></span
+                    >
+                    <input type="text" id="tp-torch-on" />
+                  </label>
+                  <label class="toolpath-field">
+                    <span class="toolpath-label"
+                      >Torch OFF <em class="toolpath-note">M5</em></span
+                    >
+                    <input type="text" id="tp-torch-off" />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -123,6 +210,36 @@
         <br />
         <button type="button" id="applyWorksheetSettings">Apply</button>
       </form>
+    </div>
+    <div id="status-bar" class="status-bar">
+      <div class="status-group">
+        <span class="status-label">Linear snap</span>
+        <label class="status-option"
+          ><input type="checkbox" id="snap-linear-1" />1</label
+        >
+        <label class="status-option"
+          ><input type="checkbox" id="snap-linear-5" />5</label
+        >
+        <label class="status-option"
+          ><input type="checkbox" id="snap-linear-10" />10</label
+        >
+      </div>
+      <div class="status-sep"></div>
+      <div class="status-group">
+        <span class="status-label">Angle snap</span>
+        <label class="status-option"
+          ><input type="checkbox" id="snap-angle-1" />1</label
+        >
+        <label class="status-option"
+          ><input type="checkbox" id="snap-angle-5" />5</label
+        >
+        <label class="status-option"
+          ><input type="checkbox" id="snap-angle-10" />10</label
+        >
+      </div>
+      <div class="status-spacer"></div>
+      <div id="status-text" class="status-text"></div>
+      <div id="render-indicator" class="status-render"></div>
     </div>
     <div id="modalBackdrop"></div>
     <div id="tooltip" class="tooltip"></div>

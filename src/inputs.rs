@@ -103,6 +103,9 @@ impl UserUI {
             }
         }
     }
+    pub fn is_left_down(&self) -> bool {
+        self.button_level == ButtonLevel::Down && self.mouse_button == MouseButton::Left
+    }
 }
 
 #[derive(Debug, EnumString, Display)]

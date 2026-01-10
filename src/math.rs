@@ -2630,7 +2630,7 @@ pub fn bezpath_from_apices(apices: &[ApexType]) -> BezPath {
                 // Ensure we're at the arc start s
                 if curr != s {
                     path.line_to(to_point(s));
-                    curr = s;
+                    // curr = s;
                 }
                 // Append the circular arc s -> e with center c
                 add_circular_arc(&mut path, c, s, e);

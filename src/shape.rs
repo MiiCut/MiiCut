@@ -5,17 +5,19 @@
 //     }
 // }
 use crate::{
-    dom::Icons,
+    dom::ShapeType,
     inputs::UserUI,
     math::{
-        bez_path_to_geo_polygon, bezpath_from_apices, snap_angle, snap_val, snap_vertex, EPSILON,
+        bez_path_to_geo_polygon, bezpath_from_apices, geo_multipolygon_to_bez_paths, rotate_vector,
+        snap_angle, snap_val, snap_vertex, EPSILON,
     },
     types::{EUId, SegBundle, VUId, Value, VecRing},
 };
 use geo::algorithm::bounding_rect::BoundingRect;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::orient::Orient;
-use geo::{orient::Direction, LineString, MultiPolygon, Point, Polygon};
+use geo::algorithm::translate::Translate;
+use geo::{orient::Direction, Coord, LineString, MultiPolygon, Point, Polygon};
 use kurbo::{Arc, BezPath, Circle, PathEl, Shape, Vec2};
 use std::{collections::HashSet, hash::Hash};
 use std::{
@@ -73,16 +75,72 @@ impl TextData {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum SvgFillRule {
+    EvenOdd,
+    NonZero,
+}
+
+#[derive(Clone, Debug)]
+pub struct SvgData {
+    pub rings: Vec<Vec<Vec2>>,
+    pub fill_rule: SvgFillRule,
+    original_min: Vec2,
+    original_max: Vec2,
+    cached_bbox_min: Vec2,
+    cached_bbox_max: Vec2,
+    cached_polygon: Option<MultiPolygon<f64>>,
+    cached_paths_raw: Option<Vec<BezPath>>,
+    cached_paths: Option<Vec<BezPath>>,
+}
+impl SvgData {
+    pub fn new(rings: Vec<Vec<Vec2>>, fill_rule: SvgFillRule) -> Self {
+        let mut min = Vec2::new(f64::INFINITY, f64::INFINITY);
+        let mut max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for ring in rings.iter() {
+            for pt in ring.iter() {
+                min.x = min.x.min(pt.x);
+                min.y = min.y.min(pt.y);
+                max.x = max.x.max(pt.x);
+                max.y = max.y.max(pt.y);
+            }
+        }
+        if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
+            min = Vec2::ZERO;
+            max = Vec2::ZERO;
+        }
+        Self {
+            rings,
+            fill_rule,
+            original_min: min,
+            original_max: max,
+            cached_bbox_min: Vec2::ZERO,
+            cached_bbox_max: Vec2::ZERO,
+            cached_polygon: None,
+            cached_paths_raw: None,
+            cached_paths: None,
+        }
+    }
+    fn invalidate_cache(&mut self) {
+        self.cached_polygon = None;
+        self.cached_paths_raw = None;
+        self.cached_paths = None;
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct ClosedShape {
-    shape_type: Icons,
+    shape_type: ShapeType,
     operation: Operation,
     vertices: VecRing<VUId>,
 
     bezpath: BezPath,
     polygon: MultiPolygon<f64>,
     text: Option<TextData>,
+    svg: Option<SvgData>,
+    rotation: f64,
+    rotation_saved: f64,
 }
 impl ClosedShape {
     const TOLERANCE: f64 = 0.01;
@@ -98,22 +156,22 @@ impl ClosedShape {
         self.operation.difference();
     }
 
-    pub fn new(shape_type: Icons, vertices: &[Vec2]) -> Option<Self> {
+    pub fn new(shape_type: ShapeType, vertices: &[Vec2]) -> Option<Self> {
         let mut vertices: Vec<Vec2> = vertices.iter().cloned().collect();
         if vertices.is_empty() {
             return None;
         }
         // Sanity check
         match shape_type {
-            Icons::Arrow => {
+            ShapeType::Arrow => {
                 return None;
             }
-            Icons::Disc => {
+            ShapeType::Disc => {
                 if vertices.len() != 2 || vertices[0] == vertices[1] {
                     return None;
                 }
             }
-            Icons::Square => {
+            ShapeType::Square => {
                 if vertices.len() != 2 || vertices[0] == vertices[1] {
                     return None;
                 } else {
@@ -124,7 +182,7 @@ impl ClosedShape {
                     vertices = vec![bl, tl, tr, br];
                 }
             }
-            Icons::Oblong => {
+            ShapeType::Oblong => {
                 if vertices.len() != 2 || vertices[0] == vertices[1] {
                     return None;
                 }
@@ -133,12 +191,15 @@ impl ClosedShape {
                 let side = m - Vec2::new(dir.y, -dir.x) * 20.;
                 vertices = vec![vertices[0], vertices[1], side];
             }
-            Icons::Poly => {
+            ShapeType::Poly => {
                 if vertices.len() < 3 {
                     return None;
                 }
             }
-            Icons::Text => {
+            ShapeType::Text => {
+                return None;
+            }
+            ShapeType::Svg => {
                 return None;
             }
         }
@@ -155,25 +216,29 @@ impl ClosedShape {
             bezpath: BezPath::new(),
             polygon: MultiPolygon::new(vec![]),
             text: None,
+            svg: None,
+            rotation: 0.0,
+            rotation_saved: 0.0,
         };
         shape.set_bezpath();
         Some(shape)
     }
 
     pub fn from_raw(
-        shape_type: Icons,
+        shape_type: ShapeType,
         operation: Operation,
         vertices: Vec<Vec2>,
         rounded: &[Option<u32>],
         text: Option<TextData>,
+        svg: Option<SvgData>,
     ) -> Option<Self> {
         match shape_type {
-            Icons::Arrow => return None,
-            Icons::Disc if vertices.len() != 2 => return None,
-            Icons::Square if vertices.len() != 4 => return None,
-            Icons::Oblong if vertices.len() != 3 => return None,
-            Icons::Poly if vertices.len() < 3 => return None,
-            Icons::Text if vertices.len() != 4 => return None,
+            ShapeType::Arrow => return None,
+            ShapeType::Disc if vertices.len() != 2 => return None,
+            ShapeType::Square if vertices.len() != 4 => return None,
+            ShapeType::Oblong if vertices.len() != 3 => return None,
+            ShapeType::Poly if vertices.len() < 3 => return None,
+            ShapeType::Text | ShapeType::Svg if vertices.len() != 4 => return None,
             _ => {}
         }
 
@@ -188,6 +253,9 @@ impl ClosedShape {
             bezpath: BezPath::new(),
             polygon: MultiPolygon::new(vec![]),
             text,
+            svg,
+            rotation: 0.0,
+            rotation_saved: 0.0,
         };
 
         let count = rounded.len().min(shape.vertices.len());
@@ -215,12 +283,46 @@ impl ClosedShape {
             .collect::<Vec<_>>();
 
         let mut shape = ClosedShape {
-            shape_type: Icons::Text,
+            shape_type: ShapeType::Text,
             operation: Operation::Union,
             vertices: VecRing::from_slice(&vertices[..]).unwrap(),
             bezpath: BezPath::new(),
             polygon: MultiPolygon::new(vec![]),
             text: Some(TextData::new(text, font, None, false)),
+            svg: None,
+            rotation: 0.0,
+            rotation_saved: 0.0,
+        };
+        shape.set_bezpath();
+        Some(shape)
+    }
+
+    pub fn new_svg(rings: Vec<Vec<Vec2>>, fill_rule: SvgFillRule) -> Option<Self> {
+        let svg = SvgData::new(rings, fill_rule);
+        let min = svg.original_min;
+        let max = svg.original_max;
+        if min == max {
+            return None;
+        }
+        let bl = Vec2::new(min.x, min.y);
+        let tr = Vec2::new(max.x, max.y);
+        let tl = Vec2::new(bl.x, tr.y);
+        let br = Vec2::new(tr.x, bl.y);
+        let vertices = vec![bl, tl, tr, br]
+            .iter()
+            .map(|v| (VUId::new(), Value::new(*v)))
+            .collect::<Vec<_>>();
+
+        let mut shape = ClosedShape {
+            shape_type: ShapeType::Svg,
+            operation: Operation::Union,
+            vertices: VecRing::from_slice(&vertices[..]).unwrap(),
+            bezpath: BezPath::new(),
+            polygon: MultiPolygon::new(vec![]),
+            text: None,
+            svg: Some(svg),
+            rotation: 0.0,
+            rotation_saved: 0.0,
         };
         shape.set_bezpath();
         Some(shape)
@@ -256,7 +358,8 @@ impl ClosedShape {
     }
     pub fn select_vertex(&mut self, draw_pos: Vec2) -> Option<VUId> {
         for (_idx, (uid, value)) in self.vertices.iter().enumerate() {
-            if (value.curr - draw_pos).hypot() < Self::GRAB_RADIUS {
+            let pos = self.vertex_display_pos(value.curr);
+            if (pos - draw_pos).hypot() < Self::GRAB_RADIUS {
                 return Some(*uid);
             }
         }
@@ -264,7 +367,8 @@ impl ClosedShape {
     }
     pub fn highlight_vertex(&mut self, draw_pos: Vec2) -> Option<VUId> {
         for (uid, value) in self.vertices.iter() {
-            if (value.curr - draw_pos).hypot() < Self::GRAB_RADIUS {
+            let pos = self.vertex_display_pos(value.curr);
+            if (pos - draw_pos).hypot() < Self::GRAB_RADIUS {
                 return Some(*uid);
             }
         }
@@ -275,7 +379,7 @@ impl ClosedShape {
         let mut delta = user_ui.pointer.curr - user_ui.pointer.saved;
         delta = (delta / snap.linear()).round() * snap.linear();
         match self.shape_type {
-            Icons::Disc => {
+            ShapeType::Disc => {
                 if self.vertices.len() != 2 {
                     return false;
                 }
@@ -322,7 +426,7 @@ impl ClosedShape {
                     false
                 }
             }
-            Icons::Oblong => {
+            ShapeType::Oblong => {
                 if self.vertices.len() != 3 {
                     return false;
                 }
@@ -388,86 +492,68 @@ impl ClosedShape {
                 self.set_bezpath();
                 true
             }
-            Icons::Square | Icons::Text => {
+            ShapeType::Square | ShapeType::Text | ShapeType::Svg => {
                 let len = self.vertices.len();
                 if len != 4 {
                     return false;
                 }
-                if self.shape_type == Icons::Text {
+                let center = self.bbox_center_saved();
+                let saved = rotate_vector(user_ui.pointer.saved - center, -self.rotation) + center;
+                let curr = rotate_vector(user_ui.pointer.curr - center, -self.rotation) + center;
+                let mut local_delta = curr - saved;
+                local_delta = (local_delta / snap.linear()).round() * snap.linear();
+                log!("center {:?} local delta {:?}", center, local_delta);
+                if user_ui.keys_states.shift_pressed {
+                    let start = saved - center;
+                    let curr = curr - center;
+                    if start.hypot() < EPSILON || curr.hypot() < EPSILON {
+                        return false;
+                    }
+                    let delta_a = curr.atan2() - start.atan2();
+                    self.rotation = snap_angle(self.rotation_saved + delta_a, snap);
+                    self.set_bezpath();
+                    return true;
+                }
+                if self.shape_type == ShapeType::Text {
                     if let Some(text) = self.text.as_mut() {
                         text.scale = None;
                         text.invalidate_cache();
                     }
+                } else if self.shape_type == ShapeType::Svg {
+                    if let Some(svg) = self.svg.as_mut() {
+                        svg.invalidate_cache();
+                    }
                 }
+
                 let i = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                     Some(i) => i as i64,
                     None => return false,
                 };
-
-                // Snap the saved vertex position, hence snap prev/next along h or v axis
-                // let snap_v_idx = snap_vertex(self.vertices.val(idx as i64).saved, snap);
                 self.vertices.val_mut(i).saved = snap_vertex(self.vertices.val(i).saved, snap);
-                self.vertices.val_mut(i).add(delta);
+                self.vertices.val_mut(i).add(local_delta);
                 if i % 2 == 1 {
                     self.vertices.val_mut(i - 1).saved.x = self.vertices.val_mut(i).saved.x;
-                    self.vertices.val_mut(i - 1).add(Vec2::new(delta.x, 0.));
+                    self.vertices
+                        .val_mut(i - 1)
+                        .add(Vec2::new(local_delta.x, 0.));
                     self.vertices.val_mut(i + 1).saved.y = self.vertices.val_mut(i).saved.y;
-                    self.vertices.val_mut(i + 1).add(Vec2::new(0., delta.y));
+                    self.vertices
+                        .val_mut(i + 1)
+                        .add(Vec2::new(0., local_delta.y));
                 } else {
                     self.vertices.val_mut(i - 1).saved.y = self.vertices.val_mut(i).saved.y;
-                    self.vertices.val_mut(i - 1).add(Vec2::new(0., delta.y));
+                    self.vertices
+                        .val_mut(i - 1)
+                        .add(Vec2::new(0., local_delta.y));
                     self.vertices.val_mut(i + 1).saved.x = self.vertices.val_mut(i).saved.x;
-                    self.vertices.val_mut(i + 1).add(Vec2::new(delta.x, 0.));
+                    self.vertices
+                        .val_mut(i + 1)
+                        .add(Vec2::new(local_delta.x, 0.));
                 }
                 self.set_bezpath();
-
-                // if idx % 2 == 0 {
-                //     self.vertices.val_mut(idx - 1).saved.x =
-                //         snap_val(self.vertices.val(idx - 1).saved.x, snap);
-                //     self.vertices.val_mut(idx + 1).saved.y =
-                //         snap_val(self.vertices.val(idx + 1).saved.y, snap);
-                // } else {
-                //     self.vertices.val_mut(idx - 1).saved.y =
-                //         snap_val(self.vertices.val(idx - 1).saved.y, snap);
-                //     self.vertices.val_mut(idx + 1).saved.x =
-                //         snap_val(self.vertices.val(idx + 1).saved.x, snap);
-                // }
-
-                false
-                // self.vertices.val_mut(idx).saved = snap_v_idx;
-
-                // // 2) grab positions and derive segments
-                // let pos_m = self.vertices.val(idx).saved;
-                // let o_seg_a = SegBundle::new(self.vertices.val(idx_prev).saved, pos_m);
-                // let o_seg_b = SegBundle::new(pos_m, self.vertices.val(idx_next).saved);
-                // if let Some(seg_a) = o_seg_a {
-                //     if let Some(seg_b) = o_seg_b {
-                //         let delta_a = delta.dot(seg_a.u);
-                //         let delta_b = delta.dot(seg_b.u);
-
-                //         let new_prev = self.vertices.val(idx_prev).saved + delta_b * seg_b.u;
-                //         let new_next = self.vertices.val(idx_next).saved + delta_a * seg_a.u;
-                //         let new_m = pos_m + delta;
-
-                //         if (new_m - new_prev).hypot() > EPSILON
-                //             && (new_m - new_next).hypot() > EPSILON
-                //         {
-                //             self.vertices.val_mut(idx_prev).set(new_prev);
-                //             self.vertices.val_mut(idx).set(new_m);
-                //             self.vertices.val_mut(idx_next).set(new_next);
-                //             self.set_bezpath();
-                //             true
-                //         } else {
-                //             return false;
-                //         }
-                //     } else {
-                //         return false;
-                //     }
-                // } else {
-                //     return false;
-                // }
+                true
             }
-            Icons::Poly => {
+            ShapeType::Poly => {
                 let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                     Some(i) => i as i64,
                     None => return false,
@@ -477,7 +563,7 @@ impl ClosedShape {
                 self.set_bezpath();
                 true
             }
-            Icons::Arrow => {
+            ShapeType::Arrow => {
                 // Arrow is not a closed shape, so we don't move it
                 return false;
             }
@@ -493,6 +579,7 @@ impl ClosedShape {
         for (_, value) in self.vertices.iter_mut() {
             value.save();
         }
+        self.rotation_saved = self.rotation;
     }
     pub fn get_binded_elements(&self) -> HashSet<EUId> {
         let mut binds = HashSet::new();
@@ -503,13 +590,16 @@ impl ClosedShape {
     }
 
     pub fn contains(&self, pos: Vec2) -> bool {
-        if self.shape_type == Icons::Text {
+        if matches!(self.shape_type, ShapeType::Text | ShapeType::Svg) {
+            if self.rotation.abs() > EPSILON {
+                return self.get_bezpath().contains(pos.to_point());
+            }
             let bbox = self.bezpath.bounding_box();
             return bbox.contains(pos.to_point());
         }
         self.get_bezpath().contains(pos.to_point())
     }
-    pub fn get_shape_type(&self) -> Icons {
+    pub fn get_shape_type(&self) -> ShapeType {
         self.shape_type
     }
     pub fn get_operation(&self) -> Operation {
@@ -523,6 +613,31 @@ impl ClosedShape {
     }
     pub fn get_text(&self) -> Option<&TextData> {
         self.text.as_ref()
+    }
+    pub fn get_svg(&self) -> Option<&SvgData> {
+        self.svg.as_ref()
+    }
+    pub fn get_svg_paths(&self) -> Option<&Vec<BezPath>> {
+        self.svg.as_ref().and_then(|svg| svg.cached_paths.as_ref())
+    }
+    pub fn vertex_display_pos(&self, pos: Vec2) -> Vec2 {
+        if matches!(
+            self.shape_type,
+            ShapeType::Square | ShapeType::Text | ShapeType::Svg
+        ) && self.rotation.abs() > EPSILON
+        {
+            let center = self.bbox_center();
+            return rotate_vector(pos - center, self.rotation) + center;
+        }
+        pos
+    }
+    pub fn get_rotation(&self) -> f64 {
+        self.rotation
+    }
+    pub fn set_rotation(&mut self, rotation: f64) {
+        self.rotation = rotation;
+        self.rotation_saved = rotation;
+        self.set_bezpath();
     }
     pub fn set_text_value(&mut self, text: String) {
         if let Some(data) = self.text.as_mut() {
@@ -562,7 +677,7 @@ impl ClosedShape {
         self.set_bezpath();
     }
     pub fn fit_text_bbox_width_to_content(&mut self) {
-        if self.shape_type != Icons::Text {
+        if self.shape_type != ShapeType::Text {
             return;
         }
         let Some(text) = self.text.as_ref() else {
@@ -606,7 +721,7 @@ impl ClosedShape {
         self.set_bezpath();
     }
     pub fn fit_text_bbox_to_polygon(&mut self) {
-        if self.shape_type != Icons::Text {
+        if self.shape_type != ShapeType::Text {
             return;
         }
         let Some(rect) = self.polygon.bounding_rect() else {
@@ -630,14 +745,15 @@ impl ClosedShape {
         self.set_bezpath();
     }
     pub fn set_bezpath(&mut self) {
+        let mut bezpath_only = true;
         match self.shape_type {
-            Icons::Disc => {
+            ShapeType::Disc => {
                 let center = self.vertices.val(0).curr;
                 let radius = (self.vertices.val(1).curr - center).hypot();
                 self.bezpath =
                     kurbo::Circle::new(center.to_point(), radius).to_path(Self::TOLERANCE);
             }
-            Icons::Oblong => {
+            ShapeType::Oblong => {
                 let e1 = self.vertices.val(0).curr;
                 let e2 = self.vertices.val(1).curr;
                 let side = self.vertices.val(2).curr;
@@ -684,19 +800,77 @@ impl ClosedShape {
                 }
                 self.bezpath = path;
             }
-            Icons::Square | Icons::Poly => {
+            ShapeType::Square | ShapeType::Poly => {
                 let apices = self.vertices.get_apices(); // -> Vec<ApexType>
                 self.bezpath = bezpath_from_apices(&apices);
             }
-            Icons::Text => {
+            ShapeType::Text => {
                 let apices = self.vertices.get_apices();
                 self.bezpath = bezpath_from_apices(&apices);
                 self.update_text_polygon();
-                return;
+                bezpath_only = false;
             }
-            Icons::Arrow => return,
+            ShapeType::Svg => {
+                let apices = self.vertices.get_apices();
+                self.bezpath = bezpath_from_apices(&apices);
+                self.update_svg_polygon();
+                bezpath_only = false;
+            }
+            ShapeType::Arrow => return,
         }
-        self.update_polygon();
+        if bezpath_only {
+            self.update_polygon();
+        }
+        self.apply_rotation();
+    }
+
+    fn apply_rotation(&mut self) {
+        if self.rotation.abs() <= EPSILON {
+            if let Some(svg) = self.svg.as_mut() {
+                if let Some(raw) = svg.cached_paths_raw.as_ref() {
+                    svg.cached_paths = Some(raw.clone());
+                }
+            }
+            return;
+        }
+        let center = self.bbox_center();
+        self.bezpath = rotate_bezpath(&self.bezpath, center, self.rotation);
+        self.polygon = rotate_multipolygon(&self.polygon, center, self.rotation);
+        if let Some(svg) = self.svg.as_mut() {
+            if let Some(raw) = svg.cached_paths_raw.as_ref() {
+                svg.cached_paths = Some(rotate_bezpaths(raw, center, self.rotation));
+            }
+        }
+    }
+
+    fn bbox_center(&self) -> Vec2 {
+        let mut min = Vec2::new(f64::INFINITY, f64::INFINITY);
+        let mut max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for (_, value) in self.vertices.iter() {
+            min.x = min.x.min(value.curr.x);
+            min.y = min.y.min(value.curr.y);
+            max.x = max.x.max(value.curr.x);
+            max.y = max.y.max(value.curr.y);
+        }
+        if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
+            return Vec2::ZERO;
+        }
+        (min + max) * 0.5
+    }
+
+    fn bbox_center_saved(&self) -> Vec2 {
+        let mut min = Vec2::new(f64::INFINITY, f64::INFINITY);
+        let mut max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for (_, value) in self.vertices.iter() {
+            min.x = min.x.min(value.saved.x);
+            min.y = min.y.min(value.saved.y);
+            max.x = max.x.max(value.saved.x);
+            max.y = max.y.max(value.saved.y);
+        }
+        if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
+            return Vec2::ZERO;
+        }
+        (min + max) * 0.5
     }
     fn update_polygon(&mut self) {
         let poly = bez_path_to_geo_polygon(&self.bezpath);
@@ -721,20 +895,35 @@ impl ClosedShape {
         let bbox_max = Vec2::new(bbox.x1, bbox.y1);
 
         let scale_override = if text.auto_fit { None } else { text.scale };
-        let cache_hit = text.cached_polygon.is_some()
+        let cache_key_match = text.cached_polygon.is_some()
             && text.cached_text == text.text
             && text.cached_font == text.font
             && text.cached_scale_override == scale_override
-            && text.cached_auto_fit == text.auto_fit
-            && text.cached_bbox_min == bbox_min
-            && text.cached_bbox_max == bbox_max;
-
-        if cache_hit {
-            self.polygon = text
-                .cached_polygon
-                .clone()
-                .unwrap_or_else(|| MultiPolygon::new(vec![]));
-            return;
+            && text.cached_auto_fit == text.auto_fit;
+        if cache_key_match {
+            if text.cached_bbox_min == bbox_min && text.cached_bbox_max == bbox_max {
+                self.polygon = text
+                    .cached_polygon
+                    .clone()
+                    .unwrap_or_else(|| MultiPolygon::new(vec![]));
+                return;
+            }
+            let cached_size = text.cached_bbox_max - text.cached_bbox_min;
+            let bbox_size = bbox_max - bbox_min;
+            if cached_size == bbox_size {
+                let dx = bbox_min.x - text.cached_bbox_min.x;
+                let dy = bbox_min.y - text.cached_bbox_min.y;
+                let translated = text
+                    .cached_polygon
+                    .as_ref()
+                    .map(|poly| poly.translate(dx, dy))
+                    .unwrap_or_else(|| MultiPolygon::new(vec![]));
+                self.polygon = translated.clone();
+                text.cached_polygon = Some(translated);
+                text.cached_bbox_min = bbox_min;
+                text.cached_bbox_max = bbox_max;
+                return;
+            }
         }
 
         let (poly, scale) = text_to_multipolygon(
@@ -757,6 +946,288 @@ impl ClosedShape {
             text.scale = Some(scale);
         }
     }
+
+    fn update_svg_polygon(&mut self) {
+        let Some(svg) = self.svg.as_mut() else {
+            self.polygon = MultiPolygon::new(vec![]);
+            return;
+        };
+        if self.vertices.len() < 4 || self.bezpath.is_empty() || svg.rings.is_empty() {
+            self.polygon = MultiPolygon::new(vec![]);
+            svg.invalidate_cache();
+            return;
+        }
+        let bbox = self.bezpath.bounding_box();
+        if bbox.is_zero_area() {
+            self.polygon = MultiPolygon::new(vec![]);
+            svg.invalidate_cache();
+            return;
+        }
+        let bbox_min = Vec2::new(bbox.x0, bbox.y0);
+        let bbox_max = Vec2::new(bbox.x1, bbox.y1);
+
+        if let Some(cached) = svg.cached_polygon.as_ref() {
+            if svg.cached_bbox_min == bbox_min && svg.cached_bbox_max == bbox_max {
+                self.polygon = cached.clone();
+                return;
+            }
+            let cached_size = svg.cached_bbox_max - svg.cached_bbox_min;
+            let bbox_size = bbox_max - bbox_min;
+            if cached_size == bbox_size {
+                let dx = bbox_min.x - svg.cached_bbox_min.x;
+                let dy = bbox_min.y - svg.cached_bbox_min.y;
+                let translated = cached.translate(dx, dy);
+                self.polygon = translated.clone();
+                svg.cached_polygon = Some(translated);
+                if let Some(paths) = svg.cached_paths_raw.as_ref() {
+                    let translated_paths = translate_bezpaths(paths, dx, dy);
+                    svg.cached_paths_raw = Some(translated_paths.clone());
+                    svg.cached_paths = Some(translated_paths);
+                }
+                svg.cached_bbox_min = bbox_min;
+                svg.cached_bbox_max = bbox_max;
+                return;
+            }
+        }
+
+        let orig_min = svg.original_min;
+        let orig_max = svg.original_max;
+        let orig_w = (orig_max.x - orig_min.x).max(1e-6);
+        let orig_h = (orig_max.y - orig_min.y).max(1e-6);
+        let bbox_w = (bbox_max.x - bbox_min.x).max(1e-6);
+        let bbox_h = (bbox_max.y - bbox_min.y).max(1e-6);
+        let scale = (bbox_w / orig_w).min(bbox_h / orig_h);
+        let dx = bbox_min.x + (bbox_w - orig_w * scale) * 0.5 - orig_min.x * scale;
+        let dy = bbox_min.y + (bbox_h - orig_h * scale) * 0.5 - orig_min.y * scale;
+
+        let mut rings: Vec<Vec<Vec2>> = Vec::new();
+        for ring in svg.rings.iter() {
+            let mut pts = Vec::with_capacity(ring.len());
+            for pt in ring.iter() {
+                pts.push(Vec2::new(pt.x * scale + dx, pt.y * scale + dy));
+            }
+            let pts = normalize_svg_ring(pts);
+            if pts.len() >= 3 {
+                rings.push(pts);
+            }
+        }
+        if rings.is_empty() {
+            self.polygon = MultiPolygon::new(vec![]);
+            return;
+        }
+
+        let hole_flags = svg_compute_hole_flags(&rings, svg.fill_rule);
+        let mut outers: Vec<Vec<Vec2>> = Vec::new();
+        let mut holes: Vec<Vec<Vec2>> = Vec::new();
+        for (ring, is_hole) in rings.into_iter().zip(hole_flags.into_iter()) {
+            if is_hole {
+                holes.push(ring);
+            } else {
+                outers.push(ring);
+            }
+        }
+        if outers.is_empty() {
+            outers = holes;
+            holes = Vec::new();
+        }
+
+        let mut polys = Vec::new();
+        for outer in outers.iter() {
+            let outer_poly = Polygon::new(vec2_to_linestring(outer), vec![]);
+            let mut inner_lines = Vec::new();
+            for hole in holes.iter() {
+                if let Some(pt) = hole.first() {
+                    if outer_poly.contains(&Point::new(pt.x, pt.y)) {
+                        inner_lines.push(vec2_to_linestring(hole));
+                    }
+                }
+            }
+            polys.push(Polygon::new(vec2_to_linestring(outer), inner_lines));
+        }
+
+        self.polygon = MultiPolygon::new(polys);
+        svg.cached_polygon = Some(self.polygon.clone());
+        let raw_paths = geo_multipolygon_to_bez_paths(&self.polygon);
+        svg.cached_paths_raw = Some(raw_paths.clone());
+        svg.cached_paths = Some(raw_paths);
+        svg.cached_bbox_min = bbox_min;
+        svg.cached_bbox_max = bbox_max;
+    }
+}
+
+fn normalize_svg_ring(mut ring: Vec<Vec2>) -> Vec<Vec2> {
+    if ring.len() > 1 {
+        let first = ring[0];
+        let last = ring[ring.len() - 1];
+        if (first - last).hypot() < 1e-6 {
+            ring.pop();
+        }
+    }
+    ring
+}
+
+fn translate_bezpaths(paths: &[BezPath], dx: f64, dy: f64) -> Vec<BezPath> {
+    paths
+        .iter()
+        .map(|path| translate_bezpath(path, dx, dy))
+        .collect()
+}
+
+fn translate_bezpath(path: &BezPath, dx: f64, dy: f64) -> BezPath {
+    let mut out = BezPath::new();
+    for elem in path.iter() {
+        match elem {
+            PathEl::MoveTo(pt) => {
+                out.push(PathEl::MoveTo(kurbo::Point::new(pt.x + dx, pt.y + dy)));
+            }
+            PathEl::LineTo(pt) => {
+                out.push(PathEl::LineTo(kurbo::Point::new(pt.x + dx, pt.y + dy)));
+            }
+            PathEl::QuadTo(pt1, pt2) => {
+                out.push(PathEl::QuadTo(
+                    kurbo::Point::new(pt1.x + dx, pt1.y + dy),
+                    kurbo::Point::new(pt2.x + dx, pt2.y + dy),
+                ));
+            }
+            PathEl::CurveTo(pt1, pt2, pt3) => {
+                out.push(PathEl::CurveTo(
+                    kurbo::Point::new(pt1.x + dx, pt1.y + dy),
+                    kurbo::Point::new(pt2.x + dx, pt2.y + dy),
+                    kurbo::Point::new(pt3.x + dx, pt3.y + dy),
+                ));
+            }
+            PathEl::ClosePath => out.push(PathEl::ClosePath),
+        }
+    }
+    out
+}
+
+fn rotate_bezpaths(paths: &[BezPath], center: Vec2, angle: f64) -> Vec<BezPath> {
+    paths
+        .iter()
+        .map(|path| rotate_bezpath(path, center, angle))
+        .collect()
+}
+
+fn rotate_bezpath(path: &BezPath, center: Vec2, angle: f64) -> BezPath {
+    let mut out = BezPath::new();
+    for elem in path.iter() {
+        match elem {
+            PathEl::MoveTo(pt) => {
+                out.push(PathEl::MoveTo(rotate_point(pt, center, angle)));
+            }
+            PathEl::LineTo(pt) => {
+                out.push(PathEl::LineTo(rotate_point(pt, center, angle)));
+            }
+            PathEl::QuadTo(pt1, pt2) => {
+                out.push(PathEl::QuadTo(
+                    rotate_point(pt1, center, angle),
+                    rotate_point(pt2, center, angle),
+                ));
+            }
+            PathEl::CurveTo(pt1, pt2, pt3) => {
+                out.push(PathEl::CurveTo(
+                    rotate_point(pt1, center, angle),
+                    rotate_point(pt2, center, angle),
+                    rotate_point(pt3, center, angle),
+                ));
+            }
+            PathEl::ClosePath => out.push(PathEl::ClosePath),
+        }
+    }
+    out
+}
+
+fn rotate_point(point: kurbo::Point, center: Vec2, angle: f64) -> kurbo::Point {
+    let v = Vec2::new(point.x, point.y);
+    let rotated = rotate_vector(v - center, angle) + center;
+    kurbo::Point::new(rotated.x, rotated.y)
+}
+
+fn rotate_multipolygon(polygon: &MultiPolygon<f64>, center: Vec2, angle: f64) -> MultiPolygon<f64> {
+    let mut polys = Vec::with_capacity(polygon.0.len());
+    for poly in polygon.0.iter() {
+        let exterior = rotate_linestring(poly.exterior(), center, angle);
+        let interiors = poly
+            .interiors()
+            .iter()
+            .map(|ring| rotate_linestring(ring, center, angle))
+            .collect();
+        polys.push(Polygon::new(exterior, interiors));
+    }
+    MultiPolygon::new(polys)
+}
+
+fn rotate_linestring(line: &LineString<f64>, center: Vec2, angle: f64) -> LineString<f64> {
+    let coords: Vec<Coord<f64>> = line
+        .points()
+        .map(|pt| {
+            let v = Vec2::new(pt.x(), pt.y());
+            let rotated = rotate_vector(v - center, angle) + center;
+            Coord {
+                x: rotated.x,
+                y: rotated.y,
+            }
+        })
+        .collect();
+    LineString::from(coords)
+}
+
+fn vec2_to_linestring(points: &[Vec2]) -> LineString<f64> {
+    let mut coords: Vec<geo::Coord<f64>> = points
+        .iter()
+        .map(|pt| geo::Coord { x: pt.x, y: pt.y })
+        .collect();
+    if coords.len() >= 2 && coords.first() != coords.last() {
+        coords.push(coords[0]);
+    }
+    LineString::from(coords)
+}
+
+fn ring_area(points: &[Vec2]) -> f64 {
+    if points.len() < 3 {
+        return 0.0;
+    }
+    let mut area = 0.0;
+    for i in 0..points.len() {
+        let p1 = points[i];
+        let p2 = points[(i + 1) % points.len()];
+        area += (p1.x * p2.y) - (p2.x * p1.y);
+    }
+    area * 0.5
+}
+
+fn svg_compute_hole_flags(rings: &[Vec<Vec2>], fill_rule: SvgFillRule) -> Vec<bool> {
+    let mut flags = vec![false; rings.len()];
+    match fill_rule {
+        SvgFillRule::NonZero => {
+            for (idx, ring) in rings.iter().enumerate() {
+                flags[idx] = ring_area(ring) < 0.0;
+            }
+        }
+        SvgFillRule::EvenOdd => {
+            let polys: Vec<Polygon<f64>> = rings
+                .iter()
+                .map(|ring| Polygon::new(vec2_to_linestring(ring), vec![]))
+                .collect();
+            for (idx, ring) in rings.iter().enumerate() {
+                let Some(probe) = ring.first() else {
+                    continue;
+                };
+                let mut depth = 0;
+                for (j, poly) in polys.iter().enumerate() {
+                    if idx == j {
+                        continue;
+                    }
+                    if poly.contains(&Point::new(probe.x, probe.y)) {
+                        depth += 1;
+                    }
+                }
+                flags[idx] = depth % 2 == 1;
+            }
+        }
+    }
+    flags
 }
 
 struct GlyphBuilder {
@@ -1016,6 +1487,9 @@ impl Clone for ClosedShape {
             bezpath: self.bezpath.clone(),
             polygon: self.polygon.clone(),
             text: self.text.clone(),
+            svg: self.svg.clone(),
+            rotation: self.rotation,
+            rotation_saved: self.rotation,
         }
     }
 }

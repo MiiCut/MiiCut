@@ -10,11 +10,11 @@ use std::mem;
 use crate::{
     clipboard::Clipboard,
     dimensions::{dim_hv, dim_radius},
-    dom::Icons,
+    dom::ShapeType,
     inputs::{SystemMouse, UserAction, UserUI},
     math::*,
     prefab::*,
-    shape::ClosedShape,
+    shape::{ClosedShape, SvgFillRule},
     shapes::DataSet,
     types::{Binding, Couple, EUId, SegBundle, VUId},
     undoredo::UndoRedo,
@@ -22,7 +22,7 @@ use crate::{
 use js_sys::Array;
 use kurbo::{BezPath, PathEl, Point, Rect, Size, Vec2};
 use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, MouseEvent};
+use web_sys::{CanvasRenderingContext2d, CanvasWindingRule, HtmlCanvasElement, MouseEvent};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextPos {
@@ -157,10 +157,11 @@ pub enum CanvasKind {
     Grid = 1,
     Draw = 2,
     Gcode = 3,
+    Toolpath = 4,
 }
 
 impl CanvasKind {
-    pub const COUNT: usize = 4;
+    pub const COUNT: usize = 5;
 
     #[inline(always)]
     pub const fn idx(self) -> usize {
@@ -168,6 +169,7 @@ impl CanvasKind {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 struct GridRules {
     h_rule_height: f64,
@@ -189,7 +191,7 @@ impl GridRules {
             grid_snap: 1.,
         }
     }
-    pub fn draw_rules(
+    pub fn _draw_rules(
         &mut self,
         draw_rec_size: Size,
         draw_rec_grid_spacing: f64,
@@ -257,7 +259,7 @@ impl GridRules {
             texts,
         )
     }
-    pub fn draw_grid_primary(
+    pub fn _draw_grid_primary(
         &mut self,
         draw_rec_size: Size,
         draw_rec_grid_spacing: f64,
@@ -295,7 +297,7 @@ impl GridRules {
             vec![],
         )
     }
-    pub fn draw_grid_secondary(
+    pub fn _draw_grid_secondary(
         &mut self,
         draw_rec_size: Size,
         draw_rec_grid_spacing: f64,
@@ -438,6 +440,9 @@ impl Canvas {
     pub fn get_scale(&self) -> f64 {
         self.scale
     }
+    pub fn set_area_size(&mut self, size: Size) {
+        self.area_size = size;
+    }
     pub fn get_size(&self) -> Size {
         self.area_size
     }
@@ -468,6 +473,9 @@ impl Canvas {
     }
     pub fn is_pointer_on_canvas(&self) -> bool {
         self.pointer_on_canvas
+    }
+    pub fn set_cursor(&self, cursor: &str) {
+        let _ = self.canvas.style().set_property("cursor", cursor);
     }
     pub fn get_grid_size(&self) -> f64 {
         self.grid_rules.grid_size
@@ -531,9 +539,15 @@ impl Canvas {
     }
     pub fn move_vertices_selected(&mut self) -> bool {
         if let Some((last_eid, last_vid)) = self.dataset.last_vertex_selected {
-            self.dataset.get_element_mut(last_eid).map(|e| {
-                return e.move_vertex(last_vid, &self.user_ui);
-            });
+            let moved = self
+                .dataset
+                .get_element_mut(last_eid)
+                .map(|e| e.move_vertex(last_vid, &self.user_ui))
+                .unwrap_or(false);
+            if moved {
+                self.dataset.mark_final_polygon_dirty();
+            }
+            return moved;
         }
         false
     }
@@ -570,7 +584,7 @@ impl Canvas {
             .rotate(text.config.angle)
             .expect("Failed to rotate canvas");
         self.ctx
-            .set_font(&format!("{}px Stencilia", text.config.font_size));
+            .set_font(&format!("{}px Urbanist", text.config.font_size));
         self.ctx.set_global_alpha(text.config.opacity);
 
         self.ctx.set_stroke_style_str(text.config.color.get());
@@ -595,7 +609,7 @@ impl Canvas {
             .rotate(text.config.angle)
             .expect("Failed to rotate canvas");
         self.ctx
-            .set_font(&format!("{}px Stencilia", text.config.font_size));
+            .set_font(&format!("{}px Urbanist", text.config.font_size));
         self.ctx.set_global_alpha(text.config.opacity);
 
         self.ctx.set_stroke_style_str(text.config.color.get());
@@ -660,6 +674,60 @@ impl Canvas {
         for text in texts.iter() {
             self.draw_text(text);
         }
+    }
+    pub fn draw_svg_paths(
+        &self,
+        paths: &[BezPath],
+        pattern: Pattern,
+        fill_color: Color,
+        stroke_color: Color,
+        fill_rule: SvgFillRule,
+    ) {
+        let (stroke_style, stroke_width, filled) = pattern.get();
+        self.ctx.set_line_dash(&stroke_style).unwrap();
+        self.ctx.set_line_width(stroke_width);
+
+        self.ctx.set_fill_style_str(&fill_color.get());
+        self.ctx.set_stroke_style_str(&stroke_color.get());
+
+        self.ctx.begin_path();
+        for path in paths {
+            for cst in path.iter() {
+                match cst {
+                    PathEl::MoveTo(pt) => {
+                        let cpt = to_canvas(pt.to_vec2(), self.scale, self.offset);
+                        self.ctx.move_to(cpt.x, cpt.y);
+                    }
+                    PathEl::LineTo(pt) => {
+                        let cpt = to_canvas(pt.to_vec2(), self.scale, self.offset);
+                        self.ctx.line_to(cpt.x, cpt.y);
+                    }
+                    PathEl::QuadTo(pt1, pt2) => {
+                        let cpt1 = to_canvas(pt1.to_vec2(), self.scale, self.offset);
+                        let cpt2 = to_canvas(pt2.to_vec2(), self.scale, self.offset);
+                        self.ctx.quadratic_curve_to(cpt1.x, cpt1.y, cpt2.x, cpt2.y);
+                    }
+                    PathEl::CurveTo(pt1, pt2, pt3) => {
+                        let cpt1 = to_canvas(pt1.to_vec2(), self.scale, self.offset);
+                        let cpt2 = to_canvas(pt2.to_vec2(), self.scale, self.offset);
+                        let cpt3 = to_canvas(pt3.to_vec2(), self.scale, self.offset);
+                        self.ctx
+                            .bezier_curve_to(cpt1.x, cpt1.y, cpt2.x, cpt2.y, cpt3.x, cpt3.y);
+                    }
+                    PathEl::ClosePath => self.ctx.close_path(),
+                }
+            }
+        }
+        if filled {
+            match fill_rule {
+                SvgFillRule::EvenOdd => {
+                    self.ctx
+                        .fill_with_canvas_winding_rule(CanvasWindingRule::Evenodd);
+                }
+                SvgFillRule::NonZero => self.ctx.fill(),
+            }
+        }
+        self.ctx.stroke();
     }
     pub fn draw_closed_path(
         &self,
@@ -738,14 +806,96 @@ impl Canvas {
         self.reset_origin();
     }
     pub fn draw_grid_and_rules(&mut self) {
-        self.draw_origin();
+        self.draw_rules_only(self.scale, self.offset);
+    }
+    pub fn draw_rules_only(&mut self, drawing_scale: f64, drawing_offset: Vec2) {
+        self.clear();
+
+        let spacing = self.get_grid_size();
+        if spacing <= EPSILON {
+            return;
+        }
+
+        let canvas_size = self.get_canvas_size();
+        let (stroke_style, stroke_width, _) = Pattern::Rules.get();
+        self.ctx.set_line_dash(&stroke_style).unwrap();
+        self.ctx.set_line_width(stroke_width);
+
+        let color = Color::Rules.get();
+        self.ctx.set_stroke_style_str(&color);
+
+        let draw_min = to_draw(Vec2::ZERO, drawing_scale, drawing_offset);
+        let draw_max = to_draw(
+            Vec2::new(canvas_size.width, canvas_size.height),
+            drawing_scale,
+            drawing_offset,
+        );
+
+        let major_spacing = spacing * 10.0;
+        let mut labels: Vec<CanvasText> = Vec::new();
+        let text_cfg = CanvasTextConfig::new(Color::Rules, 0., TextAlign::Center, 16, 0.4);
+        let text_cfg_left = CanvasTextConfig::new(Color::Rules, 0., TextAlign::Left, 16, 0.4);
+
+        let mut x = (draw_min.x / spacing).floor() * spacing;
+        let x_end = draw_max.x + spacing;
+        self.ctx.begin_path();
+        self.ctx.move_to(0., 0.);
+        self.ctx.line_to(canvas_size.width, 0.);
+        while x <= x_end {
+            let is_major = ((x / major_spacing).round() - x / major_spacing).abs() < 1e-6;
+            let tick = if is_major {
+                self.grid_rules.primary_rules_thicks_hw
+            } else {
+                self.grid_rules.secondary_rules_thicks_hw
+            };
+            let cx = to_canvas(Vec2::new(x, 0.0), drawing_scale, drawing_offset).x;
+            self.ctx.move_to(cx, 0.);
+            self.ctx.line_to(cx, tick);
+            if is_major {
+                labels.push(CanvasText::new(
+                    format!("{:.0}", x),
+                    TextPos::PosCustom(Vec2::new(cx, tick + 12.)),
+                    text_cfg.clone(),
+                ));
+            }
+            x += spacing;
+        }
+
+        let mut y = (draw_min.y / spacing).floor() * spacing;
+        let y_end = draw_max.y + spacing;
+        self.ctx.move_to(0., 0.);
+        self.ctx.line_to(0., canvas_size.height);
+        while y <= y_end {
+            let is_major = ((y / major_spacing).round() - y / major_spacing).abs() < 1e-6;
+            let tick = if is_major {
+                self.grid_rules.primary_rules_thicks_hw
+            } else {
+                self.grid_rules.secondary_rules_thicks_hw
+            };
+            let cy = to_canvas(Vec2::new(0.0, y), drawing_scale, drawing_offset).y;
+            self.ctx.move_to(0., cy);
+            self.ctx.line_to(tick, cy);
+            if is_major {
+                labels.push(CanvasText::new(
+                    format!("{:.0}", y),
+                    TextPos::PosCustom(Vec2::new(tick + 4., cy + 5.)),
+                    text_cfg_left.clone(),
+                ));
+            }
+            y += spacing;
+        }
+        self.ctx.stroke();
+
+        for text in labels.iter() {
+            self.direct_text(text);
+        }
     }
     pub fn may_be_draw_radiuses(&mut self) {
         let text_color = get_text_colors().stroke_color;
         let text_cfg = CanvasTextConfig::new(text_color, 0., TextAlign::Center, 14, 0.8);
         for e in self.dataset.shapes.values() {
             match e.get_shape_type() {
-                Icons::Square | Icons::Poly => {
+                ShapeType::Square | ShapeType::Poly => {
                     for apex_type in e.get_vertices().get_apices().iter() {
                         if let ApexType::Arc { s, c, e: _e } = apex_type {
                             let r = (*s - *c).length();
@@ -764,7 +914,7 @@ impl Canvas {
     }
     pub fn draw_dimensions(&mut self, e: &ClosedShape) {
         match e.get_shape_type() {
-            Icons::Disc => {
+            ShapeType::Disc => {
                 let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
                 if v.len() == 2 {
                     if let Some(seg) = SegBundle::new(v[0], v[1]) {
@@ -781,16 +931,41 @@ impl Canvas {
                     }
                 }
             }
-            Icons::Square | Icons::Text => {
-                for (v1, v2) in e
-                    .get_vertices()
+            ShapeType::Square | ShapeType::Text | ShapeType::Svg => {
+                let points: Vec<Vec2> =
+                    e.get_vertices().iter().map(|(_, v)| v.curr).collect();
+                let rotation = e.get_rotation();
+                for (idx, (v1, v2)) in points
                     .iter()
-                    .zip(e.get_vertices().iter().cycle().skip(1))
+                    .zip(points.iter().cycle().skip(1))
                     .take(2)
-                    .map(|(v1, v2)| (v1.1.curr, v2.1.curr))
+                    .enumerate()
                 {
-                    if let Some(seg) = SegBundle::new(v1, v2) {
-                        let (path, pattern, colors, text) = dim_hv(seg, self.get_canvas_infos());
+                    if let Some(seg) = SegBundle::new(*v1, *v2) {
+                        let (path, pattern, colors, mut text) =
+                            dim_hv(seg, self.get_canvas_infos());
+                        if idx == 0 && rotation.abs() > EPSILON {
+                            let mut deg = rotation.to_degrees();
+                            while deg <= -180.0 {
+                                deg += 360.0;
+                            }
+                            while deg > 180.0 {
+                                deg -= 360.0;
+                            }
+                            let angle_pos = points[0]
+                                + rotate_vector(Vec2::new(10.0, -10.0) / self.scale, rotation);
+                            text.push(CanvasText::new(
+                                format!("A{deg:.1}°"),
+                                TextPos::PosCustom(angle_pos),
+                                CanvasTextConfig::new(
+                                    get_text_colors().stroke_color,
+                                    0.0,
+                                    TextAlign::Left,
+                                    14,
+                                    0.8,
+                                ),
+                            ));
+                        }
                         self.draw_path(
                             &path,
                             pattern,
@@ -801,7 +976,7 @@ impl Canvas {
                     }
                 }
             }
-            Icons::Oblong => {
+            ShapeType::Oblong => {
                 let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
                 if v.len() == 3 {
                     if let Some(seg1) = SegBundle::new(v[0], v[1]) {
@@ -830,7 +1005,7 @@ impl Canvas {
                     }
                 }
             }
-            Icons::Poly => {
+            ShapeType::Poly => {
                 for (v1, v2) in e
                     .get_vertices()
                     .iter()
@@ -849,12 +1024,13 @@ impl Canvas {
                     }
                 }
             }
-            Icons::Arrow => (),
+            ShapeType::Arrow => (),
         }
     }
 
     pub fn draw_vs(&mut self, e: &ClosedShape) {
         for (vid, vertex) in e.get_vertices().iter() {
+            let pos = e.vertex_display_pos(vertex.curr);
             let vid_sel = self
                 .dataset
                 .vertices_selected
@@ -867,8 +1043,18 @@ impl Canvas {
                 .any(|&(_, high_vid)| &high_vid == vid);
 
             let colors = get_vertices_colors(vid_sel, vid_high);
+            if vid_sel {
+                let ring = point_path(pos, 0.45);
+                self.draw_path(
+                    &ring,
+                    Pattern::Composed(false),
+                    Color::Transparent,
+                    Color::Red,
+                    vec![],
+                );
+            }
             self.draw_path(
-                &point_path(vertex.curr, 1.),
+                &point_path(pos, 1.),
                 Pattern::Point,
                 colors.fill_color,
                 colors.stroke_color,
@@ -882,7 +1068,7 @@ impl Canvas {
         // move shapes out of self.dataset temporarily
         let shapes = mem::take(&mut self.dataset.shapes);
 
-        for (_eid, e) in shapes.iter() {
+        for (eid, e) in shapes.iter() {
             self.draw_vs(e);
             self.draw_dimensions(e);
             for (vid, vertex) in e.get_vertices().iter() {
@@ -890,7 +1076,7 @@ impl Canvas {
                     vertex
                         .bind
                         .iter()
-                        .map(|(eid2, vid2)| Couple((*eid2, *vid), (*eid2, *vid2))),
+                        .map(|(eid2, vid2)| Couple((*eid, *vid), (*eid2, *vid2))),
                 );
             }
         }
@@ -910,15 +1096,46 @@ impl Canvas {
         );
     }
     pub fn draw_paths_sets(&mut self) {
+        self.draw_paths_sets_with_svg_bbox(false);
+    }
+    pub fn draw_paths_sets_with_svg_bbox(&mut self, svg_bbox_only: bool) {
         for (eid, e) in self.dataset.shapes.iter() {
-            let stroke_color = get_stroke_color(
-                self.dataset.shapes_selected.contains(eid),
-                self.dataset.shapes_highlighted.contains(eid),
-            );
-            let fill_color = get_fill_color(
-                self.dataset.shapes_selected.contains(eid),
-                self.dataset.shapes_highlighted.contains(eid),
-            );
+            let is_selected = self.dataset.shapes_selected.contains(eid);
+            let is_highlighted = self.dataset.shapes_highlighted.contains(eid);
+            let stroke_color = if !is_selected && !is_highlighted {
+                Color::Gray20
+            } else {
+                get_stroke_color(is_selected, is_highlighted)
+            };
+            let fill_color = if svg_bbox_only && e.get_shape_type() == ShapeType::Svg {
+                if is_selected || is_highlighted {
+                    get_fill_color(is_selected, is_highlighted)
+                } else {
+                    Color::Transparent
+                }
+            } else {
+                get_fill_color(is_selected, is_highlighted)
+            };
+            if e.get_shape_type() == ShapeType::Svg {
+                if svg_bbox_only {
+                    let path = e.get_bezpath();
+                    self.draw_path(path, Pattern::Point, fill_color, stroke_color, vec![]);
+                    continue;
+                }
+                if let (Some(paths), Some(svg)) = (e.get_svg_paths(), e.get_svg()) {
+                    self.draw_svg_paths(
+                        paths,
+                        Pattern::Point,
+                        fill_color,
+                        stroke_color,
+                        svg.fill_rule,
+                    );
+                } else {
+                    let path = e.get_bezpath();
+                    self.draw_path(path, Pattern::Point, fill_color, stroke_color, vec![]);
+                }
+                continue;
+            }
             let path = e.get_bezpath();
             self.draw_path(path, Pattern::Point, fill_color, stroke_color, vec![]);
         }
@@ -1020,7 +1237,7 @@ impl Pattern {
             Rules => (pattern_solid, 1., false),
             OnCreation => (pattern_dashed, 1., true),
             Point => (pattern_solid, 1., true),
-            Composed(filled) => (pattern_solid, 5., *filled),
+            Composed(filled) => (pattern_solid, 2.5, *filled),
             Basic => (pattern_dashed, 1., false),
             Helper => (pattern_dashed, 1., false),
             Text => (pattern_solid, 1., false),
