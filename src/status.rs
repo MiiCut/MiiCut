@@ -1,5 +1,5 @@
 use crate::app::RefAV;
-use crate::canvas::CanvasKind;
+use crate::dom::Tabs;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, HtmlElement, HtmlInputElement, Window};
 
@@ -12,6 +12,15 @@ pub(crate) fn update_status_bar(av: RefAV) {
     let Some(text_el) = avb.document.get_element_by_id("status-text") else {
         return;
     };
+    if let Some(snap_el) = avb.document.get_element_by_id("status-snap") {
+        if let Ok(snap_el) = snap_el.dyn_into::<HtmlElement>() {
+            if matches!(avb.active_view, Tabs::Draw) {
+                let _ = snap_el.style().set_property("display", "flex");
+            } else {
+                let _ = snap_el.style().set_property("display", "none");
+            }
+        }
+    }
     let now = now_ms(&avb.window);
     let render_msg = match avb.render_notice.take() {
         Some((msg, until)) if now <= until => {
@@ -21,20 +30,29 @@ pub(crate) fn update_status_bar(av: RefAV) {
         _ => None,
     };
 
-    let canvas = &avb.canvases[avb.active_canvas.idx()];
-    let offset = canvas.get_offset();
-    let scale = canvas.get_scale();
-    let pos = canvas.get_user_ui().pointer.curr;
-    let view = match avb.active_canvas {
-        CanvasKind::Draw => "Draw",
-        CanvasKind::Gcode => "G-code",
-        CanvasKind::Toolpath => "Toolpath",
-        _ => "View",
+    let text = match avb.active_view {
+        Tabs::Draw => {
+            let canvas = &avb.canvases[avb.active_canvas.idx()];
+            let offset = canvas.get_offset();
+            let scale = canvas.get_scale();
+            let pos = canvas.get_user_ui().pointer.curr;
+            format!(
+                "Draw | Scale: {:.2} | Offset: ({:.1}, {:.1}) | Pos: ({:.2}, {:.2})",
+                scale, offset.x, offset.y, pos.x, pos.y
+            )
+        }
+        Tabs::Machine => {
+            let mut parts = vec![avb.ws_status.clone()];
+            if let Some(msg) = avb.last_ws_error.as_ref() {
+                parts.push(format!("WS error: {msg}"));
+            }
+            if let Some(msg) = avb.last_http_error.as_ref() {
+                parts.push(format!("HTTP error: {msg}"));
+            }
+            parts.join(" | ")
+        }
+        _ => String::new(),
     };
-    let text = format!(
-        "{view} | Scale: {:.2} | Offset: ({:.1}, {:.1}) | Pos: ({:.2}, {:.2})",
-        scale, offset.x, offset.y, pos.x, pos.y
-    );
     if let Ok(el) = text_el.dyn_into::<HtmlElement>() {
         el.set_inner_text(&text);
     }
@@ -50,13 +68,16 @@ pub(crate) fn update_status_bar(av: RefAV) {
         }
     }
 
-    let snap = &canvas.get_user_ui().snap;
-    set_checkbox(&avb.document, "snap-linear-1", snap.linear() == 1.0);
-    set_checkbox(&avb.document, "snap-linear-5", snap.linear() == 5.0);
-    set_checkbox(&avb.document, "snap-linear-10", snap.linear() == 10.0);
-    set_checkbox(&avb.document, "snap-angle-1", snap.angle() == 1.0);
-    set_checkbox(&avb.document, "snap-angle-5", snap.angle() == 5.0);
-    set_checkbox(&avb.document, "snap-angle-10", snap.angle() == 10.0);
+    if matches!(avb.active_view, Tabs::Draw) {
+        let canvas = &avb.canvases[avb.active_canvas.idx()];
+        let snap = &canvas.get_user_ui().snap;
+        set_checkbox(&avb.document, "snap-linear-1", snap.linear() == 1.0);
+        set_checkbox(&avb.document, "snap-linear-5", snap.linear() == 5.0);
+        set_checkbox(&avb.document, "snap-linear-10", snap.linear() == 10.0);
+        set_checkbox(&avb.document, "snap-angle-1", snap.angle() == 1.0);
+        set_checkbox(&avb.document, "snap-angle-5", snap.angle() == 5.0);
+        set_checkbox(&avb.document, "snap-angle-10", snap.angle() == 10.0);
+    }
 }
 
 pub(crate) fn begin_render(av: RefAV, label: &'static str) {

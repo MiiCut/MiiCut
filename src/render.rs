@@ -222,6 +222,14 @@ pub(crate) fn render_gcode_view(av: RefAV) {
     update_status_bar(av);
 }
 
+pub(crate) fn render_machine_view(av: RefAV) {
+    begin_render(av.clone(), "Machine");
+    update_status_bar(av.clone());
+    let _ = av.borrow_mut().ensure_machine_view(av.clone());
+    end_render(av.clone());
+    update_status_bar(av);
+}
+
 pub(crate) fn toolpath_points_to_path(points: &[Vec2]) -> Option<BezPath> {
     if points.len() < 2 {
         return None;

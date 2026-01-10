@@ -3,7 +3,9 @@ use crate::canvas::{CanvasKind, Color};
 use crate::dom::{get_element_height, get_element_width, ShapeType, Tabs};
 use crate::inputs::{ButtonLevel, MouseButton, SystemMouse, UserAction};
 use crate::math::MyError;
-use crate::render::{render_draw_view, render_gcode_view, render_toolpath_view};
+use crate::render::{
+    render_draw_view, render_gcode_view, render_machine_view, render_toolpath_view,
+};
 use crate::shape::{ClosedShape, TextFont};
 use crate::shapes::{toolpath_to_plasma_gcode, Toolpath};
 use wasm_bindgen::JsCast;
@@ -221,7 +223,7 @@ pub(crate) fn on_draw_mouse_wheel(av: RefAV, event: Event) {
             let _ = avb.update_canvas_inputs(mouse_event, sys_mouse);
             let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
             let world_pos = canvas.get_user_ui().draw_pos;
-            let factor = if delta_y > 0.0 { 0.9 } else { 1.1 };
+            let factor = if delta_y > 0.0 { 0.95 } else { 1.05 };
             zoom_canvas_at(canvas, world_pos, factor);
             drop(avb);
             render_draw_view(av.clone());
@@ -296,7 +298,7 @@ pub(crate) fn on_gcode_mouse_wheel(av: RefAV, event: Event) {
             let _ = avb.update_canvas_inputs(mouse_event, sys_mouse);
             let canvas = &mut avb.canvases[CanvasKind::Gcode.idx()];
             let world_pos = canvas.get_user_ui().draw_pos;
-            let factor = if delta_y > 0.0 { 0.9 } else { 1.1 };
+            let factor = if delta_y > 0.0 { 0.95 } else { 1.05 };
             zoom_canvas_at(canvas, world_pos, factor);
             drop(avb);
             render_gcode_view(av.clone());
@@ -343,7 +345,7 @@ pub(crate) fn on_toolpath_mouse_wheel(av: RefAV, event: Event) {
             let _ = avb.update_canvas_inputs(mouse_event, sys_mouse);
             let canvas = &mut avb.canvases[CanvasKind::Toolpath.idx()];
             let world_pos = canvas.get_user_ui().draw_pos;
-            let factor = if delta_y > 0.0 { 0.9 } else { 1.1 };
+            let factor = if delta_y > 0.0 { 0.95 } else { 1.05 };
             zoom_canvas_at(canvas, world_pos, factor);
             drop(avb);
             render_toolpath_view(av.clone());
@@ -427,32 +429,74 @@ pub(crate) fn on_window_click(_pa: RefAV, _event: Event) {}
 pub(crate) fn on_window_keydown(av: RefAV, event: Event) {
     if let Ok(kb_event) = event.dyn_into::<KeyboardEvent>() {
         let key = kb_event.key();
-        let mut avb = av.borrow_mut();
-        let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-        let keys = &mut canvas.get_user_ui_mut().keys_states;
-        keys.ctrl_cmd_pressed = kb_event.ctrl_key() || kb_event.meta_key();
-        keys.shift_pressed = kb_event.shift_key();
-        keys.alt_pressed = kb_event.alt_key();
+        let ctrl_cmd = kb_event.ctrl_key() || kb_event.meta_key();
+        let shift = kb_event.shift_key();
+        let alt = kb_event.alt_key();
+        {
+            let mut avb = av.borrow_mut();
+            let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+            let keys = &mut canvas.get_user_ui_mut().keys_states;
+            keys.ctrl_cmd_pressed = ctrl_cmd;
+            keys.shift_pressed = shift;
+            keys.alt_pressed = alt;
+        }
 
+        let mut do_render = false;
         match key.as_str() {
-            "Escape" => avb.esc_pressed(),
-            "Delete" | "Backspace" => avb.del_back_pressed(),
-            " " => avb.space_pressed(),
-            "ArrowUp" => avb.arrow_up_pressed(),
-            "ArrowDown" => avb.arrow_down_pressed(),
-            "c" | "C" => {
-                if keys.ctrl_cmd_pressed {
-                    avb.ctrl_c_pressed();
+            "Alt" => {
+                do_render = true;
+            }
+            "Escape" => {
+                if let Ok(mut avb) = av.try_borrow_mut() {
+                    avb.esc_pressed();
                 }
+                do_render = true;
+            }
+            "Delete" | "Backspace" => {
+                if let Ok(mut avb) = av.try_borrow_mut() {
+                    avb.del_back_pressed();
+                }
+                do_render = true;
+            }
+            " " => {
+                if let Ok(mut avb) = av.try_borrow_mut() {
+                    avb.space_pressed();
+                }
+                do_render = true;
+            }
+            "ArrowUp" => {
+                if let Ok(mut avb) = av.try_borrow_mut() {
+                    avb.arrow_up_pressed();
+                }
+                do_render = true;
+            }
+            "ArrowDown" => {
+                if let Ok(mut avb) = av.try_borrow_mut() {
+                    avb.arrow_down_pressed();
+                }
+                do_render = true;
+            }
+            "c" | "C" => {
+                if ctrl_cmd {
+                    if let Ok(mut avb) = av.try_borrow_mut() {
+                        avb.ctrl_c_pressed();
+                    }
+                }
+                do_render = true;
             }
             "v" | "V" => {
-                if keys.ctrl_cmd_pressed {
-                    avb.ctrl_v_pressed();
+                if ctrl_cmd {
+                    if let Ok(mut avb) = av.try_borrow_mut() {
+                        avb.ctrl_v_pressed();
+                    }
                 }
+                do_render = true;
             }
             "s" | "S" => {
-                if keys.ctrl_cmd_pressed {
-                    if let Some(save) = avb.document.get_element_by_id("save-option") {
+                if ctrl_cmd {
+                    kb_event.prevent_default();
+                    log!("Ctrl+S pressed");
+                    if let Some(save) = av.borrow().document.get_element_by_id("save-option") {
                         let save = save.dyn_into::<HtmlElement>().unwrap();
                         save.click();
                     }
@@ -460,14 +504,15 @@ pub(crate) fn on_window_keydown(av: RefAV, event: Event) {
             }
             _ => {}
         }
-
-        drop(avb);
-        render_draw_view(av);
+        if do_render {
+            render_draw_view(av);
+        }
     }
 }
 
 pub(crate) fn on_window_keyup(av: RefAV, event: Event) {
     if let Ok(kb_event) = event.dyn_into::<KeyboardEvent>() {
+        let key = kb_event.key();
         let mut avb = av.borrow_mut();
         let keys = &mut avb.canvases[CanvasKind::Draw.idx()]
             .get_user_ui_mut()
@@ -476,6 +521,10 @@ pub(crate) fn on_window_keyup(av: RefAV, event: Event) {
         keys.shift_pressed = kb_event.shift_key();
         keys.alt_pressed = kb_event.alt_key();
         // avb.update_draw_cursor();
+        if key == "Alt" {
+            drop(avb);
+            render_draw_view(av);
+        }
     }
 }
 
@@ -486,9 +535,11 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
     let tab_draw = avb.document.get_element_by_id("tab-draw");
     let tab_toolpath = avb.document.get_element_by_id("tab-toolpath");
     let tab_gcode = avb.document.get_element_by_id("tab-gcode");
+    let tab_machine = avb.document.get_element_by_id("tab-machine");
     let draw = avb.document.get_element_by_id("view-draw");
     let toolpath = avb.document.get_element_by_id("view-toolpath");
     let gcode = avb.document.get_element_by_id("view-gcode");
+    let machine = avb.document.get_element_by_id("view-machine");
     let left_panel = avb.document.get_element_by_id("left-panel");
 
     let set_active = |el: &Option<web_sys::Element>, active: bool| {
@@ -504,9 +555,11 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
     set_active(&tab_draw, selected == Tabs::Draw);
     set_active(&tab_toolpath, selected == Tabs::Toolpath);
     set_active(&tab_gcode, selected == Tabs::Gcode);
+    set_active(&tab_machine, selected == Tabs::Machine);
     set_active(&draw, selected == Tabs::Draw);
     set_active(&toolpath, selected == Tabs::Toolpath);
     set_active(&gcode, selected == Tabs::Gcode);
+    set_active(&machine, selected == Tabs::Machine);
 
     if let Some(panel) = left_panel.as_ref() {
         let classes = panel.class_list();
@@ -523,6 +576,7 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
             Tabs::Gcode => {
                 let _ = classes.add_1("gcode-mode");
             }
+            Tabs::Machine => {}
         }
         if let Ok(panel) = panel.clone().dyn_into::<web_sys::HtmlElement>() {
             if matches!(selected, Tabs::Draw) {
@@ -533,11 +587,14 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
         }
     }
 
-    avb.active_canvas = match selected {
-        Tabs::Draw => CanvasKind::Draw,
-        Tabs::Toolpath => CanvasKind::Toolpath,
-        Tabs::Gcode => CanvasKind::Gcode,
-    };
+    if !matches!(selected, Tabs::Machine) {
+        avb.active_canvas = match selected {
+            Tabs::Draw => CanvasKind::Draw,
+            Tabs::Toolpath => CanvasKind::Toolpath,
+            Tabs::Gcode => CanvasKind::Gcode,
+            Tabs::Machine => avb.active_canvas,
+        };
+    }
 
     if matches!(selected, Tabs::Toolpath) {
         avb.refresh_toolpath_cache();
@@ -549,6 +606,10 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
         avb.last_gcode = None;
         avb.gcode_auto_center = true;
     }
+    if matches!(selected, Tabs::Machine) {
+        let _ = avb.ensure_machine_view(av.clone());
+        avb.request_machine_settings(av.clone());
+    }
 
     drop(avb);
     resize_canvases(av.clone());
@@ -557,6 +618,7 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
         Tabs::Draw => render_draw_view(av),
         Tabs::Toolpath => render_toolpath_view(av),
         Tabs::Gcode => render_gcode_view(av),
+        Tabs::Machine => render_machine_view(av),
     }
 }
 
@@ -611,12 +673,12 @@ pub(crate) fn on_icon_mouseout(av: RefAV, _event: Event) {
 }
 
 fn render_active_view(av: RefAV) {
-    let active = av.borrow().active_canvas;
+    let active = av.borrow().active_view;
     match active {
-        CanvasKind::Draw => render_draw_view(av),
-        CanvasKind::Gcode => render_gcode_view(av),
-        CanvasKind::Toolpath => render_toolpath_view(av),
-        _ => render_draw_view(av),
+        Tabs::Draw => render_draw_view(av),
+        Tabs::Gcode => render_gcode_view(av),
+        Tabs::Toolpath => render_toolpath_view(av),
+        Tabs::Machine => render_machine_view(av),
     }
 }
 

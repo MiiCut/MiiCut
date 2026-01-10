@@ -10,6 +10,7 @@ use kurbo::{flatten, BezPath, PathEl, Shape, Size, Vec2};
 use svg::parser::{Event as SvgEvent, Parser as SvgParser};
 use wasm_bindgen::JsValue;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::closure::Closure;
 use web_sys::{Blob, BlobPropertyBag, Document, HtmlAnchorElement, Url};
 
 pub(crate) fn build_svg_from_dataset(dataset: &DataSet) -> Option<String> {
@@ -256,20 +257,35 @@ pub(crate) fn trigger_download(document: &Document, filename: &str, contents: &s
     if let Some(body) = document.body() {
         if let Ok(link) = document.create_element("a") {
             if let Ok(link) = link.dyn_into::<HtmlAnchorElement>() {
-            let parts = Array::new();
-            parts.push(&JsValue::from_str(contents));
-            let options = BlobPropertyBag::new();
-            options.set_type(mime);
-            if let Ok(blob) = Blob::new_with_str_sequence_and_options(&parts, &options) {
-                if let Ok(url) = Url::create_object_url_with_blob(&blob) {
-                    link.set_href(&url);
-                    link.set_download(filename);
-                    let _ = body.append_child(&link);
-                    link.click();
-                    let _ = body.remove_child(&link);
-                    let _ = Url::revoke_object_url(&url);
+                let parts = Array::new();
+                parts.push(&JsValue::from_str(contents));
+                let options = BlobPropertyBag::new();
+                options.set_type(mime);
+                if let Ok(blob) = Blob::new_with_str_sequence_and_options(&parts, &options) {
+                    if let Ok(url) = Url::create_object_url_with_blob(&blob) {
+                        link.set_href(&url);
+                        link.set_download(filename);
+                        let _ = body.append_child(&link);
+                        link.click();
+                        if let Some(window) = web_sys::window() {
+                            let body = body.clone();
+                            let link = link.clone();
+                            let url = url.clone();
+                            let callback = Closure::once(move || {
+                                let _ = body.remove_child(&link);
+                                let _ = Url::revoke_object_url(&url);
+                            });
+                            let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                callback.as_ref().unchecked_ref(),
+                                0,
+                            );
+                            callback.forget();
+                        } else {
+                            let _ = body.remove_child(&link);
+                            let _ = Url::revoke_object_url(&url);
+                        }
+                    }
                 }
-            }
             }
         }
     }

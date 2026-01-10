@@ -37,18 +37,12 @@
           <a href="#" id="export-svg">Export to SVG</a>
         </div>
       </div>
-      <div class="dropdown">
-        <button class="dropbtn">Machine</button>
-        <div class="dropdown-content">
-          <a href="#" id="machine-load-params">Load parameters</a>
-          <a href="#" id="machine-save-params">Save parameters</a>
-        </div>
-      </div>
       <div id="view-tabs" class="view-tabs">
         <span class="view-title">VIEW:</span>
         <button id="tab-draw" class="tab active">Draw</button>
         <button id="tab-toolpath" class="tab">Toolpath</button>
         <button id="tab-gcode" class="tab">G-code</button>
+        <button id="tab-machine" class="tab">Machine</button>
       </div>
     </div>
 
@@ -192,6 +186,24 @@
               </div>
             </div>
           </div>
+
+          <div id="view-machine" class="view">
+            <div id="machine-status-bar">
+              <div id="machine-status-text">Status: idle</div>
+              <button id="machine-refresh" type="button">Refresh</button>
+              <div id="machine-status-time"></div>
+              <div id="machine-status-error"></div>
+              <div class="machine-status-actions">
+                <button id="machine-load-params" type="button">
+                  Load parameters
+                </button>
+                <button id="machine-save-params" type="button">
+                  Save parameters
+                </button>
+              </div>
+            </div>
+            <div id="machine-container"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -212,34 +224,38 @@
       </form>
     </div>
     <div id="status-bar" class="status-bar">
-      <div class="status-group">
-        <span class="status-label">Linear snap</span>
-        <label class="status-option"
-          ><input type="checkbox" id="snap-linear-1" />1</label
-        >
-        <label class="status-option"
-          ><input type="checkbox" id="snap-linear-5" />5</label
-        >
-        <label class="status-option"
-          ><input type="checkbox" id="snap-linear-10" />10</label
-        >
-      </div>
-      <div class="status-sep"></div>
-      <div class="status-group">
-        <span class="status-label">Angle snap</span>
-        <label class="status-option"
-          ><input type="checkbox" id="snap-angle-1" />1</label
-        >
-        <label class="status-option"
-          ><input type="checkbox" id="snap-angle-5" />5</label
-        >
-        <label class="status-option"
-          ><input type="checkbox" id="snap-angle-10" />10</label
-        >
+      <div id="status-snap" class="status-snap">
+        <div class="status-group">
+          <span class="status-label">Linear snap</span>
+          <label class="status-option"
+            ><input type="checkbox" id="snap-linear-1" />1</label
+          >
+          <label class="status-option"
+            ><input type="checkbox" id="snap-linear-5" />5</label
+          >
+          <label class="status-option"
+            ><input type="checkbox" id="snap-linear-10" />10</label
+          >
+        </div>
+        <div class="status-sep"></div>
+        <div class="status-group">
+          <span class="status-label">Angle snap</span>
+          <label class="status-option"
+            ><input type="checkbox" id="snap-angle-1" />1</label
+          >
+          <label class="status-option"
+            ><input type="checkbox" id="snap-angle-5" />5</label
+          >
+          <label class="status-option"
+            ><input type="checkbox" id="snap-angle-10" />10</label
+          >
+        </div>
       </div>
       <div class="status-spacer"></div>
-      <div id="status-text" class="status-text"></div>
-      <div id="render-indicator" class="status-render"></div>
+      <div id="status-info" class="status-info">
+        <div id="status-text" class="status-text"></div>
+        <div id="render-indicator" class="status-render"></div>
+      </div>
     </div>
     <div id="modalBackdrop"></div>
     <div id="tooltip" class="tooltip"></div>

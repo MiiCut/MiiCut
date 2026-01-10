@@ -12,6 +12,7 @@ pub mod handlers;
 pub mod import_export;
 pub mod inputs;
 pub mod math;
+pub mod machine;
 pub mod prefab;
 pub mod render;
 pub mod shape;

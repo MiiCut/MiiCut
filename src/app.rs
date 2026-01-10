@@ -11,10 +11,14 @@ use crate::handlers::{
     on_window_click, on_window_keydown, on_window_keyup, on_window_resize, resize_canvases,
 };
 use crate::import_export::{
-    build_json_from_dataset, build_svg_from_dataset, get_prop, json_escape, load_json_to_dataset,
+    build_json_from_dataset, build_svg_from_dataset, get_prop, load_json_to_dataset,
     load_svg_to_dataset, make_export_info, timestamp_string, trigger_download,
 };
 use crate::inputs::{SystemMouse, UserAction};
+use crate::machine::{
+    build_machine_view, load_machine_schema, machine_input_id, parse_grbl_setting_line,
+    update_machine_value, MachineGroup,
+};
 use crate::prefab::line_path;
 use crate::render::{
     draw_grid_and_rules, draw_reset_origin, render_draw_view, render_gcode_view,
@@ -23,15 +27,16 @@ use crate::render::{
 use crate::shapes::{multipolygon_to_toolpath, toolpath_to_plasma_gcode, Toolpath, ToolpathParams};
 use crate::status::update_status_bar;
 use crate::types::{EUId, VUId};
-use js_sys::{Array, JSON};
+use js_sys::{Array, Date, Object, Reflect, JSON};
 use kurbo::{BezPath, PathEl, Point, Size, Vec2};
 use std::collections::HashSet;
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::spawn_local;
 use web_sys::{
     Blob, Document, Element, Event, FileReader, HtmlAnchorElement, HtmlCanvasElement, HtmlElement,
-    HtmlInputElement, MouseEvent, Url, Window,
+    HtmlInputElement, KeyboardEvent, MouseEvent, Url, Window,
 };
 
 pub(crate) type RefAV = Rc<RefCell<AppVars>>;
@@ -72,10 +77,215 @@ pub(crate) struct AppVars {
     pub(crate) toolpath_original_paths: Vec<BezPath>,
     pub(crate) toolpath_auto_center: bool,
     pub(crate) toolpath_auto_fit: bool,
+    pub(crate) machine_groups: Vec<MachineGroup>,
+    pub(crate) machine_view_built: bool,
+    pub(crate) machine_last_update: Option<String>,
+    pub(crate) ws_connected: bool,
+    pub(crate) ws_status: String,
+    pub(crate) last_ws_error: Option<String>,
+    pub(crate) last_http_error: Option<String>,
     pub(crate) cnc: Option<Rc<CncLink>>,
 }
 
 impl AppVars {
+    pub(crate) fn ensure_machine_view(&mut self, av: RefAV) -> Result<(), JsValue> {
+        if self.machine_groups.is_empty() {
+            self.machine_groups = load_machine_schema();
+        }
+        if !self.machine_view_built {
+            build_machine_view(&self.document, &self.machine_groups)?;
+            self.wire_machine_inputs(av.clone())?;
+            self.wire_machine_controls(av)?;
+            self.set_machine_status_time(None);
+            self.set_machine_status_error();
+            self.machine_view_built = true;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn request_machine_settings(&mut self, av: RefAV) {
+        if let Some(cnc) = &self.cnc {
+            self.set_machine_status("Status: updating...", Some("pending"));
+            self.last_http_error = None;
+            self.set_machine_status_error();
+            let cnc = cnc.clone();
+            let av = av.clone();
+            spawn_local(async move {
+                let result = cnc.send_http_cmd_ts("$$").await;
+                if let Ok(mut avb) = av.try_borrow_mut() {
+                    match result {
+                        Ok(true) => avb.last_http_error = None,
+                        Ok(false) => {
+                            avb.last_http_error = Some("Machine settings request failed: $$".into())
+                        }
+                        Err(_) => {
+                            avb.last_http_error = Some("Machine settings request failed: $$".into())
+                        }
+                    }
+                    if avb.last_http_error.is_some() {
+                        avb.set_machine_status("Status: unable to update", Some("error"));
+                    }
+                    avb.set_machine_status_error();
+                }
+            });
+        }
+    }
+
+    pub(crate) fn handle_ws_text(&mut self, msg: &str) {
+        let mut updated = 0;
+        for line in msg.lines() {
+            if let Some((id, value)) = parse_grbl_setting_line(line) {
+                if update_machine_value(&mut self.machine_groups, &id, &value) {
+                    self.update_machine_input(&id, &value);
+                    updated += 1;
+                }
+            }
+        }
+        if updated > 0 {
+            self.set_machine_status("Status: updated", Some("ok"));
+            let now = Date::new_0().to_string().as_string().unwrap_or_default();
+            self.machine_last_update = Some(now.clone());
+            self.set_machine_status_time(Some(&now));
+            self.last_http_error = None;
+            self.set_machine_status_error();
+        }
+    }
+
+    fn update_machine_input(&self, id: &str, value: &str) {
+        let input_id = machine_input_id(id);
+        let Some(el) = self.document.get_element_by_id(&input_id) else {
+            return;
+        };
+        if let Ok(input) = el.dyn_into::<HtmlInputElement>() {
+            input.set_value(value);
+        }
+    }
+
+    fn wire_machine_inputs(&self, av: RefAV) -> Result<(), JsValue> {
+        let Some(cnc) = self.cnc.clone() else {
+            return Ok(());
+        };
+        for group in self.machine_groups.iter() {
+            for setting in group.settings.iter() {
+                let input_id = machine_input_id(&setting.id);
+                let Some(el) = self.document.get_element_by_id(&input_id) else {
+                    continue;
+                };
+                let input: HtmlInputElement = el.dyn_into()?;
+                let input_cb = input.clone();
+                let id = setting.id.clone();
+                let cnc = cnc.clone();
+                let av = av.clone();
+                let on_keydown = Closure::<dyn FnMut(Event)>::new(move |evt: Event| {
+                    let Ok(evt) = evt.dyn_into::<KeyboardEvent>() else {
+                        return;
+                    };
+                    if evt.key() != "Enter" {
+                        return;
+                    }
+                    evt.prevent_default();
+                    let value = input_cb.value();
+                    let cmd = format!("${}={}", id, value);
+                    let cnc = cnc.clone();
+                    let av = av.clone();
+                    spawn_local(async move {
+                        let result = cnc.send_http_cmd_ts(&cmd).await;
+                        if let Ok(mut avb) = av.try_borrow_mut() {
+                            match result {
+                                Ok(true) => avb.last_http_error = None,
+                                Ok(false) => {
+                                    avb.last_http_error =
+                                        Some(format!("Machine setting failed: {cmd}"))
+                                }
+                                Err(_) => {
+                                    avb.last_http_error =
+                                        Some(format!("Machine setting failed: {cmd}"))
+                                }
+                            }
+                            avb.set_machine_status_error();
+                        }
+                    });
+                });
+                input.add_event_listener_with_callback(
+                    "keydown",
+                    on_keydown.as_ref().unchecked_ref(),
+                )?;
+                on_keydown.forget();
+            }
+        }
+        Ok(())
+    }
+
+    fn wire_machine_controls(&self, av: RefAV) -> Result<(), JsValue> {
+        let Some(el) = self.document.get_element_by_id("machine-refresh") else {
+            return Ok(());
+        };
+        let button: HtmlElement = el.dyn_into()?;
+        let av = av.clone();
+        let on_click = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+            if let Ok(mut avb) = av.try_borrow_mut() {
+                avb.request_machine_settings(av.clone());
+            }
+        });
+        button.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
+        on_click.forget();
+        Ok(())
+    }
+
+    fn set_machine_status(&self, text: &str, state: Option<&str>) {
+        let Some(el) = self.document.get_element_by_id("machine-status-text") else {
+            return;
+        };
+        let Ok(el) = el.dyn_into::<HtmlElement>() else {
+            return;
+        };
+        el.set_inner_text(text);
+        let classes = el.class_list();
+        let _ = classes.remove_1("ok");
+        let _ = classes.remove_1("error");
+        let _ = classes.remove_1("pending");
+        if let Some(state) = state {
+            let _ = classes.add_1(state);
+        }
+    }
+
+    fn set_machine_status_time(&self, time: Option<&str>) {
+        let Some(el) = self.document.get_element_by_id("machine-status-time") else {
+            return;
+        };
+        let Ok(el) = el.dyn_into::<HtmlElement>() else {
+            return;
+        };
+        let text = match time {
+            Some(time) if !time.is_empty() => format!("Last update: {time}"),
+            _ => "Last update: --".to_string(),
+        };
+        el.set_inner_text(&text);
+    }
+
+    fn set_machine_status_error(&self) {
+        let Some(el) = self.document.get_element_by_id("machine-status-error") else {
+            return;
+        };
+        let Ok(el) = el.dyn_into::<HtmlElement>() else {
+            return;
+        };
+        let mut parts = Vec::new();
+        if let Some(msg) = self.last_ws_error.as_ref() {
+            parts.push(format!("WS: {msg}"));
+        }
+        if let Some(msg) = self.last_http_error.as_ref() {
+            parts.push(format!("HTTP: {msg}"));
+        }
+        let text = parts.join(" | ");
+        el.set_inner_text(&text);
+        let classes = el.class_list();
+        let _ = classes.remove_1("active");
+        if !text.is_empty() {
+            let _ = classes.add_1("active");
+        }
+    }
+
     pub(crate) fn esc_pressed(&mut self) {
         self.element_on_creation = None;
         self.go_to_arrow_tool();
@@ -503,6 +713,10 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
     let cnc: Option<Rc<CncLink>> = CncLink::connect("http://192.168.1.36", "ws://192.168.1.36:81/")
         .ok()
         .map(Rc::new);
+    // let cnc: Option<Rc<CncLink>> =
+    //     CncLink::connect("http://192.168.100.100", "ws://192.168.100.100:81/")
+    //         .ok()
+    //         .map(Rc::new);
 
     let app_vars = Rc::new(RefCell::new(AppVars {
         element_on_creation: None,
@@ -545,8 +759,37 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         toolpath_original_paths: Vec::new(),
         toolpath_auto_center: false,
         toolpath_auto_fit: false,
+        machine_groups: Vec::new(),
+        machine_view_built: false,
+        machine_last_update: None,
+        ws_connected: false,
+        ws_status: "WS disconnected".to_string(),
+        last_ws_error: None,
+        last_http_error: None,
         cnc,
     }));
+
+    if let Some(cnc) = app_vars.borrow().cnc.clone() {
+        let av_clone = app_vars.clone();
+        cnc.set_on_text_handler(Some(Box::new(move |msg| {
+            if let Ok(mut avb) = av_clone.try_borrow_mut() {
+                avb.handle_ws_text(&msg);
+            }
+        })));
+        let av_clone = app_vars.clone();
+        cnc.set_on_status_handler(Some(Box::new(move |msg| {
+            if let Ok(mut avb) = av_clone.try_borrow_mut() {
+                avb.ws_status = msg.clone();
+                avb.ws_connected = msg.starts_with("WS connected");
+                if msg.starts_with("WS error") || msg.starts_with("WS closed") {
+                    avb.last_ws_error = Some(msg);
+                } else {
+                    avb.last_ws_error = None;
+                }
+                avb.set_machine_status_error();
+            }
+        })));
+    }
 
     init_menu(app_vars.clone())?;
     init_tabs(app_vars.clone())?;
@@ -627,7 +870,7 @@ pub(crate) fn init_window(av: RefAV) -> Result<(), JsValue> {
 }
 
 pub(crate) fn init_tabs(av: RefAV) -> Result<(), JsValue> {
-    let tabs: HashSet<Tabs> = [Tabs::Draw, Tabs::Toolpath, Tabs::Gcode]
+    let tabs: HashSet<Tabs> = [Tabs::Draw, Tabs::Toolpath, Tabs::Gcode, Tabs::Machine]
         .into_iter()
         .collect();
 
@@ -1117,28 +1360,28 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
     if let Some(save) = document.get_element_by_id("save-option") {
         let av_clone = av.clone();
         let save = save.dyn_into::<HtmlElement>()?;
-        let on_save = Closure::wrap(Box::new(move || {
-            let canvas = &av_clone.borrow().canvases[CanvasKind::Draw.idx()];
-            let meta = make_export_info(&av_clone.borrow().document);
-            let json = build_json_from_dataset(&canvas.dataset, &meta);
-            let Some(json) = json else {
-                return;
+        let on_save = Closure::wrap(Box::new(move |event: Event| {
+            event.prevent_default();
+            let (document, json, filename) = {
+                let avb = av_clone.borrow();
+                let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+                let meta = make_export_info(&avb.document);
+                let json = build_json_from_dataset(&canvas.dataset, &meta);
+                let Some(json) = json else {
+                    return;
+                };
+                let file_base = meta
+                    .title
+                    .as_ref()
+                    .map(|title| title.as_str())
+                    .filter(|title| !title.trim().is_empty())
+                    .unwrap_or("miicut");
+                let timestamp = timestamp_string();
+                let filename = format!("{file_base}-{timestamp}.mii.json");
+                (avb.document.clone(), json, filename)
             };
-            let file_base = meta
-                .title
-                .as_ref()
-                .map(|title| title.as_str())
-                .filter(|title| !title.trim().is_empty())
-                .unwrap_or("miicut");
-            let timestamp = timestamp_string();
-            let filename = format!("{file_base}-{timestamp}.mii.json");
-            trigger_download(
-                &av_clone.borrow().document,
-                &filename,
-                &json,
-                "application/json",
-            );
-        }) as Box<dyn FnMut()>);
+            trigger_download(&document, &filename, &json, "application/json");
+        }) as Box<dyn FnMut(_)>);
         save.add_event_listener_with_callback("click", on_save.as_ref().unchecked_ref())?;
         on_save.forget();
     }
@@ -1198,20 +1441,19 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
     if let Some(export) = document.get_element_by_id("export-svg") {
         let av_clone = av.clone();
         let export = export.dyn_into::<HtmlElement>()?;
-        let on_export = Closure::wrap(Box::new(move || {
-            let canvas = &av_clone.borrow().canvases[CanvasKind::Draw.idx()];
-            let Some(svg) = build_svg_from_dataset(&canvas.dataset) else {
-                return;
+        let on_export = Closure::wrap(Box::new(move |event: Event| {
+            event.prevent_default();
+            let (document, svg, filename) = {
+                let avb = av_clone.borrow();
+                let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+                let Some(svg) = build_svg_from_dataset(&canvas.dataset) else {
+                    return;
+                };
+                let filename = "drawing.svg".to_string();
+                (avb.document.clone(), svg, filename)
             };
-            let file_base = "drawing";
-            let filename = format!("{file_base}.svg");
-            trigger_download(
-                &av_clone.borrow().document,
-                &filename,
-                &svg,
-                "image/svg+xml",
-            );
-        }) as Box<dyn FnMut()>);
+            trigger_download(&document, &filename, &svg, "image/svg+xml");
+        }) as Box<dyn FnMut(_)>);
         export.add_event_listener_with_callback("click", on_export.as_ref().unchecked_ref())?;
         on_export.forget();
     }
@@ -1333,18 +1575,74 @@ pub(crate) fn init_status(av: RefAV) -> Result<(), JsValue> {
 
 pub(crate) fn save_toolpath_params(av: RefAV) {
     let document = av.borrow().document.clone();
-    let params = av.borrow().toolpath_params.clone();
-    let payload = format!(
-        "{{\"feed_xy\":{:.3},\"travel_feed_xy\":{:.3},\"pierce_delay_s\":{:.3},\"lead_in_mm\":{:.3},\"lead_out_mm\":{:.3},\"kerf_mm\":{:.3},\"torch_on_m3\":\"{}\",\"torch_off_m5\":\"{}\"}}",
-        params.feed_xy,
-        params.travel_feed_xy,
-        params.pierce_delay_s,
-        params.lead_in_mm,
-        params.lead_out_mm,
-        params.kerf_mm,
-        json_escape(&params.torch_on_m3),
-        json_escape(&params.torch_off_m5),
+    let (params, machine_values) = {
+        let avb = av.borrow();
+        let params = avb.toolpath_params.clone();
+        let mut machine_values = Vec::new();
+        for group in avb.machine_groups.iter() {
+            for setting in group.settings.iter() {
+                machine_values.push((setting.id.clone(), setting.value.clone()));
+            }
+        }
+        (params, machine_values)
+    };
+    let payload = Object::new();
+    let toolpath = Object::new();
+    let _ = Reflect::set(
+        &toolpath,
+        &"feed_xy".into(),
+        &JsValue::from_f64(params.feed_xy),
     );
+    let _ = Reflect::set(
+        &toolpath,
+        &"travel_feed_xy".into(),
+        &JsValue::from_f64(params.travel_feed_xy),
+    );
+    let _ = Reflect::set(
+        &toolpath,
+        &"pierce_delay_s".into(),
+        &JsValue::from_f64(params.pierce_delay_s),
+    );
+    let _ = Reflect::set(
+        &toolpath,
+        &"lead_in_mm".into(),
+        &JsValue::from_f64(params.lead_in_mm),
+    );
+    let _ = Reflect::set(
+        &toolpath,
+        &"lead_out_mm".into(),
+        &JsValue::from_f64(params.lead_out_mm),
+    );
+    let _ = Reflect::set(
+        &toolpath,
+        &"kerf_mm".into(),
+        &JsValue::from_f64(params.kerf_mm),
+    );
+    let _ = Reflect::set(
+        &toolpath,
+        &"torch_on_m3".into(),
+        &JsValue::from_str(&params.torch_on_m3),
+    );
+    let _ = Reflect::set(
+        &toolpath,
+        &"torch_off_m5".into(),
+        &JsValue::from_str(&params.torch_off_m5),
+    );
+    let _ = Reflect::set(&payload, &"toolpath".into(), &toolpath);
+
+    let machine = Object::new();
+    for (id, value) in machine_values {
+        let _ = Reflect::set(
+            &machine,
+            &JsValue::from_str(&id),
+            &JsValue::from_str(&value),
+        );
+    }
+    let _ = Reflect::set(&payload, &"machine_settings".into(), &machine);
+    let payload = JSON::stringify_with_replacer_and_space(&payload, &JsValue::NULL, &2.into())
+        .ok()
+        .and_then(|val| val.as_string())
+        .unwrap_or_default();
 
     if let Some(body) = document.body() {
         if let Ok(el) = document.create_element("a") {
@@ -1418,31 +1716,57 @@ pub(crate) fn apply_toolpath_params_from_json(av: RefAV, json_data: String) {
     };
     let document = av.borrow().document.clone();
     let mut avb = av.borrow_mut();
+    let Some(toolpath_value) = get_prop(&value, "toolpath") else {
+        return;
+    };
     let params = &mut avb.toolpath_params;
 
-    if let Some(val) = get_prop(&value, "feed_xy").and_then(|val| val.as_f64()) {
+    if let Some(val) = get_prop(&toolpath_value, "feed_xy").and_then(|val| val.as_f64()) {
         params.feed_xy = val;
     }
-    if let Some(val) = get_prop(&value, "travel_feed_xy").and_then(|val| val.as_f64()) {
+    if let Some(val) = get_prop(&toolpath_value, "travel_feed_xy").and_then(|val| val.as_f64()) {
         params.travel_feed_xy = val;
     }
-    if let Some(val) = get_prop(&value, "pierce_delay_s").and_then(|val| val.as_f64()) {
+    if let Some(val) = get_prop(&toolpath_value, "pierce_delay_s").and_then(|val| val.as_f64()) {
         params.pierce_delay_s = val;
     }
-    if let Some(val) = get_prop(&value, "lead_in_mm").and_then(|val| val.as_f64()) {
+    if let Some(val) = get_prop(&toolpath_value, "lead_in_mm").and_then(|val| val.as_f64()) {
         params.lead_in_mm = val;
     }
-    if let Some(val) = get_prop(&value, "lead_out_mm").and_then(|val| val.as_f64()) {
+    if let Some(val) = get_prop(&toolpath_value, "lead_out_mm").and_then(|val| val.as_f64()) {
         params.lead_out_mm = val;
     }
-    if let Some(val) = get_prop(&value, "kerf_mm").and_then(|val| val.as_f64()) {
+    if let Some(val) = get_prop(&toolpath_value, "kerf_mm").and_then(|val| val.as_f64()) {
         params.kerf_mm = val;
     }
-    if let Some(val) = get_prop(&value, "torch_on_m3").and_then(|val| val.as_string()) {
+    if let Some(val) = get_prop(&toolpath_value, "torch_on_m3").and_then(|val| val.as_string()) {
         params.torch_on_m3 = val;
     }
-    if let Some(val) = get_prop(&value, "torch_off_m5").and_then(|val| val.as_string()) {
+    if let Some(val) = get_prop(&toolpath_value, "torch_off_m5").and_then(|val| val.as_string()) {
         params.torch_off_m5 = val;
+    }
+
+    if let Some(machine_val) = get_prop(&value, "machine_settings") {
+        let machine_obj = Object::from(machine_val);
+        let keys = Object::keys(&machine_obj);
+        for key in keys.iter() {
+            let Some(id) = key.as_string() else {
+                continue;
+            };
+            let value_str = match Reflect::get(&machine_obj, &key) {
+                Ok(val) => val
+                    .as_string()
+                    .or_else(|| val.as_f64().map(|num| num.to_string()))
+                    .unwrap_or_default(),
+                Err(_) => String::new(),
+            };
+            if value_str.is_empty() {
+                continue;
+            }
+            if update_machine_value(&mut avb.machine_groups, &id, &value_str) {
+                avb.update_machine_input(&id, &value_str);
+            }
+        }
     }
 
     drop(avb);

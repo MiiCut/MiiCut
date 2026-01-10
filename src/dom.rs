@@ -9,6 +9,7 @@ pub enum Tabs {
     Draw,
     Gcode,
     Toolpath,
+    Machine,
 }
 
 impl Tabs {
@@ -17,6 +18,7 @@ impl Tabs {
             Tabs::Draw => "tab-draw",
             Tabs::Gcode => "tab-gcode",
             Tabs::Toolpath => "tab-toolpath",
+            Tabs::Machine => "tab-machine",
         }
     }
 
@@ -25,6 +27,7 @@ impl Tabs {
             Tabs::Draw => "view-draw",
             Tabs::Gcode => "view-gcode",
             Tabs::Toolpath => "view-toolpath",
+            Tabs::Machine => "view-machine",
         }
     }
 

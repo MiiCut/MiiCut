@@ -1,0 +1,581 @@
+{
+  "General": {
+    "General": [
+      {
+        "id": "10",
+        "label": "Status report options",
+        "value": "511"
+      },
+      {
+        "id": "11",
+        "label": "Junction deviation",
+        "value": "0.010"
+      },
+      {
+        "id": "12",
+        "label": "Arc tolerance",
+        "value": "0.002"
+      },
+      {
+        "id": "13#0",
+        "label": "Report in inches",
+        "value": "0"
+      },
+      {
+        "id": "28",
+        "label": "G73 Retract distance",
+        "value": "0.100"
+      },
+      {
+        "id": "32",
+        "label": "Mode of operation",
+        "value": "0"
+      },
+      {
+        "id": "39#0",
+        "label": "Enable legacy RT commands",
+        "value": "1"
+      },
+      {
+        "id": "60#0",
+        "label": "Restore overrides",
+        "value": "0"
+      },
+      {
+        "id": "62#0",
+        "label": "Sleep enable",
+        "value": "0"
+      },
+      {
+        "id": "63",
+        "label": "Feed hold actions",
+        "value": "3"
+      },
+      {
+        "id": "64#0",
+        "label": "Force init alarm",
+        "value": "0"
+      },
+      {
+        "id": "384#0",
+        "label": "Disable G92 persistence",
+        "value": "0"
+      },
+      {
+        "id": "396",
+        "label": "WebUI timeout",
+        "value": "30"
+      },
+      {
+        "id": "397",
+        "label": "WebUI auto report interval",
+        "value": "0"
+      },
+      {
+        "id": "398",
+        "label": "Planner buffer blocks",
+        "value": "100"
+      },
+      {
+        "id": "481",
+        "label": "Autoreport interval",
+        "value": "0"
+      },
+      {
+        "id": "484#0",
+        "label": "Unlock required after E-Stop",
+        "value": "1"
+      },
+      {
+        "id": "486",
+        "label": "Lock coordinate systems",
+        "value": "0"
+      },
+      {
+        "id": "534#0",
+        "label": "Output NGC debug messages",
+        "value": "0"
+      },
+      {
+        "id": "650",
+        "label": "File systems options",
+        "value": "0"
+      },
+      {
+        "id": "676",
+        "label": "Reset actions",
+        "value": "15"
+      }
+    ]
+  },
+  "Control signals": {
+    "Control signals": [
+      {
+        "id": "14",
+        "label": "Invert control inputs",
+        "value": "0"
+      },
+      {
+        "id": "17",
+        "label": "Pullup disable control inputs",
+        "value": "0"
+      }
+    ]
+  },
+  "Limits": {
+    "Limits": [
+      {
+        "id": "5",
+        "label": "Invert limit inputs",
+        "value": "0"
+      },
+      {
+        "id": "18",
+        "label": "Pullup disable limit inputs",
+        "value": "0"
+      },
+      {
+        "id": "20#0",
+        "label": "Soft limits enable",
+        "value": "0"
+      },
+      {
+        "id": "21",
+        "label": "Hard limits enable",
+        "value": "1"
+      }
+    ]
+  },
+  "Coolant": {
+    "Coolant": [
+      {
+        "id": "15",
+        "label": "Invert coolant outputs",
+        "value": "0"
+      },
+      {
+        "id": "673",
+        "label": "Coolant on delay",
+        "value": "0.0"
+      }
+    ]
+  },
+  "Spindle": {
+    "Spindle": [
+      {
+        "id": "9",
+        "label": "PWM spindle options",
+        "value": "1"
+      },
+      {
+        "id": "16",
+        "label": "Invert spindle signals",
+        "value": "0"
+      },
+      {
+        "id": "30",
+        "label": "Maximum spindle speed",
+        "value": "1000.000"
+      },
+      {
+        "id": "31",
+        "label": "Minimum spindle speed",
+        "value": "0.000"
+      },
+      {
+        "id": "33",
+        "label": "Spindle PWM frequency",
+        "value": "5000.0"
+      },
+      {
+        "id": "34",
+        "label": "Spindle PWM off value",
+        "value": "0.0"
+      },
+      {
+        "id": "35",
+        "label": "Spindle PWM min value",
+        "value": "0.0"
+      },
+      {
+        "id": "36",
+        "label": "Spindle PWM max value",
+        "value": "100.0"
+      },
+      {
+        "id": "394",
+        "label": "Spindle on delay",
+        "value": "0.0"
+      },
+      {
+        "id": "539",
+        "label": "Spindle off delay",
+        "value": "0.0"
+      }
+    ]
+  },
+  "Tool change": {
+    "Tool change": [
+      {
+        "id": "341",
+        "label": "Tool change mode",
+        "value": "0"
+      },
+      {
+        "id": "342",
+        "label": "Tool change probing distance",
+        "value": "30.0"
+      },
+      {
+        "id": "343",
+        "label": "Tool change locate feed rate",
+        "value": "25.0"
+      },
+      {
+        "id": "344",
+        "label": "Tool change search seek rate",
+        "value": "200.0"
+      },
+      {
+        "id": "345",
+        "label": "Tool change probe pull-off rate",
+        "value": "200.0"
+      },
+      {
+        "id": "346",
+        "label": "Tool change options",
+        "value": "1"
+      },
+      {
+        "id": "485#0",
+        "label": "Keep tool number over reboot",
+        "value": "0"
+      },
+      {
+        "id": "675",
+        "label": "Macro ATC options",
+        "value": "0"
+      }
+    ]
+  },
+  "Homing": {
+    "Homing": [
+      {
+        "id": "22",
+        "label": "Homing cycle",
+        "value": "0"
+      },
+      {
+        "id": "23",
+        "label": "Homing direction invert",
+        "value": "0"
+      },
+      {
+        "id": "24",
+        "label": "Homing locate feed rate",
+        "value": "25.0"
+      },
+      {
+        "id": "25",
+        "label": "Homing search seek rate",
+        "value": "500.0"
+      },
+      {
+        "id": "26",
+        "label": "Homing switch debounce delay",
+        "value": "250"
+      },
+      {
+        "id": "27",
+        "label": "Homing switch pull-off distance",
+        "value": "1.000"
+      },
+      {
+        "id": "43",
+        "label": "Homing passes",
+        "value": "1"
+      },
+      {
+        "id": "44",
+        "label": "Axes homing, first phase",
+        "value": "4"
+      },
+      {
+        "id": "45",
+        "label": "Axes homing, second phase",
+        "value": "3"
+      },
+      {
+        "id": "46",
+        "label": "Axes homing, third phase",
+        "value": "0"
+      }
+    ]
+  },
+  "Probing": {
+    "Probing": [
+      {
+        "id": "6",
+        "label": "Invert probe inputs",
+        "value": "0"
+      },
+      {
+        "id": "19",
+        "label": "Pullup disable probe inputs",
+        "value": "0"
+      },
+      {
+        "id": "65",
+        "label": "Probing options",
+        "value": "0"
+      }
+    ]
+  },
+  "Parking": {
+    "Safety door": [
+      {
+        "id": "41",
+        "label": "Parking cycle",
+        "value": "0"
+      },
+      {
+        "id": "42",
+        "label": "Parking axis",
+        "value": "2"
+      },
+      {
+        "id": "56",
+        "label": "Parking pull-out distance",
+        "value": "5.0"
+      },
+      {
+        "id": "57",
+        "label": "Parking pull-out rate",
+        "value": "100.0"
+      },
+      {
+        "id": "58",
+        "label": "Parking target",
+        "value": "-5.0"
+      },
+      {
+        "id": "59",
+        "label": "Parking fast rate",
+        "value": "500.0"
+      },
+      {
+        "id": "61",
+        "label": "Safety door options",
+        "value": "0"
+      },
+      {
+        "id": "392",
+        "label": "Spindle on delay",
+        "value": "4.0"
+      },
+      {
+        "id": "393",
+        "label": "Coolant on delay",
+        "value": "1.0"
+      }
+    ]
+  },
+  "Jogging": {
+    "Jogging": [
+      {
+        "id": "40#0",
+        "label": "Limit jog commands",
+        "value": "0"
+      }
+    ]
+  },
+  "Networking": {
+    "Networking": [
+      {
+        "id": "70",
+        "label": "Network Services",
+        "value": "6"
+      },
+      {
+        "id": "300",
+        "label": "Hostname",
+        "value": "grblHAL"
+      },
+      {
+        "id": "301",
+        "label": "IP Mode",
+        "value": "1"
+      },
+      {
+        "id": "302",
+        "label": "IP Address",
+        "value": "192.168.1.36"
+      },
+      {
+        "id": "303",
+        "label": "Gateway",
+        "value": "192.168.1.1"
+      },
+      {
+        "id": "304",
+        "label": "Netmask",
+        "value": "255.255.255.0"
+      },
+      {
+        "id": "305",
+        "label": "Telnet port",
+        "value": "23"
+      },
+      {
+        "id": "306",
+        "label": "HTTP port",
+        "value": "80"
+      },
+      {
+        "id": "307",
+        "label": "Websocket port",
+        "value": "81"
+      },
+      {
+        "id": "308",
+        "label": "FTP port",
+        "value": "21"
+      },
+      {
+        "id": "535",
+        "label": "MAC Address",
+        "value": ""
+      }
+    ]
+  },
+  "Aux ports": {
+    "Aux ports": [
+      {
+        "id": "370",
+        "label": "Invert I/O Port inputs",
+        "value": "0"
+      },
+      {
+        "id": "372",
+        "label": "Invert I/O Port outputs",
+        "value": "0"
+      }
+    ]
+  },
+  "Stepper": {
+    "Stepper": [
+      {
+        "id": "0",
+        "label": "Step pulse time",
+        "value": "5.0"
+      },
+      {
+        "id": "1",
+        "label": "Step idle delay",
+        "value": "25"
+      },
+      {
+        "id": "2",
+        "label": "Step pulse invert",
+        "value": "0"
+      },
+      {
+        "id": "3",
+        "label": "Step direction invert",
+        "value": "0"
+      },
+      {
+        "id": "4",
+        "label": "Invert stepper enable output(s)",
+        "value": "7"
+      },
+      {
+        "id": "29",
+        "label": "Pulse delay",
+        "value": "0.0"
+      },
+      {
+        "id": "37",
+        "label": "Steppers to keep enabled",
+        "value": "0"
+      },
+      {
+        "id": "680",
+        "label": "Stepper enable delay",
+        "value": "0"
+      }
+    ]
+  },
+  "X-axis": {
+    "X-axis": [
+      {
+        "id": "100",
+        "label": "Axis travel resolution",
+        "value": "10.00000"
+      },
+      {
+        "id": "110",
+        "label": "Axis maximum rate",
+        "value": "6000.000"
+      },
+      {
+        "id": "120",
+        "label": "Axis acceleration",
+        "value": "1000.000"
+      },
+      {
+        "id": "130",
+        "label": "Axis maximum travel",
+        "value": "200.000"
+      }
+    ]
+  },
+  "Y-axis": {
+    "Y-axis": [
+      {
+        "id": "101",
+        "label": "Axis travel resolution",
+        "value": "250.00000"
+      },
+      {
+        "id": "111",
+        "label": "Axis maximum rate",
+        "value": "500.000"
+      },
+      {
+        "id": "121",
+        "label": "Axis acceleration",
+        "value": "10.000"
+      },
+      {
+        "id": "131",
+        "label": "Axis maximum travel",
+        "value": "200.000"
+      }
+    ]
+  },
+  "Z-axis": {
+    "Z-axis": [
+      {
+        "id": "102",
+        "label": "Axis travel resolution",
+        "value": "250.00000"
+      },
+      {
+        "id": "112",
+        "label": "Axis maximum rate",
+        "value": "500.000"
+      },
+      {
+        "id": "122",
+        "label": "Axis acceleration",
+        "value": "10.000"
+      },
+      {
+        "id": "132",
+        "label": "Axis maximum travel",
+        "value": "200.000"
+      }
+    ]
+  }
+}
