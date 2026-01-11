@@ -14,7 +14,7 @@ use crate::{
     inputs::{SystemMouse, UserAction, UserUI},
     math::*,
     prefab::*,
-    shape::{ClosedShape, SvgFillRule},
+    shape::{GeneralShape, SvgFillRule},
     shapes::DataSet,
     types::{Binding, Couple, EUId, SegBundle, VUId},
     undoredo::UndoRedo,
@@ -539,12 +539,22 @@ impl Canvas {
     }
     pub fn move_vertices_selected(&mut self) -> bool {
         if let Some((last_eid, last_vid)) = self.dataset.last_vertex_selected {
+            let affects_final = self
+                .dataset
+                .get_element(last_eid)
+                .map(|e| {
+                    !matches!(
+                        e.get_shape_type(),
+                        ShapeType::ConstrLine | ShapeType::ConstrCircle
+                    )
+                })
+                .unwrap_or(false);
             let moved = self
                 .dataset
                 .get_element_mut(last_eid)
                 .map(|e| e.move_vertex(last_vid, &self.user_ui))
                 .unwrap_or(false);
-            if moved {
+            if moved && affects_final {
                 self.dataset.mark_final_polygon_dirty();
             }
             return moved;
@@ -912,11 +922,11 @@ impl Canvas {
             }
         }
     }
-    pub fn draw_dimensions(&mut self, e: &ClosedShape) {
+    pub fn draw_dimensions(&mut self, e: &GeneralShape) {
         match e.get_shape_type() {
-            ShapeType::Disc => {
+            ShapeType::Disc | ShapeType::ConstrCircle => {
                 let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
-                if v.len() == 2 {
+                if v.len() >= 2 {
                     if let Some(seg) = SegBundle::new(v[0], v[1]) {
                         // Draw the radius segment
                         let (path, pattern, colors, text) =
@@ -931,9 +941,23 @@ impl Canvas {
                     }
                 }
             }
+            ShapeType::ConstrLine => {
+                let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
+                if v.len() == 2 {
+                    if let Some(seg) = SegBundle::new(v[0], v[1]) {
+                        let (path, pattern, colors, text) = dim_hv(seg, self.get_canvas_infos());
+                        self.draw_path(
+                            &path,
+                            pattern,
+                            colors.fill_color,
+                            colors.stroke_color,
+                            text,
+                        );
+                    }
+                }
+            }
             ShapeType::Square | ShapeType::Text | ShapeType::Svg => {
-                let points: Vec<Vec2> =
-                    e.get_vertices().iter().map(|(_, v)| v.curr).collect();
+                let points: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
                 let rotation = e.get_rotation();
                 for (idx, (v1, v2)) in points
                     .iter()
@@ -1028,7 +1052,7 @@ impl Canvas {
         }
     }
 
-    pub fn draw_vs(&mut self, e: &ClosedShape) {
+    pub fn draw_vs(&mut self, e: &GeneralShape) {
         for (vid, vertex) in e.get_vertices().iter() {
             let pos = e.vertex_display_pos(vertex.curr);
             let vid_sel = self
@@ -1084,7 +1108,7 @@ impl Canvas {
         self.dataset.shapes = shapes;
         binds
     }
-    pub fn draw_paths_creation(&mut self, e: &ClosedShape) {
+    pub fn draw_paths_creation(&mut self, e: &GeneralShape) {
         let stroke_color = get_stroke_color(false, false);
         let path = e.get_bezpath();
         self.draw_path(
@@ -1102,12 +1126,22 @@ impl Canvas {
         for (eid, e) in self.dataset.shapes.iter() {
             let is_selected = self.dataset.shapes_selected.contains(eid);
             let is_highlighted = self.dataset.shapes_highlighted.contains(eid);
+            let is_construction = matches!(
+                e.get_shape_type(),
+                ShapeType::ConstrLine | ShapeType::ConstrCircle
+            );
             let stroke_color = if !is_selected && !is_highlighted {
-                Color::Gray20
+                if is_construction {
+                    Color::Rules
+                } else {
+                    Color::Gray20
+                }
             } else {
                 get_stroke_color(is_selected, is_highlighted)
             };
-            let fill_color = if svg_bbox_only && e.get_shape_type() == ShapeType::Svg {
+            let fill_color = if is_construction {
+                Color::Transparent
+            } else if svg_bbox_only && e.get_shape_type() == ShapeType::Svg {
                 if is_selected || is_highlighted {
                     get_fill_color(is_selected, is_highlighted)
                 } else {
@@ -1116,28 +1150,27 @@ impl Canvas {
             } else {
                 get_fill_color(is_selected, is_highlighted)
             };
+            let pattern = if is_construction {
+                Pattern::Helper
+            } else {
+                Pattern::Point
+            };
             if e.get_shape_type() == ShapeType::Svg {
                 if svg_bbox_only {
                     let path = e.get_bezpath();
-                    self.draw_path(path, Pattern::Point, fill_color, stroke_color, vec![]);
+                    self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
                     continue;
                 }
                 if let (Some(paths), Some(svg)) = (e.get_svg_paths(), e.get_svg()) {
-                    self.draw_svg_paths(
-                        paths,
-                        Pattern::Point,
-                        fill_color,
-                        stroke_color,
-                        svg.fill_rule,
-                    );
+                    self.draw_svg_paths(paths, pattern, fill_color, stroke_color, svg.fill_rule);
                 } else {
                     let path = e.get_bezpath();
-                    self.draw_path(path, Pattern::Point, fill_color, stroke_color, vec![]);
+                    self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
                 }
                 continue;
             }
             let path = e.get_bezpath();
-            self.draw_path(path, Pattern::Point, fill_color, stroke_color, vec![]);
+            self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
         }
     }
 }

@@ -1,9 +1,9 @@
-use crate::{shape::ClosedShape, types::Value};
+use crate::{shape::GeneralShape, types::Value};
 
 #[derive(Clone, Debug)]
 pub struct Clipboard {
-    item_copy: Option<(ClosedShape, Value)>,
-    item_paste: Option<(ClosedShape, Value)>,
+    item_copy: Option<(GeneralShape, Value)>,
+    item_paste: Option<(GeneralShape, Value)>,
 }
 impl Clipboard {
     pub fn new() -> Self {
@@ -13,7 +13,7 @@ impl Clipboard {
         }
     }
 
-    pub fn copy(&mut self, nodes: ClosedShape, pointer_copy: Value) {
+    pub fn copy(&mut self, nodes: GeneralShape, pointer_copy: Value) {
         self.item_copy = Some((nodes, pointer_copy));
         self.item_paste = None;
     }
@@ -24,7 +24,7 @@ impl Clipboard {
         }
     }
 
-    pub fn make_paste(&self, pointer: &Value) -> Option<ClosedShape> {
+    pub fn make_paste(&self, pointer: &Value) -> Option<GeneralShape> {
         let (shape, copy_pointer) = self.item_copy.as_ref()?;
         let delta = pointer.curr - copy_pointer.curr;
         let mut pasted = shape.clone();

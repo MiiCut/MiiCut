@@ -6,10 +6,12 @@ use crate::math::MyError;
 use crate::render::{
     render_draw_view, render_gcode_view, render_machine_view, render_toolpath_view,
 };
-use crate::shape::{ClosedShape, TextFont};
-use crate::shapes::{toolpath_to_plasma_gcode, Toolpath};
+use crate::shape::{GeneralShape, TextFont};
+use crate::shapes::{toolpath_to_plasma_gcode, DataSet, Toolpath};
+use crate::types::EUId;
+use kurbo::Vec2;
 use wasm_bindgen::JsCast;
-use web_sys::{Event, HtmlElement, KeyboardEvent, MouseEvent, WheelEvent};
+use web_sys::{Event, HtmlElement, KeyboardEvent, MouseEvent, WheelEvent, Window};
 
 pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
     let mut avb = av.borrow_mut();
@@ -50,6 +52,31 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                             .get_user_ui()
                             .pointer
                             .curr;
+                        let constr_circle = {
+                            let dataset = &avb.canvases[CanvasKind::Draw.idx()].dataset;
+                            find_constr_circle_at(dataset, pos)
+                        };
+                        if let Some((eid, current_count)) = constr_circle {
+                            if let Some(new_count) =
+                                prompt_constr_circle_vertices(&avb.window, current_count)
+                            {
+                                if let Some(elem) = avb.canvases[CanvasKind::Draw.idx()]
+                                    .dataset
+                                    .get_element_mut(eid)
+                                {
+                                    elem.set_constr_circle_vertices(new_count);
+                                    do_render = true;
+                                }
+                            }
+                            avb.canvases[CanvasKind::Draw.idx()]
+                                .get_user_ui_mut()
+                                .cancel_drag();
+                            drop(avb);
+                            if do_render {
+                                render_active_view(av.clone());
+                            }
+                            return Ok(());
+                        }
                         if avb.edit_text_at(pos) {
                             do_render = true;
                             drop(avb);
@@ -77,16 +104,21 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
             }
             UserAction::ClickUp(button, _) => {
                 if button == MouseButton::Left && is_draw_view {
-                    {
-                        let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                        canvas.dataset.refresh_svg_cache();
-                        canvas.dataset.mark_final_polygon_dirty();
+                    let needs_final_update = avb.canvases[CanvasKind::Draw.idx()]
+                        .dataset
+                        .selection_affects_final_polygon();
+                    if needs_final_update {
+                        {
+                            let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                            canvas.dataset.refresh_svg_cache();
+                            canvas.dataset.mark_final_polygon_dirty();
+                        }
+                        avb.refresh_toolpath_cache();
+                        let toolpath = avb.toolpath.clone().unwrap_or(Toolpath::new(Vec::new()));
+                        let gcode = toolpath_to_plasma_gcode(&toolpath, &avb.toolpath_params);
+                        avb.last_gcode = Some(gcode);
+                        avb.refresh_gcode_cache();
                     }
-                    avb.refresh_toolpath_cache();
-                    let toolpath = avb.toolpath.clone().unwrap_or(Toolpath::new(Vec::new()));
-                    let gcode = toolpath_to_plasma_gcode(&toolpath, &avb.toolpath_params);
-                    avb.last_gcode = Some(gcode);
-                    avb.refresh_gcode_cache();
                     do_render = true;
                 }
             }
@@ -94,6 +126,8 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
         ShapeType::Disc
         | ShapeType::Square
         | ShapeType::Oblong
+        | ShapeType::ConstrLine
+        | ShapeType::ConstrCircle
         | ShapeType::Poly
         | ShapeType::Text => match user_action {
             UserAction::Move(_, _) => {
@@ -115,19 +149,21 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         ShapeType::Disc
                         | ShapeType::Square
                         | ShapeType::Oblong
+                        | ShapeType::ConstrLine
+                        | ShapeType::ConstrCircle
                         | ShapeType::Text => {
                             if vs.len() == 1 {
                                 let mut vs = vs.clone();
                                 vs.push(point);
                                 if let Some(mut e) = if cs == ShapeType::Text {
-                                    ClosedShape::new_text(
+                                    GeneralShape::new_text(
                                         "TEXT".to_string(),
                                         TextFont::Stencilia,
                                         vs[0],
                                         vs[1],
                                     )
                                 } else {
-                                    ClosedShape::new(cs, &vs)
+                                    GeneralShape::new(cs, &vs)
                                 } {
                                     if cs == ShapeType::Text {
                                         e.fit_text_bbox_width_to_content();
@@ -142,7 +178,7 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         ShapeType::Poly => {
                             if vs.first().is_some() {
                                 if clicks == 2 {
-                                    if let Some(e) = ClosedShape::new(cs, &vs) {
+                                    if let Some(e) = GeneralShape::new(cs, &vs) {
                                         let canvas = avb.get_user_canvas_mut();
                                         canvas.dataset.push_element(e);
                                         avb.element_on_creation = None;
@@ -541,6 +577,7 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
     let gcode = avb.document.get_element_by_id("view-gcode");
     let machine = avb.document.get_element_by_id("view-machine");
     let left_panel = avb.document.get_element_by_id("left-panel");
+    let file_menu = avb.document.get_element_by_id("file-menu");
 
     let set_active = |el: &Option<web_sys::Element>, active: bool| {
         if let Some(el) = el {
@@ -583,6 +620,16 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
                 let _ = panel.style().set_property("display", "flex");
             } else {
                 let _ = panel.style().set_property("display", "none");
+            }
+        }
+    }
+
+    if let Some(menu) = file_menu.as_ref() {
+        if let Ok(menu) = menu.clone().dyn_into::<web_sys::HtmlElement>() {
+            if matches!(selected, Tabs::Draw) {
+                let _ = menu.style().set_property("display", "inline-block");
+            } else {
+                let _ = menu.style().set_property("display", "none");
             }
         }
     }
@@ -641,13 +688,14 @@ pub(crate) fn on_icon_mouseover(av: RefAV, event: Event, icon: ShapeType) {
                 .set_attribute("style", &format!("color:{selected_color}"))
                 .unwrap();
         }
-        avb.tooltip
-            .set_attribute(
-                "style",
-                &format!("display:block;left:{}px;top:{}px", event.x(), event.y()),
-            )
-            .unwrap();
-        avb.tooltip.set_inner_text(icon_tooltip(icon));
+        show_tooltip(&avb, event.x(), event.y(), icon_tooltip(icon));
+    }
+}
+
+pub(crate) fn on_icon_mouseover_label(av: RefAV, event: Event, label: &'static str) {
+    if let Ok(event) = event.dyn_into::<MouseEvent>() {
+        let avb = av.borrow_mut();
+        show_tooltip(&avb, event.x(), event.y(), label);
     }
 }
 
@@ -682,6 +730,45 @@ fn render_active_view(av: RefAV) {
     }
 }
 
+fn find_constr_circle_at(dataset: &DataSet, pos: Vec2) -> Option<(EUId, usize)> {
+    dataset
+        .shapes
+        .iter()
+        .filter_map(|(eid, elem)| {
+            if elem.get_shape_type() != ShapeType::ConstrCircle || !elem.contains(pos) {
+                return None;
+            }
+            let vertices = elem.get_vertices();
+            if vertices.len() < 2 {
+                return None;
+            }
+            let center = vertices.val(0).curr;
+            let edge = vertices.val(1).curr;
+            let radius = (edge - center).hypot();
+            let distance = (pos - center).hypot();
+            let delta = (distance - radius).abs();
+            let count = elem.constr_circle_vertices().unwrap_or(3);
+            Some((*eid, delta, count))
+        })
+        .min_by(|(_, a_delta, _), (_, b_delta, _)| a_delta.total_cmp(b_delta))
+        .map(|(eid, _, count)| (eid, count))
+}
+
+fn prompt_constr_circle_vertices(window: &Window, current: usize) -> Option<usize> {
+    let default_value = format!("{current}");
+    let input = window
+        .prompt_with_message_and_default("Nombre de sommets du cercle (>=3) :", &default_value)
+        .ok()??;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let Ok(value) = trimmed.parse::<usize>() else {
+        return None;
+    };
+    Some(value.max(3))
+}
+
 fn icon_tooltip(icon: ShapeType) -> &'static str {
     match icon {
         ShapeType::Arrow => "Arrow",
@@ -691,5 +778,14 @@ fn icon_tooltip(icon: ShapeType) -> &'static str {
         ShapeType::Poly => "Polygon",
         ShapeType::Text => "Text",
         ShapeType::Svg => "SVG",
+        ShapeType::ConstrLine => "Construction Line",
+        ShapeType::ConstrCircle => "Construction Circle",
     }
+}
+
+fn show_tooltip(avb: &crate::app::AppVars, x: i32, y: i32, label: &str) {
+    avb.tooltip
+        .set_attribute("style", &format!("display:block;left:{x}px;top:{y}px"))
+        .unwrap();
+    avb.tooltip.set_inner_text(label);
 }

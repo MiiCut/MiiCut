@@ -142,10 +142,7 @@ pub fn build_machine_view(document: &Document, groups: &[MachineGroup]) -> Resul
             for panel in panels {
                 let classes = panel.class_list();
                 let _ = classes.remove_1("machine-panel-overflow");
-                let body = panel
-                    .query_selector(".machine-panel-body")
-                    .ok()
-                    .flatten();
+                let body = panel.query_selector(".machine-panel-body").ok().flatten();
                 let Some(body) = body.and_then(|el| el.dyn_into::<HtmlElement>().ok()) else {
                     continue;
                 };

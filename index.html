@@ -23,7 +23,7 @@
     <!-- Top Menu -->
     <div id="top-menu" class="top-menu">
       <div id="menuTitle">&nbsp;MiiCut 0.2.0</div>
-      <div class="dropdown">
+      <div id="file-menu" class="dropdown">
         <button class="dropbtn">File</button>
         <div class="dropdown-content">
           <a href="#" id="load-option">Load file</a>
@@ -38,7 +38,7 @@
         </div>
       </div>
       <div id="view-tabs" class="view-tabs">
-        <span class="view-title">VIEW:</span>
+        <span class="view-title">VIEW</span>
         <button id="tab-draw" class="tab active">Draw</button>
         <button id="tab-toolpath" class="tab">Toolpath</button>
         <button id="tab-gcode" class="tab">G-code</button>
@@ -72,12 +72,12 @@
           <div id="icon-text" class="icon" data-tooltip="Draw text"></div>
           <div class="icon-separator"></div>
           <div
-            id="icon-construction-line"
+            id="icon-constr-line"
             class="icon"
             data-tooltip="Construction line"
           ></div>
           <div
-            id="icon-construction-circle"
+            id="icon-constr-circle"
             class="icon"
             data-tooltip="Construction circle"
           ></div>

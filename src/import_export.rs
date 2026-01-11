@@ -1,16 +1,17 @@
 use crate::app::RefAV;
 use crate::canvas::CanvasKind;
 use crate::dom::ShapeType;
-use crate::shape::{ClosedShape, Operation, SvgData, SvgFillRule, TextData, TextFont};
+use crate::render::center_paths_canvas;
+use crate::shape::{GeneralShape, Operation, SvgData, SvgFillRule, TextData, TextFont};
 use crate::shapes::DataSet;
 use crate::status::update_status_bar;
 use crate::types::EUId;
 use js_sys::{Array, Date, JSON};
 use kurbo::{flatten, BezPath, PathEl, Shape, Size, Vec2};
 use svg::parser::{Event as SvgEvent, Parser as SvgParser};
-use wasm_bindgen::JsValue;
-use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
+use wasm_bindgen::JsValue;
 use web_sys::{Blob, BlobPropertyBag, Document, HtmlAnchorElement, Url};
 
 pub(crate) fn build_svg_from_dataset(dataset: &DataSet) -> Option<String> {
@@ -119,7 +120,13 @@ pub(crate) fn build_json_from_dataset(dataset: &DataSet, meta: &ExportInfo) -> O
         out.push_str(&format!("      \"id\": {},\n", eid));
         out.push_str(&format!("      \"type\": \"{shape_type}\",\n"));
         out.push_str(&format!("      \"operation\": \"{op_name}\",\n"));
-        out.push_str(&format!("      \"rotation\": {:.6},\n", elem.get_rotation()));
+        out.push_str(&format!(
+            "      \"rotation\": {:.6},\n",
+            elem.get_rotation()
+        ));
+        if let Some(count) = elem.constr_circle_vertices() {
+            out.push_str(&format!("      \"constr_vertices\": {count},\n"));
+        }
         let vertices = elem.get_vertices();
         out.push_str("      \"vertices\": [\n");
         for (idx, (_, v)) in vertices.iter().enumerate() {
@@ -128,7 +135,10 @@ pub(crate) fn build_json_from_dataset(dataset: &DataSet, meta: &ExportInfo) -> O
             } else {
                 ",\n"
             };
-            let rounded = v.rounded.map(|val| val.to_string()).unwrap_or("null".to_string());
+            let rounded = v
+                .rounded
+                .map(|val| val.to_string())
+                .unwrap_or("null".to_string());
             let binds = if v.bind.is_empty() {
                 "[]".to_string()
             } else {
@@ -233,6 +243,8 @@ pub(crate) fn name_to_icon(name: &str) -> Option<ShapeType> {
         "poly" => Some(ShapeType::Poly),
         "text" => Some(ShapeType::Text),
         "svg" => Some(ShapeType::Svg),
+        "constr_line" => Some(ShapeType::ConstrLine),
+        "constr_circle" => Some(ShapeType::ConstrCircle),
         _ => None,
     }
 }
@@ -334,9 +346,7 @@ pub(crate) fn timestamp_string() -> String {
     let hours = now.get_hours();
     let minutes = now.get_minutes();
     let seconds = now.get_seconds();
-    format!(
-        "{year:04}{month:02}{day:02}-{hours:02}{minutes:02}{seconds:02}"
-    )
+    format!("{year:04}{month:02}{day:02}-{hours:02}{minutes:02}{seconds:02}")
 }
 
 pub(crate) fn icon_to_name(icon: ShapeType) -> &'static str {
@@ -347,6 +357,8 @@ pub(crate) fn icon_to_name(icon: ShapeType) -> &'static str {
         ShapeType::Poly => "poly",
         ShapeType::Text => "text",
         ShapeType::Svg => "svg",
+        ShapeType::ConstrLine => "constr_line",
+        ShapeType::ConstrCircle => "constr_circle",
         _ => "unknown",
     }
 }
@@ -388,7 +400,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
     let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
 
     if let Some(meta) = get_prop(&value, "meta") {
-            if let Some(canvas_meta) = get_prop(&meta, "canvas") {
+        if let Some(canvas_meta) = get_prop(&meta, "canvas") {
             if let Some(size) = get_vec2_array(&canvas_meta, "size") {
                 canvas.set_area_size(Size::new(size.x, size.y));
             }
@@ -423,6 +435,19 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             .and_then(name_to_operation)
             .unwrap_or(Operation::Union);
         let rotation = get_f64(&shape_value, "rotation").unwrap_or(0.0);
+        let constr_circle_vertices = if icon == ShapeType::ConstrCircle {
+            get_prop(&shape_value, "constr_vertices")
+                .and_then(|val| val.as_f64())
+                .and_then(|val| {
+                    if val.is_finite() && val >= 0.0 {
+                        Some(val.round() as usize)
+                    } else {
+                        None
+                    }
+                })
+        } else {
+            None
+        };
 
         let vertices_value = get_prop(&shape_value, "vertices");
         let Some(vertices_value) = vertices_value else {
@@ -499,13 +524,14 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             None
         };
 
-        let Some(mut elem) = ClosedShape::from_raw(
+        let Some(mut elem) = GeneralShape::from_raw(
             icon,
             operation,
             vertices,
             &rounded,
             text_data,
             svg_data,
+            constr_circle_vertices,
         ) else {
             continue;
         };
@@ -519,6 +545,18 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
     canvas.dataset.refresh_svg_cache();
     canvas.dataset.mark_final_polygon_dirty();
     canvas.dataset.calc_final_polygon();
+    {
+        let mut paths = canvas.dataset.get_final_paths().clone();
+        if paths.is_empty() {
+            paths = canvas
+                .dataset
+                .shapes
+                .values()
+                .map(|shape| shape.get_bezpath().clone())
+                .collect();
+        }
+        center_paths_canvas(canvas, &paths);
+    }
     drop(avb);
     update_status_bar(av);
 }
@@ -708,10 +746,7 @@ pub(crate) fn load_svg_to_dataset(av: RefAV, svg_data: String, combine_paths: bo
         if rings.is_empty() {
             continue;
         }
-        let mut normalized_rings: Vec<Vec<Vec2>> = rings
-            .into_iter()
-            .map(normalize_ring)
-            .collect();
+        let mut normalized_rings: Vec<Vec<Vec2>> = rings.into_iter().map(normalize_ring).collect();
         if fill_rule == SvgFillRule::EvenOdd {
             for ring in normalized_rings.iter_mut().skip(1) {
                 ring.reverse();
@@ -769,7 +804,7 @@ pub(crate) fn load_svg_to_dataset(av: RefAV, svg_data: String, combine_paths: bo
                 p.y = (p.y - min_y) * scale;
             }
         }
-        if let Some(shape) = ClosedShape::new_svg(rings, fill_rule) {
+        if let Some(shape) = GeneralShape::new_svg(rings, fill_rule) {
             canvas.dataset.shapes.insert(EUId::new(), shape);
         }
     }

@@ -8,8 +8,8 @@ use crate::{
     dom::ShapeType,
     inputs::UserUI,
     math::{
-        bez_path_to_geo_polygon, bezpath_from_apices, geo_multipolygon_to_bez_paths, rotate_vector,
-        snap_angle, snap_val, snap_vertex, EPSILON,
+        bez_path_to_geo_polygon, bezpath_from_apices, distance_to_segment,
+        geo_multipolygon_to_bez_paths, rotate_vector, snap_angle, snap_val, snap_vertex, EPSILON,
     },
     types::{EUId, SegBundle, VUId, Value, VecRing},
 };
@@ -130,10 +130,11 @@ impl SvgData {
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct ClosedShape {
+pub struct GeneralShape {
     shape_type: ShapeType,
     operation: Operation,
     vertices: VecRing<VUId>,
+    constr_circle_vertices: usize,
 
     bezpath: BezPath,
     polygon: MultiPolygon<f64>,
@@ -142,9 +143,10 @@ pub struct ClosedShape {
     rotation: f64,
     rotation_saved: f64,
 }
-impl ClosedShape {
+impl GeneralShape {
     const TOLERANCE: f64 = 0.01;
     const GRAB_RADIUS: f64 = 5.0;
+    const DEFAULT_CONSTR_CIRCLE_VERTICES: usize = 8;
 
     pub fn op_next(&mut self) {
         self.operation.next();
@@ -166,7 +168,12 @@ impl ClosedShape {
             ShapeType::Arrow => {
                 return None;
             }
-            ShapeType::Disc => {
+            ShapeType::Disc | ShapeType::ConstrCircle => {
+                if vertices.len() != 2 || vertices[0] == vertices[1] {
+                    return None;
+                }
+            }
+            ShapeType::ConstrLine => {
                 if vertices.len() != 2 || vertices[0] == vertices[1] {
                     return None;
                 }
@@ -209,10 +216,15 @@ impl ClosedShape {
             .collect::<Vec<_>>();
         let vertices = &vertices[..];
 
-        let mut shape = ClosedShape {
+        let mut shape = GeneralShape {
             shape_type,
             operation: Operation::Union,
             vertices: VecRing::from_slice(vertices).unwrap(),
+            constr_circle_vertices: if shape_type == ShapeType::ConstrCircle {
+                Self::DEFAULT_CONSTR_CIRCLE_VERTICES
+            } else {
+                0
+            },
             bezpath: BezPath::new(),
             polygon: MultiPolygon::new(vec![]),
             text: None,
@@ -231,6 +243,7 @@ impl ClosedShape {
         rounded: &[Option<u32>],
         text: Option<TextData>,
         svg: Option<SvgData>,
+        constr_circle_vertices: Option<usize>,
     ) -> Option<Self> {
         match shape_type {
             ShapeType::Arrow => return None,
@@ -239,6 +252,7 @@ impl ClosedShape {
             ShapeType::Oblong if vertices.len() != 3 => return None,
             ShapeType::Poly if vertices.len() < 3 => return None,
             ShapeType::Text | ShapeType::Svg if vertices.len() != 4 => return None,
+            ShapeType::ConstrCircle if vertices.len() < 2 => return None,
             _ => {}
         }
 
@@ -246,10 +260,18 @@ impl ClosedShape {
             .iter()
             .map(|v| (VUId::new(), Value::new(*v)))
             .collect::<Vec<_>>();
-        let mut shape = ClosedShape {
+        let mut shape = GeneralShape {
             shape_type,
             operation,
             vertices: VecRing::from_slice(&vertices[..]).unwrap(),
+            constr_circle_vertices: if shape_type == ShapeType::ConstrCircle {
+                constr_circle_vertices
+                    .or_else(|| vertices.len().checked_sub(2))
+                    .unwrap_or(Self::DEFAULT_CONSTR_CIRCLE_VERTICES)
+                    .max(3)
+            } else {
+                0
+            },
             bezpath: BezPath::new(),
             polygon: MultiPolygon::new(vec![]),
             text,
@@ -282,10 +304,11 @@ impl ClosedShape {
             .map(|v| (VUId::new(), Value::new(*v)))
             .collect::<Vec<_>>();
 
-        let mut shape = ClosedShape {
+        let mut shape = GeneralShape {
             shape_type: ShapeType::Text,
             operation: Operation::Union,
             vertices: VecRing::from_slice(&vertices[..]).unwrap(),
+            constr_circle_vertices: 0,
             bezpath: BezPath::new(),
             polygon: MultiPolygon::new(vec![]),
             text: Some(TextData::new(text, font, None, false)),
@@ -313,10 +336,11 @@ impl ClosedShape {
             .map(|v| (VUId::new(), Value::new(*v)))
             .collect::<Vec<_>>();
 
-        let mut shape = ClosedShape {
+        let mut shape = GeneralShape {
             shape_type: ShapeType::Svg,
             operation: Operation::Union,
             vertices: VecRing::from_slice(&vertices[..]).unwrap(),
+            constr_circle_vertices: 0,
             bezpath: BezPath::new(),
             polygon: MultiPolygon::new(vec![]),
             text: None,
@@ -357,7 +381,10 @@ impl ClosedShape {
         &mut self.vertices
     }
     pub fn select_vertex(&mut self, draw_pos: Vec2) -> Option<VUId> {
-        for (_idx, (uid, value)) in self.vertices.iter().enumerate() {
+        for (idx, (uid, value)) in self.vertices.iter().enumerate() {
+            if self.shape_type == ShapeType::ConstrCircle && idx >= 2 {
+                continue;
+            }
             let pos = self.vertex_display_pos(value.curr);
             if (pos - draw_pos).hypot() < Self::GRAB_RADIUS {
                 return Some(*uid);
@@ -366,7 +393,10 @@ impl ClosedShape {
         return None;
     }
     pub fn highlight_vertex(&mut self, draw_pos: Vec2) -> Option<VUId> {
-        for (uid, value) in self.vertices.iter() {
+        for (idx, (uid, value)) in self.vertices.iter().enumerate() {
+            if self.shape_type == ShapeType::ConstrCircle && idx >= 2 {
+                continue;
+            }
             let pos = self.vertex_display_pos(value.curr);
             if (pos - draw_pos).hypot() < Self::GRAB_RADIUS {
                 return Some(*uid);
@@ -377,10 +407,15 @@ impl ClosedShape {
     pub fn move_vertex(&mut self, value_uid: VUId, user_ui: &UserUI) -> bool {
         let snap = user_ui.snap;
         let mut delta = user_ui.pointer.curr - user_ui.pointer.saved;
-        delta = (delta / snap.linear()).round() * snap.linear();
+        if !user_ui.magnetized {
+            delta = (delta / snap.linear()).round() * snap.linear();
+        }
         match self.shape_type {
-            ShapeType::Disc => {
-                if self.vertices.len() != 2 {
+            ShapeType::Disc | ShapeType::ConstrCircle => {
+                if self.vertices.len() < 2 {
+                    return false;
+                }
+                if self.shape_type == ShapeType::Disc && self.vertices.len() != 2 {
                     return false;
                 }
                 // The first vertex is the center
@@ -425,6 +460,19 @@ impl ClosedShape {
                 } else {
                     false
                 }
+            }
+            ShapeType::ConstrLine => {
+                if self.vertices.len() != 2 {
+                    return false;
+                }
+                let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
+                    Some(i) => i,
+                    None => return false,
+                };
+                self.vertices.val_mut(idx as i64).add(delta);
+
+                self.set_bezpath();
+                true
             }
             ShapeType::Oblong => {
                 if self.vertices.len() != 3 {
@@ -563,6 +611,7 @@ impl ClosedShape {
                 self.set_bezpath();
                 true
             }
+
             ShapeType::Arrow => {
                 // Arrow is not a closed shape, so we don't move it
                 return false;
@@ -590,6 +639,32 @@ impl ClosedShape {
     }
 
     pub fn contains(&self, pos: Vec2) -> bool {
+        if self.shape_type == ShapeType::ConstrLine {
+            let mut iter = self.vertices.iter();
+            let Some((_, v0)) = iter.next() else {
+                return false;
+            };
+            let Some((_, v1)) = iter.next() else {
+                return false;
+            };
+            return distance_to_segment(v0.curr, v1.curr, pos, Self::GRAB_RADIUS)
+                <= Self::GRAB_RADIUS;
+        }
+        if self.shape_type == ShapeType::ConstrCircle {
+            let mut iter = self.vertices.iter();
+            let Some((_, center)) = iter.next() else {
+                return false;
+            };
+            let Some((_, edge)) = iter.next() else {
+                return false;
+            };
+            let radius = (edge.curr - center.curr).hypot();
+            if radius < EPSILON {
+                return false;
+            }
+            let distance = (pos - center.curr).hypot();
+            return (distance - radius).abs() <= Self::GRAB_RADIUS;
+        }
         if matches!(self.shape_type, ShapeType::Text | ShapeType::Svg) {
             if self.rotation.abs() > EPSILON {
                 return self.get_bezpath().contains(pos.to_point());
@@ -616,6 +691,20 @@ impl ClosedShape {
     }
     pub fn get_svg(&self) -> Option<&SvgData> {
         self.svg.as_ref()
+    }
+    pub fn constr_circle_vertices(&self) -> Option<usize> {
+        if self.shape_type == ShapeType::ConstrCircle {
+            Some(self.constr_circle_vertices)
+        } else {
+            None
+        }
+    }
+    pub fn set_constr_circle_vertices(&mut self, count: usize) {
+        if self.shape_type != ShapeType::ConstrCircle {
+            return;
+        }
+        self.constr_circle_vertices = count.max(3);
+        self.set_bezpath();
     }
     pub fn get_svg_paths(&self) -> Option<&Vec<BezPath>> {
         self.svg.as_ref().and_then(|svg| svg.cached_paths.as_ref())
@@ -744,14 +833,57 @@ impl ClosedShape {
         }
         self.set_bezpath();
     }
+    fn sync_constr_circle_vertices(&mut self, center: Vec2, radius: f64) {
+        let count = self.constr_circle_vertices;
+        let desired = 2 + count;
+        while self.vertices.len() < desired {
+            self.vertices.push((VUId::new(), Value::new(center)));
+        }
+        while self.vertices.len() > desired {
+            let idx = self.vertices.len() as i64 - 1;
+            self.vertices.remove(&idx);
+        }
+        if count == 0 {
+            return;
+        }
+        if radius < EPSILON {
+            for i in 0..count {
+                let value = self.vertices.val_mut((i + 2) as i64);
+                value.curr = center;
+                value.saved = center;
+                value.last = center;
+            }
+            return;
+        }
+        let step = 2.0 * PI / count as f64;
+        for i in 0..count {
+            let angle = step * i as f64;
+            let pos = center + Vec2::new(radius * angle.cos(), radius * angle.sin());
+            let value = self.vertices.val_mut((i + 2) as i64);
+            value.curr = pos;
+            value.saved = pos;
+            value.last = pos;
+        }
+    }
     pub fn set_bezpath(&mut self) {
         let mut bezpath_only = true;
         match self.shape_type {
-            ShapeType::Disc => {
+            ShapeType::Disc | ShapeType::ConstrCircle => {
                 let center = self.vertices.val(0).curr;
                 let radius = (self.vertices.val(1).curr - center).hypot();
+                if self.shape_type == ShapeType::ConstrCircle {
+                    self.sync_constr_circle_vertices(center, radius);
+                }
                 self.bezpath =
                     kurbo::Circle::new(center.to_point(), radius).to_path(Self::TOLERANCE);
+            }
+            ShapeType::ConstrLine => {
+                let p1 = self.vertices.val(0).curr;
+                let p2 = self.vertices.val(1).curr;
+                let mut path = BezPath::new();
+                path.move_to(p1.to_point());
+                path.line_to(p2.to_point());
+                self.bezpath = path;
             }
             ShapeType::Oblong => {
                 let e1 = self.vertices.val(0).curr;
@@ -1473,17 +1605,18 @@ fn ring_signed_area(ring: &LineString<f64>) -> f64 {
     area * 0.5
 }
 
-impl Clone for ClosedShape {
+impl Clone for GeneralShape {
     fn clone(&self) -> Self {
         let vertices: Vec<(VUId, Value)> = self
             .vertices
             .iter()
             .map(|(_, value)| (VUId::new(), value.clone()))
             .collect::<Vec<_>>();
-        ClosedShape {
+        GeneralShape {
             shape_type: self.shape_type,
             operation: self.operation,
             vertices: VecRing::from_slice(&vertices[..]).unwrap(),
+            constr_circle_vertices: self.constr_circle_vertices,
             bezpath: self.bezpath.clone(),
             polygon: self.polygon.clone(),
             text: self.text.clone(),

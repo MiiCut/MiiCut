@@ -322,10 +322,10 @@ html {
 #icon-text {
   background-image: url("../assets/icon-text.svg");
 }
-#icon-construction-line {
+#icon-constr-line {
   background-image: url("../assets/icon-construction-line.svg");
 }
-#icon-construction-circle {
+#icon-constr-circle {
   background-image: url("../assets/icon-construction-circle.svg");
 }
 
@@ -514,7 +514,10 @@ html {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.95));
+  background: linear-gradient(
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0.95)
+  );
   border-radius: 0 0 6px 6px;
   pointer-events: none;
   z-index: 2;

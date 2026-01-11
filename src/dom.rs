@@ -49,6 +49,8 @@ pub enum ShapeType {
     Poly,
     Text,
     Svg,
+    ConstrLine,
+    ConstrCircle,
 }
 impl ShapeType {
     pub fn id(&self) -> &'static str {
@@ -61,6 +63,8 @@ impl ShapeType {
             Poly => "icon-polygon",
             Text => "icon-text",
             Svg => "icon-svg",
+            ConstrLine => "icon-constr-line",
+            ConstrCircle => "icon-constr-circle",
         }
     }
     pub fn get_element(&self) -> Option<Element> {

@@ -6,9 +6,10 @@ use crate::handlers::{
     on_draw_context_menu, on_draw_mouse_down, on_draw_mouse_enter, on_draw_mouse_leave,
     on_draw_mouse_move, on_draw_mouse_up, on_draw_mouse_wheel, on_gcode_context_menu,
     on_gcode_mouse_down, on_gcode_mouse_move, on_gcode_mouse_up, on_gcode_mouse_wheel,
-    on_icon_click, on_icon_mouseout, on_icon_mouseover, on_tab_click, on_toolpath_context_menu,
-    on_toolpath_mouse_down, on_toolpath_mouse_move, on_toolpath_mouse_up, on_toolpath_mouse_wheel,
-    on_window_click, on_window_keydown, on_window_keyup, on_window_resize, resize_canvases,
+    on_icon_click, on_icon_mouseout, on_icon_mouseover, on_icon_mouseover_label, on_tab_click,
+    on_toolpath_context_menu, on_toolpath_mouse_down, on_toolpath_mouse_move, on_toolpath_mouse_up,
+    on_toolpath_mouse_wheel, on_window_click, on_window_keydown, on_window_keyup, on_window_resize,
+    resize_canvases,
 };
 use crate::import_export::{
     build_json_from_dataset, build_svg_from_dataset, get_prop, load_json_to_dataset,
@@ -660,7 +661,13 @@ impl AppVars {
             get_element_width(&self.left_panel) as f64,
             get_element_height(&self.top_menu) as f64,
         );
-        self.canvases[self.active_canvas.idx()].update_ui(c_draw_origin, &mouse_event, sys_mouse)
+        let action = self.canvases[self.active_canvas.idx()].update_ui(
+            c_draw_origin,
+            &mouse_event,
+            sys_mouse,
+        );
+        self.snap_draw_to_constr_circle_vertices();
+        action
     }
 
     pub(crate) fn update_draw_cursor(&mut self) {
@@ -676,6 +683,40 @@ impl AppVars {
             }
         } else {
             canvas.set_cursor("default");
+        }
+    }
+
+    fn snap_draw_to_constr_circle_vertices(&mut self) {
+        if self.active_canvas != CanvasKind::Draw {
+            return;
+        }
+        let canvas = &mut self.canvases[CanvasKind::Draw.idx()];
+        let pos = canvas.get_user_ui().draw_pos;
+        let threshold = canvas.get_user_ui().snap.linear().max(5.0);
+        let mut best: Option<Vec2> = None;
+        let mut best_dist = f64::INFINITY;
+        for shape in canvas.dataset.shapes.values() {
+            if shape.get_shape_type() != ShapeType::ConstrCircle {
+                continue;
+            }
+            for (idx, (_, vertex)) in shape.get_vertices().iter().enumerate() {
+                if idx < 2 {
+                    continue;
+                }
+                let dist = (pos - vertex.curr).hypot();
+                if dist <= threshold && dist < best_dist {
+                    best_dist = dist;
+                    best = Some(vertex.curr);
+                }
+            }
+        }
+        let user_ui = canvas.get_user_ui_mut();
+        if let Some(target) = best {
+            user_ui.draw_pos = target;
+            user_ui.pointer.set(target);
+            user_ui.magnetized = true;
+        } else {
+            user_ui.magnetized = false;
         }
     }
 }
@@ -709,6 +750,8 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
     user_icons.insert(Oblong);
     user_icons.insert(Poly);
     user_icons.insert(Text);
+    user_icons.insert(ConstrLine);
+    user_icons.insert(ConstrCircle);
 
     let cnc: Option<Rc<CncLink>> = CncLink::connect("http://192.168.1.36", "ws://192.168.1.36:81/")
         .ok()
@@ -1088,6 +1131,36 @@ pub(crate) fn init_icons(av: RefAV) -> Result<(), JsValue> {
             .set_attribute("style", &format!("color:{selected_color}"))
             .unwrap();
         av.borrow().html_select_icon(ShapeType::Arrow);
+    }
+
+    if let Some(line_icon) = av.borrow().document.get_element_by_id("icon-constr-line") {
+        set_callback(
+            av.clone(),
+            "mouseenter".into(),
+            &line_icon,
+            Box::new(move |av, event| on_icon_mouseover_label(av, event, "Construction line")),
+        )?;
+        set_callback(
+            av.clone(),
+            "mouseleave".into(),
+            &line_icon,
+            Box::new(move |av, event| on_icon_mouseout(av, event)),
+        )?;
+    }
+
+    if let Some(circle_icon) = av.borrow().document.get_element_by_id("icon-constr-circle") {
+        set_callback(
+            av.clone(),
+            "mouseenter".into(),
+            &circle_icon,
+            Box::new(move |av, event| on_icon_mouseover_label(av, event, "Construction circle")),
+        )?;
+        set_callback(
+            av.clone(),
+            "mouseleave".into(),
+            &circle_icon,
+            Box::new(move |av, event| on_icon_mouseout(av, event)),
+        )?;
     }
 
     Ok(())

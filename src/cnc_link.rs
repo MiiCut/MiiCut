@@ -4,11 +4,11 @@ macro_rules! log {
     }
 }
 
+use js_sys::Date;
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{prelude::*, JsCast};
-use js_sys::Date;
 use web_sys::{BinaryType, CloseEvent, Event, MessageEvent, WebSocket};
 
 fn looks_ascii(buf: &[u8]) -> bool {

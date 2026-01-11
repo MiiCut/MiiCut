@@ -1,7 +1,7 @@
 use crate::dom::ShapeType;
 use crate::inputs::UserUI;
 use crate::math::{geo_multipolygon_to_bez_paths, snap_vertex};
-use crate::shape::{ClosedShape, Operation};
+use crate::shape::{GeneralShape, Operation};
 use crate::types::{EUId, Snap, VUId, Value};
 use geo::algorithm::unary_union;
 use geo::{BooleanOps, Coord, LineString, MultiPolygon, Polygon};
@@ -495,7 +495,7 @@ pub fn toolpath_to_plasma_gcode(tp: &Toolpath, p: &ToolpathParams) -> String {
 
 #[derive(Debug)]
 pub struct DataSet {
-    pub shapes: HashMap<EUId, ClosedShape>,
+    pub shapes: HashMap<EUId, GeneralShape>,
     pub shapes_selected: HashSet<EUId>,
     pub shapes_highlighted: HashSet<EUId>,
     pub shapes_selector: ShapeSelector,
@@ -525,11 +525,17 @@ impl DataSet {
     pub fn mark_final_polygon_dirty(&mut self) {
         self.final_polygon_dirty = true;
     }
-    pub fn push_element(&mut self, elem: ClosedShape) {
+    pub fn push_element(&mut self, elem: GeneralShape) {
+        let affects_final = !matches!(
+            elem.get_shape_type(),
+            ShapeType::ConstrLine | ShapeType::ConstrCircle
+        );
         self.shapes.insert(EUId::new(), elem);
-        self.final_polygon_dirty = true;
+        if affects_final {
+            self.final_polygon_dirty = true;
+        }
     }
-    pub fn pop_element(&mut self, eid: EUId) -> Option<ClosedShape> {
+    pub fn pop_element(&mut self, eid: EUId) -> Option<GeneralShape> {
         // remove the shape
         let removed = self.shapes.remove(&eid);
 
@@ -549,15 +555,22 @@ impl DataSet {
                     self.last_vertex_selected = None;
                 }
             }
-            self.final_polygon_dirty = true;
+            if let Some(shape) = removed.as_ref() {
+                if !matches!(
+                    shape.get_shape_type(),
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle
+                ) {
+                    self.final_polygon_dirty = true;
+                }
+            }
         }
 
         removed
     }
-    pub fn get_element(&self, eid: EUId) -> Option<&ClosedShape> {
+    pub fn get_element(&self, eid: EUId) -> Option<&GeneralShape> {
         self.shapes.get(&eid)
     }
-    pub fn get_element_mut(&mut self, eid: EUId) -> Option<&mut ClosedShape> {
+    pub fn get_element_mut(&mut self, eid: EUId) -> Option<&mut GeneralShape> {
         self.shapes.get_mut(&eid)
     }
 
@@ -734,8 +747,9 @@ impl DataSet {
     }
     pub fn delete_selected_elements(&mut self) -> bool {
         let mut deleted = false;
+        let mut affects_final = false;
         for eid in &self.shapes_selected.clone() {
-            if let Some(_) = self.shapes.remove(eid) {
+            if let Some(shape) = self.shapes.remove(eid) {
                 self.shapes_highlighted.remove(eid);
                 self.shapes_selected.remove(eid);
                 self.vertices_selected.clear();
@@ -743,12 +757,42 @@ impl DataSet {
                 self.shapes_selector
                     .refresh_selectable_elems(HashSet::new());
                 deleted = true;
+                if !matches!(
+                    shape.get_shape_type(),
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle
+                ) {
+                    affects_final = true;
+                }
             }
         }
-        if deleted {
+        if deleted && affects_final {
             self.final_polygon_dirty = true;
         }
         deleted
+    }
+
+    pub fn selection_affects_final_polygon(&self) -> bool {
+        if let Some((eid, _)) = self.last_vertex_selected {
+            if let Some(e) = self.shapes.get(&eid) {
+                if !matches!(
+                    e.get_shape_type(),
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle
+                ) {
+                    return true;
+                }
+            }
+        }
+        for eid in &self.shapes_selected {
+            if let Some(e) = self.shapes.get(eid) {
+                if !matches!(
+                    e.get_shape_type(),
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle
+                ) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub fn save_elements_positions(&mut self) {
@@ -760,6 +804,7 @@ impl DataSet {
     pub fn move_elements(&mut self, userui: &UserUI) -> bool {
         let delta = userui.pointer.curr - userui.pointer.saved;
         let mut moved = false;
+        let mut affects_final = false;
         let mut sel_and_bind = self.shapes_selected.clone();
 
         if !userui.keys_states.shift_pressed {
@@ -785,9 +830,15 @@ impl DataSet {
             if let Some(e) = self.shapes.get_mut(&eid) {
                 e.move_shape(delta);
                 moved = true;
+                if !matches!(
+                    e.get_shape_type(),
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle
+                ) {
+                    affects_final = true;
+                }
             }
         }
-        if moved {
+        if moved && affects_final {
             self.final_polygon_dirty = true;
         }
         moved
@@ -870,6 +921,12 @@ impl DataSet {
         let mut unions: Vec<geo::Polygon<f64>> = Vec::new();
         let mut diffs: Vec<geo::Polygon<f64>> = Vec::new();
         for s in self.shapes.values() {
+            if matches!(
+                s.get_shape_type(),
+                ShapeType::ConstrLine | ShapeType::ConstrCircle
+            ) {
+                continue;
+            }
             match s.get_operation() {
                 Operation::Union => {
                     for poly in s.get_polygon().iter() {

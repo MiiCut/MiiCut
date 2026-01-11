@@ -95,11 +95,7 @@ pub fn gcode_to_segments(gcode: &str) -> Vec<Seg> {
             if steps < 8 {
                 steps = 8;
             }
-            let step = if steps > 0 {
-                delta / steps as f64
-            } else {
-                0.0
-            };
+            let step = if steps > 0 { delta / steps as f64 } else { 0.0 };
             let mut px = x;
             let mut py = y;
             for k in 1..=steps {

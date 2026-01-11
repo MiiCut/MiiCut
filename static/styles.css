@@ -304,29 +304,29 @@ html {
   border: 2px solid #fff;
 }
 #icon-arrow {
-  background-image: url("../assets/icon-arrow.svg");
+  background-image: url("assets/icon-arrow.svg");
 }
 #icon-disc {
-  background-image: url("../assets/icon-disc.svg");
+  background-image: url("assets/icon-disc.svg");
 }
 
 #icon-square {
-  background-image: url("../assets/icon-square.svg");
+  background-image: url("assets/icon-square.svg");
 }
 #icon-oblong {
-  background-image: url("../assets/icon-oblong.svg");
+  background-image: url("assets/icon-oblong.svg");
 }
 #icon-polygon {
-  background-image: url("../assets/icon-polygon.svg");
+  background-image: url("assets/icon-polygon.svg");
 }
 #icon-text {
-  background-image: url("../assets/icon-text.svg");
+  background-image: url("assets/icon-text.svg");
 }
-#icon-construction-line {
-  background-image: url("../assets/icon-construction-line.svg");
+#icon-constr-line {
+  background-image: url("assets/icon-construction-line.svg");
 }
-#icon-construction-circle {
-  background-image: url("../assets/icon-construction-circle.svg");
+#icon-constr-circle {
+  background-image: url("assets/icon-construction-circle.svg");
 }
 
 /* Tooltip & Context Menu */
@@ -514,7 +514,10 @@ html {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.95));
+  background: linear-gradient(
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0.95)
+  );
   border-radius: 0 0 6px 6px;
   pointer-events: none;
   z-index: 2;
@@ -583,7 +586,7 @@ html {
 }
 
 .view-tabs {
-  margin-left: auto;
+  margin-left: 12px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -900,7 +903,7 @@ html {
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("../assets/stencilia/Stencilia-A.ttf") format("truetype");
+  src: url("assets/stencilia/Stencilia-A.ttf") format("truetype");
 }
 
 @font-face {
@@ -908,5 +911,5 @@ html {
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("../assets/stencilia/Stencilia-Bold.ttf") format("truetype");
+  src: url("assets/stencilia/Stencilia-Bold.ttf") format("truetype");
 }

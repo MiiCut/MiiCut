@@ -3,7 +3,7 @@ use crate::canvas::{Canvas, CanvasKind, Color, Pattern};
 use crate::dimensions::dim_hv;
 use crate::gcode::Seg;
 use crate::prefab::{get_vertices_colors, line_path, point_path};
-use crate::shape::{ClosedShape, TextFont};
+use crate::shape::{GeneralShape, TextFont};
 use crate::shapes::{toolpath_to_plasma_gcode, Toolpath};
 use crate::status::{begin_render, end_render, update_status_bar};
 use crate::types::{Binding, Couple, EUId, SegBundle, VUId};
@@ -69,10 +69,12 @@ pub(crate) fn render_draw_view(av: RefAV) {
         match cs {
             crate::dom::ShapeType::Disc
             | crate::dom::ShapeType::Square
-            | crate::dom::ShapeType::Oblong => {
+            | crate::dom::ShapeType::Oblong
+            | crate::dom::ShapeType::ConstrLine
+            | crate::dom::ShapeType::ConstrCircle => {
                 if vs.len() == 1 {
                     vs.push(canvas_draw.get_user_ui().pointer.curr);
-                    if let Some(e) = ClosedShape::new(cs, &vs) {
+                    if let Some(e) = GeneralShape::new(cs, &vs) {
                         canvas_draw.draw_paths_creation(&e);
                         canvas_draw.draw_vs(&e);
                         canvas_draw.draw_dimensions(&e);
@@ -82,9 +84,12 @@ pub(crate) fn render_draw_view(av: RefAV) {
             crate::dom::ShapeType::Text => {
                 if vs.len() == 1 {
                     vs.push(canvas_draw.get_user_ui().pointer.curr);
-                    if let Some(e) =
-                        ClosedShape::new_text("TEXT".to_string(), TextFont::Stencilia, vs[0], vs[1])
-                    {
+                    if let Some(e) = GeneralShape::new_text(
+                        "TEXT".to_string(),
+                        TextFont::Stencilia,
+                        vs[0],
+                        vs[1],
+                    ) {
                         canvas_draw.draw_paths_creation(&e);
                         canvas_draw.draw_vs(&e);
                         canvas_draw.draw_dimensions(&e);
@@ -94,7 +99,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
             crate::dom::ShapeType::Poly => {
                 if vs.len() > 2 {
                     vs.push(canvas_draw.get_user_ui().pointer.curr);
-                    if let Some(e) = ClosedShape::new(cs, &vs) {
+                    if let Some(e) = GeneralShape::new(cs, &vs) {
                         canvas_draw.draw_paths_creation(&e);
                         canvas_draw.draw_vs(&e);
                         canvas_draw.draw_dimensions(&e);

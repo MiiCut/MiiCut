@@ -106,6 +106,10 @@ impl UserUI {
     pub fn is_left_down(&self) -> bool {
         self.button_level == ButtonLevel::Down && self.mouse_button == MouseButton::Left
     }
+    pub fn cancel_drag(&mut self) {
+        self.button_level = ButtonLevel::Up;
+        self.moving = false;
+    }
 }
 
 #[derive(Debug, EnumString, Display)]
