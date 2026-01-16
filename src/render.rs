@@ -1,16 +1,16 @@
-use crate::app::RefAV;
+use crate::app::{update_shapes_panel, RefAV};
 use crate::canvas::{Canvas, CanvasKind, Color, Pattern};
 use crate::dimensions::dim_hv;
 use crate::gcode::Seg;
 use crate::prefab::{get_vertices_colors, line_path, point_path};
-use crate::shape::{GeneralShape, TextFont};
+use crate::shape::GeneralShape;
 use crate::shapes::{toolpath_to_plasma_gcode, Toolpath};
 use crate::status::{begin_render, end_render, update_status_bar};
-use crate::types::{Binding, Couple, EUId, SegBundle, VUId};
+use crate::types::SegBundle;
 use kurbo::{Arc, BezPath, PathEl, Point, Rect, Shape, Vec2};
 
 pub(crate) fn draw_reset_origin(av: RefAV) {
-    av.borrow_mut().get_user_canvas_mut().reset_origin();
+    av.borrow_mut().get_active_canvas_mut().reset_origin();
 }
 
 pub(crate) fn draw_grid_and_rules(av: RefAV) {
@@ -25,6 +25,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
     begin_render(av.clone(), "Draw");
     draw_grid_and_rules(av.clone());
     update_status_bar(av.clone());
+    update_shapes_panel(av.clone());
 
     let mut avb = av.borrow_mut();
     let svg_bbox_only = true;
@@ -40,72 +41,94 @@ pub(crate) fn render_draw_view(av: RefAV) {
 
         canvas_draw.may_be_draw_radiuses();
 
-        let binds: Binding<(EUId, VUId)> = canvas_draw.draw_vertices();
-        for Couple((eid1, vid1), (eid2, vid2)) in binds.iter() {
-            if let (Some(e1), Some(e2)) = (
-                canvas_draw.dataset.get_element(*eid1),
-                canvas_draw.dataset.get_element(*eid2),
-            ) {
-                if let (Some(v1), Some(v2)) = (e1.get_vertex(vid1), e2.get_vertex(vid2)) {
-                    let p1 = e1.vertex_display_pos(v1.curr);
-                    let p2 = e2.vertex_display_pos(v2.curr);
-                    if let Some(seg) = SegBundle::new(p1, p2) {
-                        let (path, pattern, colors, text) =
-                            dim_hv(seg, canvas_draw.get_canvas_infos());
-                        canvas_draw.draw_path(
-                            &path,
-                            pattern,
-                            colors.fill_color,
-                            colors.stroke_color,
-                            text,
-                        );
-                    }
-                }
-            }
-        }
+        canvas_draw.draw_vertices();
+
+        canvas_draw.draw_bindings();
     }
 
     if let Some((cs, mut vs)) = element_on_creation {
+        use crate::shape::ShapeType::*;
         match cs {
-            crate::dom::ShapeType::Disc
-            | crate::dom::ShapeType::Square
-            | crate::dom::ShapeType::Oblong
-            | crate::dom::ShapeType::ConstrLine
-            | crate::dom::ShapeType::ConstrCircle => {
+            Disc => {
                 if vs.len() == 1 {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr);
-                    if let Some(e) = GeneralShape::new(cs, &vs) {
+                    vs.push(canvas_draw.get_user_ui().pointer.curr());
+                    if let Some(e) = GeneralShape::new_shape_disc(vs[0], vs[1], 0) {
                         canvas_draw.draw_paths_creation(&e);
                         canvas_draw.draw_vs(&e);
                         canvas_draw.draw_dimensions(&e);
                     }
                 }
             }
-            crate::dom::ShapeType::Text => {
+            Square => {
                 if vs.len() == 1 {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr);
-                    if let Some(e) = GeneralShape::new_text(
-                        "TEXT".to_string(),
-                        TextFont::Stencilia,
-                        vs[0],
-                        vs[1],
-                    ) {
+                    vs.push(canvas_draw.get_user_ui().pointer.curr());
+                    if let Some(e) = GeneralShape::new_shape_rectangle(vs[0], vs[1], 0) {
                         canvas_draw.draw_paths_creation(&e);
                         canvas_draw.draw_vs(&e);
                         canvas_draw.draw_dimensions(&e);
                     }
                 }
             }
-            crate::dom::ShapeType::Poly => {
+            Oblong => {
+                if vs.len() == 1 {
+                    vs.push(canvas_draw.get_user_ui().pointer.curr());
+                    if let Some(e) = GeneralShape::new_shape_oblong(vs[0], vs[1], 0) {
+                        canvas_draw.draw_paths_creation(&e);
+                        canvas_draw.draw_vs(&e);
+                        canvas_draw.draw_dimensions(&e);
+                    }
+                }
+            }
+            Voronoi => {
+                if vs.len() == 1 {
+                    vs.push(canvas_draw.get_user_ui().pointer.curr());
+                    if let Some(e) = GeneralShape::new_shape_voronoi(vs[0], vs[1], 0) {
+                        canvas_draw.draw_paths_creation(&e);
+                        canvas_draw.draw_vs(&e);
+                        canvas_draw.draw_dimensions(&e);
+                    }
+                }
+            }
+            ConstrLine => {
+                if vs.len() == 1 {
+                    vs.push(canvas_draw.get_user_ui().pointer.curr());
+                    if let Some(e) = GeneralShape::new_shape_constr_line(vs[0], vs[1], 0) {
+                        canvas_draw.draw_paths_creation(&e);
+                        canvas_draw.draw_vs(&e);
+                        canvas_draw.draw_dimensions(&e);
+                    }
+                }
+            }
+            ConstrCircle => {
+                if vs.len() == 1 {
+                    vs.push(canvas_draw.get_user_ui().pointer.curr());
+                    if let Some(e) = GeneralShape::new_shape_constr_circle(vs[0], vs[1], 0) {
+                        canvas_draw.draw_paths_creation(&e);
+                        canvas_draw.draw_vs(&e);
+                        canvas_draw.draw_dimensions(&e);
+                    }
+                }
+            }
+            Text => {
+                if vs.len() == 1 {
+                    vs.push(canvas_draw.get_user_ui().pointer.curr());
+                    if let Some(e) = GeneralShape::new_shape_text(vs[0], vs[1], 0) {
+                        canvas_draw.draw_paths_creation(&e);
+                        canvas_draw.draw_vs(&e);
+                        canvas_draw.draw_dimensions(&e);
+                    }
+                }
+            }
+            Poly => {
                 if vs.len() > 2 {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr);
-                    if let Some(e) = GeneralShape::new(cs, &vs) {
+                    vs.push(canvas_draw.get_user_ui().pointer.curr());
+                    if let Some(e) = GeneralShape::new_shape_poly(vs, 0) {
                         canvas_draw.draw_paths_creation(&e);
                         canvas_draw.draw_vs(&e);
                         canvas_draw.draw_dimensions(&e);
                     }
                 } else {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr);
+                    vs.push(canvas_draw.get_user_ui().pointer.curr());
                     if vs.len() >= 2 {
                         let colors = get_vertices_colors(false, false);
                         for (i, v) in vs.iter().enumerate() {
@@ -144,7 +167,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
         }
     }
 
-    canvas_draw.draw_pointer(canvas_draw.get_user_ui().pointer.curr);
+    canvas_draw.draw_pointer(canvas_draw.get_user_ui().pointer.curr());
     avb.update_draw_cursor();
 
     drop(avb);

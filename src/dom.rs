@@ -1,8 +1,8 @@
+use crate::shape::ShapeType;
 use kurbo::Vec2;
 use wasm_bindgen::prelude::*;
-use web_sys::{window, Document, Element, Event, EventTarget, HtmlElement};
-
 use wasm_bindgen::JsCast;
+use web_sys::{window, Document, Element, Event, EventTarget, HtmlElement};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Tabs {
@@ -37,44 +37,6 @@ impl Tabs {
 
     pub fn get_html_element(&self) -> Option<HtmlElement> {
         self.get_element()?.dyn_into().ok()
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum ShapeType {
-    Arrow,
-    Disc,
-    Square,
-    Oblong,
-    Poly,
-    Text,
-    Svg,
-    ConstrLine,
-    ConstrCircle,
-}
-impl ShapeType {
-    pub fn id(&self) -> &'static str {
-        use ShapeType::*;
-        match self {
-            Arrow => "icon-arrow",
-            Disc => "icon-disc",
-            Square => "icon-square",
-            Oblong => "icon-oblong",
-            Poly => "icon-polygon",
-            Text => "icon-text",
-            Svg => "icon-svg",
-            ConstrLine => "icon-constr-line",
-            ConstrCircle => "icon-constr-circle",
-        }
-    }
-    pub fn get_element(&self) -> Option<Element> {
-        document().get_element_by_id(&self.id())
-    }
-    pub fn get_html_element(&self) -> Option<HtmlElement> {
-        if let Some(element) = self.get_element() {
-            return element.dyn_into().ok();
-        };
-        None
     }
 }
 

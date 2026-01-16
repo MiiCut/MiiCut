@@ -26,11 +26,11 @@ impl Clipboard {
 
     pub fn make_paste(&self, pointer: &Value) -> Option<GeneralShape> {
         let (shape, copy_pointer) = self.item_copy.as_ref()?;
-        let delta = pointer.curr - copy_pointer.curr;
+        let delta = pointer.curr() - copy_pointer.curr();
         let mut pasted = shape.clone();
         pasted.move_shape(delta);
         for (_, value) in pasted.get_vertices_mut().iter_mut() {
-            value.bind.clear();
+            value.property_remove_all_binds();
         }
         Some(pasted)
     }

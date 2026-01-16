@@ -27,28 +27,6 @@ pub fn between(pos1: &Vec2, pos2: &Vec2) -> Vec2 {
         pos1.y.min(pos2.y) + diff.y / 3.,
     )
 }
-// For kurbo::arc what is drawn is:
-// start_angle is positive, then it is drawn CLOCKWIZE
-// sweep_angle is positive, then it is drawn CLOCKWIZE
-// This is because Y is reversed on the canvas
-// So, if you want to draw a clockwise arc, you need to set start_angle to -PI/2 and sweep_angle to PI/2
-// To have the arc up-right
-//
-// paths_patterns.push((
-//     PrimitiveKindIter::PArc(
-//         kurbo::Arc {
-//             center: Vec2::ZERO.to_point(),
-//             radii: Vec2::new(50., 50.),
-//             start_angle: 0.,
-//             sweep_angle: PI / 2.,
-//             x_rotation: 0.0,
-//         }
-//         .path_elements(0.01),
-//     )
-//     .collect(),
-//     modifiers_pattern(false, true),
-// ));
-//
 
 pub const EPSILON: f64 = 1e-6;
 
@@ -77,6 +55,28 @@ impl fmt::Display for MyError {
     }
 }
 impl Error for MyError {}
+
+pub fn get_magnets_vertices(center_pt: Vec2, radius_pt: Vec2, count: usize) -> Vec<Vec2> {
+    let mut vs = vec![];
+    let start_angle = (radius_pt - center_pt).atan2();
+    let radius = (radius_pt - center_pt).hypot();
+    let step = 2.0 * PI / count as f64;
+    for i in 0..count {
+        let angle = start_angle + step * i as f64;
+        let pos = center_pt + Vec2::new(radius * angle.cos(), radius * angle.sin());
+        vs.push(pos);
+    }
+    vs
+}
+pub fn length_unit_to_mm(unit: &str) -> Option<f64> {
+    match unit {
+        "mm" => Some(1.0),
+        "cm" => Some(10.0),
+        "in" => Some(25.4),
+        "px" => Some(1.0),
+        _ => None,
+    }
+}
 
 pub fn is_aligned_vert(pt1: &Vec2, pt2: &Vec2) -> bool {
     // I can do this because of snaping

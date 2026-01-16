@@ -35,11 +35,18 @@ pub(crate) fn update_status_bar(av: RefAV) {
             let canvas = &avb.canvases[avb.active_canvas.idx()];
             let offset = canvas.get_offset();
             let scale = canvas.get_scale();
-            let pos = canvas.get_user_ui().pointer.curr;
-            format!(
+            let pos = canvas.get_user_ui().pointer.curr();
+            let mut text = format!(
                 "Draw | Scale: {:.2} | Offset: ({:.1}, {:.1}) | Pos: ({:.2}, {:.2})",
                 scale, offset.x, offset.y, pos.x, pos.y
-            )
+            );
+            if canvas.dataset.shapes_selected.len() == 1 {
+                let eid = *canvas.dataset.shapes_selected.iter().next().unwrap();
+                if let Some((idx, total, order)) = canvas.dataset.order_info(eid) {
+                    text.push_str(&format!(" | Order: {idx}/{total} ({order})"));
+                }
+            }
+            text
         }
         Tabs::Machine => {
             let mut parts = vec![avb.ws_status.clone()];

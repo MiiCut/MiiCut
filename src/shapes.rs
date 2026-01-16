@@ -1,8 +1,7 @@
-use crate::dom::ShapeType;
 use crate::inputs::UserUI;
 use crate::math::{geo_multipolygon_to_bez_paths, snap_vertex};
-use crate::shape::{GeneralShape, Operation};
-use crate::types::{EUId, Snap, VUId, Value};
+use crate::shape::{GeneralShape, Operation, ShapeType};
+use crate::types::{EUId, Snap, VUId, Value, ValueProperty, ValuePropertyKind};
 use geo::algorithm::unary_union;
 use geo::{BooleanOps, Coord, LineString, MultiPolygon, Polygon};
 use kurbo::{flatten, stroke, BezPath, Cap, Join, PathEl, Shape, Stroke, StrokeOpts, Vec2};
@@ -502,6 +501,7 @@ pub struct DataSet {
     pub vertices_selected: HashSet<(EUId, VUId)>,
     pub vertices_highlighted: HashSet<(EUId, VUId)>,
     pub last_vertex_selected: Option<(EUId, VUId)>,
+    next_order: i32,
 
     pub final_polygon: MultiPolygon<f64>,
     pub final_paths: Vec<BezPath>,
@@ -520,20 +520,104 @@ impl DataSet {
             final_polygon: MultiPolygon::new(vec![]),
             final_paths: Vec::new(),
             final_polygon_dirty: true,
+            next_order: 0,
         }
     }
     pub fn mark_final_polygon_dirty(&mut self) {
         self.final_polygon_dirty = true;
     }
-    pub fn push_element(&mut self, elem: GeneralShape) {
+    pub fn push_element(&mut self, mut elem: GeneralShape) -> EUId {
         let affects_final = !matches!(
             elem.get_shape_type(),
-            ShapeType::ConstrLine | ShapeType::ConstrCircle
+            ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
         );
-        self.shapes.insert(EUId::new(), elem);
+        elem.set_order(self.next_order);
+        self.next_order = self.next_order.saturating_add(1);
+        let eid = EUId::new();
+        self.shapes.insert(eid, elem);
         if affects_final {
             self.final_polygon_dirty = true;
         }
+        eid
+    }
+    pub fn sync_next_order(&mut self) {
+        let mut max_order = -1;
+        for shape in self.shapes.values() {
+            max_order = max_order.max(shape.get_order());
+        }
+        self.next_order = max_order.saturating_add(1);
+    }
+    pub fn ordered_shapes(&self) -> Vec<EUId> {
+        let mut ordered: Vec<(i32, EUId)> = self
+            .shapes
+            .iter()
+            .filter(|(_, shape)| {
+                !matches!(
+                    shape.get_shape_type(),
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+                )
+            })
+            .map(|(eid, shape)| (shape.get_order(), *eid))
+            .collect();
+        ordered.sort_by(|(order_a, eid_a), (order_b, eid_b)| {
+            order_a.cmp(order_b).then_with(|| eid_a.cmp(eid_b))
+        });
+        ordered.into_iter().map(|(_, eid)| eid).collect()
+    }
+    pub fn order_info(&self, eid: EUId) -> Option<(usize, usize, i32)> {
+        let ordered = self.ordered_shapes();
+        let total = ordered.len();
+        let idx = ordered.iter().position(|id| *id == eid)?;
+        let order = self.shapes.get(&eid)?.get_order();
+        Some((idx + 1, total, order))
+    }
+    pub fn shift_order(&mut self, eid: EUId, delta: i32) -> bool {
+        let ordered = self.ordered_shapes();
+        let total = ordered.len();
+        if total < 2 {
+            return false;
+        }
+        let idx = match ordered.iter().position(|id| *id == eid) {
+            Some(idx) => idx as i32,
+            None => return false,
+        };
+        let new_idx = (idx + delta).clamp(0, total as i32 - 1);
+        if new_idx == idx {
+            return false;
+        }
+        let other_id = ordered[new_idx as usize];
+        let order_a = self.shapes.get(&eid).map(|s| s.get_order());
+        let order_b = self.shapes.get(&other_id).map(|s| s.get_order());
+        let (Some(order_a), Some(order_b)) = (order_a, order_b) else {
+            return false;
+        };
+        if let Some(shape) = self.shapes.get_mut(&eid) {
+            shape.set_order(order_b);
+        }
+        if let Some(shape) = self.shapes.get_mut(&other_id) {
+            shape.set_order(order_a);
+        }
+        true
+    }
+    pub fn set_order_sequence(&mut self, ordered: &[EUId]) {
+        for (idx, eid) in ordered.iter().enumerate() {
+            if let Some(shape) = self.shapes.get_mut(eid) {
+                shape.set_order(idx as i32);
+            }
+        }
+        let mut max_order = -1;
+        for shape in self.shapes.values() {
+            max_order = max_order.max(shape.get_order());
+        }
+        self.next_order = max_order.saturating_add(1);
+    }
+    pub fn select_only(&mut self, eid: EUId) {
+        self.shapes_selected.clear();
+        self.shapes_highlighted.clear();
+        self.vertices_selected.clear();
+        self.vertices_highlighted.clear();
+        self.last_vertex_selected = None;
+        self.shapes_selected.insert(eid);
     }
     pub fn pop_element(&mut self, eid: EUId) -> Option<GeneralShape> {
         // remove the shape
@@ -558,7 +642,7 @@ impl DataSet {
             if let Some(shape) = removed.as_ref() {
                 if !matches!(
                     shape.get_shape_type(),
-                    ShapeType::ConstrLine | ShapeType::ConstrCircle
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
                 ) {
                     self.final_polygon_dirty = true;
                 }
@@ -572,6 +656,30 @@ impl DataSet {
     }
     pub fn get_element_mut(&mut self, eid: EUId) -> Option<&mut GeneralShape> {
         self.shapes.get_mut(&eid)
+    }
+
+    pub fn find_constr_circle_at(&self, pos: Vec2) -> Option<(EUId, usize)> {
+        self.shapes
+            .iter()
+            .filter_map(|(eid, elem)| {
+                if !matches!(elem.get_shape_type(), ShapeType::ConstrCircle) || !elem.contains(pos)
+                {
+                    return None;
+                }
+                let vertices = elem.get_vertices();
+                if vertices.len() < 5 {
+                    return None;
+                }
+                let center = vertices.val(0).curr();
+                let edge = vertices.val(1).curr();
+                let radius = (edge - center).hypot();
+                let distance = (pos - center).hypot();
+                let delta = (distance - radius).abs();
+                let count = elem.get_magnets_number().unwrap_or(3);
+                Some((*eid, delta, count))
+            })
+            .min_by(|(_, a_delta, _), (_, b_delta, _)| a_delta.total_cmp(b_delta))
+            .map(|(eid, _, count)| (eid, count))
     }
 
     pub fn create_vertices_between(
@@ -598,7 +706,10 @@ impl DataSet {
                 // Create new vertex between the selected and highlighted vertices
                 let new_v = (
                     VUId::new(),
-                    Value::new(snap_vertex((v1_sel.curr + v2_sel.curr) / 2.0, Snap::new())),
+                    Value::new(snap_vertex(
+                        (v1_sel.curr() + v2_sel.curr()) / 2.0,
+                        Snap::new(),
+                    )),
                 );
                 elem.get_vertices_mut()
                     .insert_one_between(&vid1_sel, &vid2_sel, new_v);
@@ -759,7 +870,7 @@ impl DataSet {
                 deleted = true;
                 if !matches!(
                     shape.get_shape_type(),
-                    ShapeType::ConstrLine | ShapeType::ConstrCircle
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
                 ) {
                     affects_final = true;
                 }
@@ -776,7 +887,7 @@ impl DataSet {
             if let Some(e) = self.shapes.get(&eid) {
                 if !matches!(
                     e.get_shape_type(),
-                    ShapeType::ConstrLine | ShapeType::ConstrCircle
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
                 ) {
                     return true;
                 }
@@ -786,7 +897,7 @@ impl DataSet {
             if let Some(e) = self.shapes.get(eid) {
                 if !matches!(
                     e.get_shape_type(),
-                    ShapeType::ConstrLine | ShapeType::ConstrCircle
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
                 ) {
                     return true;
                 }
@@ -802,7 +913,7 @@ impl DataSet {
     }
 
     pub fn move_elements(&mut self, userui: &UserUI) -> bool {
-        let delta = userui.pointer.curr - userui.pointer.saved;
+        let delta = userui.pointer.curr() - userui.pointer.saved();
         let mut moved = false;
         let mut affects_final = false;
         let mut sel_and_bind = self.shapes_selected.clone();
@@ -832,7 +943,7 @@ impl DataSet {
                 moved = true;
                 if !matches!(
                     e.get_shape_type(),
-                    ShapeType::ConstrLine | ShapeType::ConstrCircle
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
                 ) {
                     affects_final = true;
                 }
@@ -846,7 +957,7 @@ impl DataSet {
 
     pub fn refresh_svg_cache(&mut self) {
         for (_, shape) in self.shapes.iter_mut() {
-            if shape.get_shape_type() == ShapeType::Svg {
+            if matches!(shape.get_shape_type(), ShapeType::Svg | ShapeType::Voronoi) {
                 shape.set_bezpath();
             }
         }
@@ -857,96 +968,89 @@ impl DataSet {
         }
         HashSet::new()
     }
-    pub fn bind_unbind_vertices(
+    pub fn bind_unbind_vertex_to(
         &mut self,
-        eid_sel: EUId,
-        vid_sel: VUId,
-        eid_hig: EUId,
-        vid_hig: VUId,
-    ) -> bool {
+        eid_source: EUId,
+        vid_source: VUId,
+        eid_dest: EUId,
+        vid_dest: VUId,
+    ) {
         // Ensure vertices belong to different elements
-        if eid_sel == eid_hig {
-            log!("Cannot bind vertices from the same element");
-            return false;
+        if eid_source == eid_dest {
+            log!("Cannot bind/unbind vertices from the same element");
+            return;
         }
 
-        let old_bind_sel = self
-            .get_element(eid_sel)
-            .and_then(|elem| elem.get_vertex(&vid_sel))
-            .map(|vertex| vertex.bind.clone())
-            .unwrap_or_else(HashSet::new); // Default to empty HashSet if not found
+        let v_source = self
+            .get_element_mut(eid_source)
+            .and_then(|elem| elem.get_vertex_mut(&vid_source));
 
-        let old_bind_hig = self
-            .get_element(eid_hig)
-            .and_then(|elem| elem.get_vertex(&vid_hig))
-            .map(|vertex| vertex.bind.clone())
-            .unwrap_or_else(HashSet::new);
-
-        let unbound = if old_bind_sel.contains(&(eid_hig, vid_hig))
-            && old_bind_hig.contains(&(eid_sel, vid_sel))
-        {
-            true
+        if let Some(ValueProperty::Bind { .. }) = v_source.as_ref().and_then(|v| {
+            v.get_properties().get(&ValuePropertyKind::Bind {
+                eid: eid_dest,
+                vid: vid_dest,
+            })
+        }) {
+            v_source.and_then(|v| {
+                v.get_properties_mut().remove(&ValuePropertyKind::Bind {
+                    eid: eid_dest,
+                    vid: vid_dest,
+                });
+                Some(())
+            });
         } else {
-            false
-        };
-        if let Some(elem_sel) = self.get_element_mut(eid_sel) {
-            if let Some(vertex_sel) = elem_sel.get_vertex_mut(&vid_sel) {
-                if unbound {
-                    log!("Unbind {} to {}", vid_hig, vid_sel);
-                    vertex_sel.bind.remove(&(eid_hig, vid_hig));
-                } else {
-                    log!("Binding {} to {}", vid_hig, vid_sel);
-                    vertex_sel.bind.insert((eid_hig, vid_hig));
-                }
-            }
+            v_source.and_then(|v| {
+                v.get_properties_mut().insert(
+                    ValuePropertyKind::Bind {
+                        eid: eid_dest,
+                        vid: vid_dest,
+                    },
+                    ValueProperty::Bind {
+                        eid: eid_dest,
+                        vid: vid_dest,
+                    },
+                );
+                Some(())
+            });
         }
-        if let Some(elem_hig) = self.get_element_mut(eid_hig) {
-            if let Some(vertex_hig) = elem_hig.get_vertex_mut(&vid_hig) {
-                if unbound {
-                    log!("Unbind {} to {}", vid_sel, vid_hig);
-                    vertex_hig.bind.remove(&(eid_sel, vid_sel));
-                } else {
-                    log!("Binding {} to {}", vid_sel, vid_hig);
-                    vertex_hig.bind.insert((eid_sel, vid_sel));
-                }
-            }
-        }
-        true
     }
 
     pub fn calc_final_polygon(&mut self) {
         if !self.final_polygon_dirty {
             return;
         }
-        let mut unions: Vec<geo::Polygon<f64>> = Vec::new();
-        let mut diffs: Vec<geo::Polygon<f64>> = Vec::new();
-        for s in self.shapes.values() {
-            if matches!(
-                s.get_shape_type(),
-                ShapeType::ConstrLine | ShapeType::ConstrCircle
-            ) {
+        let ordered = self.ordered_shapes();
+        let mut result = MultiPolygon::new(vec![]);
+        for eid in ordered {
+            let Some(shape) = self.shapes.get(&eid) else {
+                continue;
+            };
+            let mut polys = Vec::new();
+            for poly in shape.get_polygon().iter() {
+                polys.push(normalize_polygon_orientation(poly));
+            }
+            let shape_poly = MultiPolygon::new(polys);
+            if shape_poly.0.is_empty() {
                 continue;
             }
-            match s.get_operation() {
+            result = match shape.get_operation() {
                 Operation::Union => {
-                    for poly in s.get_polygon().iter() {
-                        unions.push(normalize_polygon_orientation(poly));
+                    if result.0.is_empty() {
+                        shape_poly
+                    } else {
+                        result.boolean_op(&shape_poly, geo::OpType::Union)
                     }
                 }
                 Operation::Difference => {
-                    for poly in s.get_polygon().iter() {
-                        diffs.push(normalize_polygon_orientation(poly));
+                    if result.0.is_empty() {
+                        result
+                    } else {
+                        result.boolean_op(&shape_poly, geo::OpType::Difference)
                     }
                 }
-            }
+            };
         }
-        let poly_union = unary_union(&unions);
-        let poly_diff = unary_union(&diffs);
-        self.final_polygon = if diffs.len() > 0 {
-            poly_union.boolean_op(&poly_diff, geo::OpType::Difference)
-        } else {
-            poly_union
-        };
+        self.final_polygon = result;
         self.calc_final_paths();
         self.final_polygon_dirty = false;
     }

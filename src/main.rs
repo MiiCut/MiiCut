@@ -20,6 +20,7 @@ pub mod shapes;
 pub mod status;
 pub mod types;
 pub mod undoredo;
+pub mod voronoi;
 
 use crate::app::create_app_vars;
 use web_sys::window;

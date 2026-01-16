@@ -4,8 +4,6 @@
 - Always inline format! args when possible per https://rust-lang.github.io/rust-clippy/master/index.html#uninlined_format_args
 - Use method references over closures when possible per https://rust-lang.github.io/rust-clippy/master/index.html#redundant_closure_for_method_calls
 
-Run `just fmt` (in `src` directory) automatically after making Rust code changes; do not ask for approval to run it. Before finalizing a change to `src`, run `just fix -p <project>` (in `src` directory) to fix any linter issues in the code. Prefer scoping with `-p` to avoid slow workspace‑wide Clippy builds; only run `just fix` without `-p` if you changed shared crates.
-
 ### Text wrapping
 
 - Always use textwrap::wrap to wrap plain strings.

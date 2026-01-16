@@ -1,6 +1,6 @@
 use crate::canvas::{Canvas, CanvasKind, Color};
 use crate::cnc_link::CncLink;
-use crate::dom::{get_element_height, get_element_width, ShapeType, Tabs};
+use crate::dom::{get_element_height, get_element_width, Tabs};
 use crate::gcode::gcode_to_segments;
 use crate::handlers::{
     on_draw_context_menu, on_draw_mouse_down, on_draw_mouse_enter, on_draw_mouse_leave,
@@ -13,31 +13,33 @@ use crate::handlers::{
 };
 use crate::import_export::{
     build_json_from_dataset, build_svg_from_dataset, get_prop, load_json_to_dataset,
-    load_svg_to_dataset, make_export_info, timestamp_string, trigger_download,
+    make_export_info, timestamp_string, trigger_download,
 };
 use crate::inputs::{SystemMouse, UserAction};
 use crate::machine::{
     build_machine_view, load_machine_schema, machine_input_id, parse_grbl_setting_line,
     update_machine_value, MachineGroup,
 };
+use crate::math::to_draw;
 use crate::prefab::line_path;
 use crate::render::{
     draw_grid_and_rules, draw_reset_origin, render_draw_view, render_gcode_view,
     render_toolpath_view, toolpath_arc_path, toolpath_arrowhead_path, toolpath_points_to_path,
 };
+use crate::shape::{GeneralShape, Operation, ShapeType};
 use crate::shapes::{multipolygon_to_toolpath, toolpath_to_plasma_gcode, Toolpath, ToolpathParams};
 use crate::status::update_status_bar;
-use crate::types::{EUId, VUId};
+use crate::types::{EUId, VUId, Value, ValuePropertyKind};
 use js_sys::{Array, Date, Object, Reflect, JSON};
 use kurbo::{BezPath, PathEl, Point, Size, Vec2};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{
-    Blob, Document, Element, Event, FileReader, HtmlAnchorElement, HtmlCanvasElement, HtmlElement,
-    HtmlInputElement, KeyboardEvent, MouseEvent, Url, Window,
+    Blob, Document, DragEvent, Element, Event, FileReader, HtmlAnchorElement, HtmlCanvasElement,
+    HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent, Url, Window,
 };
 
 pub(crate) type RefAV = Rc<RefCell<AppVars>>;
@@ -53,6 +55,7 @@ pub(crate) struct AppVars {
     pub(crate) document: Document,
     pub(crate) top_menu: HtmlElement,
     pub(crate) left_panel: HtmlElement,
+    pub(crate) shapes_panel: HtmlElement,
     pub(crate) user_icons: HashSet<ShapeType>,
     pub(crate) tooltip: HtmlElement,
     pub(crate) icon_selected: ShapeType,
@@ -86,6 +89,7 @@ pub(crate) struct AppVars {
     pub(crate) last_ws_error: Option<String>,
     pub(crate) last_http_error: Option<String>,
     pub(crate) cnc: Option<Rc<CncLink>>,
+    pub(crate) shapes_drag_from: Option<usize>,
 }
 
 impl AppVars {
@@ -293,7 +297,7 @@ impl AppVars {
     }
     pub(crate) fn ctrl_c_pressed(&mut self) {
         if let ShapeType::Arrow = self.icon_selected.clone() {
-            let canvas_user = self.get_user_canvas_mut();
+            let canvas_user = self.get_active_canvas_mut();
             if canvas_user.dataset.shapes_selected.len() == 1 {
                 let eid = *canvas_user.dataset.shapes_selected.iter().next().unwrap();
                 if let Some(elem) = canvas_user.dataset.get_element(eid) {
@@ -307,12 +311,12 @@ impl AppVars {
     }
     pub(crate) fn ctrl_v_pressed(&mut self) {
         if let ShapeType::Arrow = self.icon_selected.clone() {
-            let canvas_user = self.get_user_canvas_mut();
+            let canvas_user = self.get_active_canvas_mut();
             if let Some(pasted) = canvas_user
                 .clipboard
                 .make_paste(&canvas_user.get_user_ui().pointer)
             {
-                canvas_user.dataset.push_element(pasted);
+                let _ = canvas_user.dataset.push_element(pasted);
                 canvas_user.dataset.mark_final_polygon_dirty();
                 canvas_user.dataset.calc_final_polygon();
             }
@@ -405,54 +409,41 @@ impl AppVars {
             self.refresh_gcode_cache();
         }
     }
+
     pub(crate) fn edit_text_at(&mut self, pos: Vec2) -> bool {
         let canvas = &mut self.canvases[CanvasKind::Draw.idx()];
-        let shift_pressed = canvas.get_user_ui().keys_states.shift_pressed;
         for (_eid, shape) in canvas.dataset.shapes.iter_mut() {
-            if shape.get_shape_type() != ShapeType::Text {
-                continue;
-            }
             if !shape.contains(pos) {
                 continue;
             }
-            if shift_pressed {
-                let auto_fit = shape.get_text().map(|text| !text.auto_fit).unwrap_or(false);
-                shape.set_text_autofit(auto_fit);
-                canvas.dataset.mark_final_polygon_dirty();
-                canvas.dataset.calc_final_polygon();
+            if let ShapeType::Text = shape.get_shape_type() {
+                let current = shape.get_text().unwrap_or("".to_string());
+                let edited = self
+                    .window
+                    .prompt_with_message_and_default("Edit text", &current)
+                    .ok()
+                    .flatten();
+                if let Some(new_text) = edited {
+                    shape.set_text(new_text);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    canvas.dataset.calc_final_polygon();
+                }
+                canvas.dataset.shapes_selected.clear();
+                canvas.dataset.shapes_highlighted.clear();
+                canvas.dataset.vertices_selected.clear();
+                canvas.dataset.vertices_highlighted.clear();
+                canvas
+                    .dataset
+                    .shapes_selector
+                    .refresh_selectable_elems(HashSet::new());
                 return true;
             }
-            shape.ensure_text_scale();
-            let current = shape
-                .get_text()
-                .map(|text| text.text.as_str())
-                .unwrap_or("");
-            let edited = self
-                .window
-                .prompt_with_message_and_default("Edit text", current)
-                .ok()
-                .flatten();
-            if let Some(new_text) = edited {
-                shape.set_text_value(new_text);
-                shape.fit_text_bbox_width_to_content();
-                canvas.dataset.mark_final_polygon_dirty();
-                canvas.dataset.calc_final_polygon();
-            }
-            canvas.dataset.shapes_selected.clear();
-            canvas.dataset.shapes_highlighted.clear();
-            canvas.dataset.vertices_selected.clear();
-            canvas.dataset.vertices_highlighted.clear();
-            canvas
-                .dataset
-                .shapes_selector
-                .refresh_selectable_elems(HashSet::new());
-            return true;
         }
         false
     }
     pub(crate) fn del_back_pressed(&mut self) {
         if let ShapeType::Arrow = self.icon_selected {
-            let canvas_user = self.get_user_canvas_mut();
+            let canvas_user = self.get_active_canvas_mut();
             if canvas_user.dataset.delete_selected_elements() {
                 canvas_user.dataset.refresh_svg_cache();
                 canvas_user.dataset.mark_final_polygon_dirty();
@@ -477,7 +468,7 @@ impl AppVars {
     }
     pub(crate) fn space_pressed(&mut self) {
         if let ShapeType::Arrow = self.icon_selected {
-            let canvas_user = self.get_user_canvas_mut();
+            let canvas_user = self.get_active_canvas_mut();
             let elems_sel: Vec<EUId> = canvas_user
                 .dataset
                 .shapes_selected
@@ -509,7 +500,7 @@ impl AppVars {
                 } else {
                     canvas_user
                         .dataset
-                        .bind_unbind_vertices(eid1, vid1, eid2, vid2);
+                        .bind_unbind_vertex_to(eid1, vid1, eid2, vid2);
                 }
                 return;
             }
@@ -525,38 +516,75 @@ impl AppVars {
                     }
                 }
             }
+        } else {
+            if let ShapeType::Poly = self.icon_selected {
+                let el_on_creation = self.element_on_creation.clone();
+                let canvas_user = self.get_active_canvas_mut();
+                if let Some((_, vs)) = el_on_creation {
+                    if let Some(e) = GeneralShape::new_shape_poly(vs, 0) {
+                        let eid = canvas_user.dataset.push_element(e);
+                        canvas_user.dataset.select_only(eid);
+                        canvas_user.dataset.mark_final_polygon_dirty();
+                        canvas_user.dataset.calc_final_polygon();
+                        self.element_on_creation = None;
+                        self.go_to_arrow_tool();
+                    }
+                }
+            }
         }
     }
 
-    pub(crate) fn change_vertex_radius(&mut self, inc: i32) {
+    pub(crate) fn change_vertex_radius(&mut self, inc: i32) -> Option<()> {
         if let ShapeType::Arrow = self.icon_selected {
-            let canvas_user = self.get_user_canvas_mut();
+            let canvas_user = self.get_active_canvas_mut();
             let vs_sel: Vec<(EUId, VUId)> = canvas_user
                 .dataset
                 .vertices_selected
                 .iter()
                 .copied()
                 .collect();
+
             if vs_sel.len() == 1 {
                 let (eid, vid) = vs_sel[0];
-                if let Some(elem) = canvas_user.dataset.get_element_mut(eid) {
-                    if let Some(v) = elem.get_vertex_mut(&vid) {
-                        if let Some(round) = v.rounded.as_mut() {
-                            log!("round: {}", round);
-                            let res = *round as i32 + inc;
-                            if res > 0 {
-                                *round = res as u32;
-                                elem.set_bezpath();
-                                canvas_user.dataset.mark_final_polygon_dirty();
-                                canvas_user.dataset.calc_final_polygon();
-                            }
-                        }
-                    }
+                let elem = canvas_user.dataset.get_element_mut(eid)?;
+
+                let rad = elem
+                    .get_vertex_mut(&vid)?
+                    .get_properties_mut()
+                    .get_mut(&ValuePropertyKind::Radius)?
+                    .as_radius_mut()?
+                    .0
+                    .as_mut()?; // -> &mut u32
+
+                let res = *rad as i32 + inc;
+                if res > 0 {
+                    *rad = res as u32;
+                    elem.set_bezpath();
+                    canvas_user.dataset.mark_final_polygon_dirty();
+                    canvas_user.dataset.calc_final_polygon();
+                    return Some(());
                 }
             }
         }
+        None
     }
+
     pub(crate) fn arrow_up_pressed(&mut self) {
+        if matches!(self.active_view, Tabs::Draw) {
+            let canvas = self.get_active_canvas_mut();
+            if canvas.dataset.shapes_selected.len() == 1
+                && canvas.dataset.vertices_selected.is_empty()
+            {
+                let eid = *canvas.dataset.shapes_selected.iter().next().unwrap();
+                if canvas.dataset.shift_order(eid, -1) {
+                    canvas.dataset.mark_final_polygon_dirty();
+                    canvas.dataset.calc_final_polygon();
+                    self.refresh_toolpath_cache();
+                    self.refresh_gcode_cache();
+                }
+                return;
+            }
+        }
         let inc = self.canvases[self.active_canvas.idx()]
             .get_user_ui()
             .snap
@@ -564,6 +592,21 @@ impl AppVars {
         self.change_vertex_radius(inc);
     }
     pub(crate) fn arrow_down_pressed(&mut self) {
+        if matches!(self.active_view, Tabs::Draw) {
+            let canvas = self.get_active_canvas_mut();
+            if canvas.dataset.shapes_selected.len() == 1
+                && canvas.dataset.vertices_selected.is_empty()
+            {
+                let eid = *canvas.dataset.shapes_selected.iter().next().unwrap();
+                if canvas.dataset.shift_order(eid, 1) {
+                    canvas.dataset.mark_final_polygon_dirty();
+                    canvas.dataset.calc_final_polygon();
+                    self.refresh_toolpath_cache();
+                    self.refresh_gcode_cache();
+                }
+                return;
+            }
+        }
         let inc = -(self.canvases[self.active_canvas.idx()]
             .get_user_ui()
             .snap
@@ -613,28 +656,28 @@ impl AppVars {
     }
 
     pub(crate) fn set_element_select_vertex(&mut self) -> bool {
-        let canvas_user = self.get_user_canvas_mut();
+        let canvas_user = self.get_active_canvas_mut();
         canvas_user
             .dataset
             .select_vertices(canvas_user.get_user_ui().draw_pos)
     }
     pub(crate) fn set_select_elements(&mut self) {
-        self.get_user_canvas_mut().select_elements();
+        self.get_active_canvas_mut().select_elements();
     }
     pub(crate) fn set_highlight_elements(&mut self) {
-        self.get_user_canvas_mut().highlight_elements();
+        self.get_active_canvas_mut().highlight_elements();
     }
     pub(crate) fn set_element_highlight_vertex(&mut self) -> bool {
-        self.get_user_canvas_mut().highlight_vertices()
+        self.get_active_canvas_mut().highlight_vertices()
     }
     pub(crate) fn set_move_elements(&mut self) -> bool {
-        self.get_user_canvas_mut().move_elements()
+        self.get_active_canvas_mut().move_elements()
     }
     pub(crate) fn set_move_vertices_selected(&mut self) -> bool {
-        self.get_user_canvas_mut().move_vertices_selected()
+        self.get_active_canvas_mut().move_vertices_selected()
     }
 
-    pub(crate) fn _get_user_canvas(&self) -> &Canvas {
+    pub(crate) fn get_active_canvas(&self) -> &Canvas {
         match self.active_canvas {
             CanvasKind::Gcode => &self.canvases[CanvasKind::Gcode.idx()],
             CanvasKind::Draw => &self.canvases[CanvasKind::Draw.idx()],
@@ -643,7 +686,7 @@ impl AppVars {
             CanvasKind::Toolpath => &self.canvases[CanvasKind::Toolpath.idx()],
         }
     }
-    pub(crate) fn get_user_canvas_mut(&mut self) -> &mut Canvas {
+    pub(crate) fn get_active_canvas_mut(&mut self) -> &mut Canvas {
         match self.active_canvas {
             CanvasKind::Gcode => &mut self.canvases[CanvasKind::Gcode.idx()],
             CanvasKind::Draw => &mut self.canvases[CanvasKind::Draw.idx()],
@@ -657,10 +700,11 @@ impl AppVars {
         mouse_event: MouseEvent,
         sys_mouse: SystemMouse,
     ) -> UserAction {
-        let c_draw_origin = Vec2::new(
-            get_element_width(&self.left_panel) as f64,
-            get_element_height(&self.top_menu) as f64,
-        );
+        let mut origin_x = get_element_width(&self.left_panel) as f64;
+        if matches!(self.active_view, Tabs::Draw) {
+            origin_x += get_element_width(&self.shapes_panel) as f64;
+        }
+        let c_draw_origin = Vec2::new(origin_x, get_element_height(&self.top_menu) as f64);
         let action = self.canvases[self.active_canvas.idx()].update_ui(
             c_draw_origin,
             &mouse_event,
@@ -696,24 +740,35 @@ impl AppVars {
         let mut best: Option<Vec2> = None;
         let mut best_dist = f64::INFINITY;
         for shape in canvas.dataset.shapes.values() {
-            if shape.get_shape_type() != ShapeType::ConstrCircle {
-                continue;
-            }
-            for (idx, (_, vertex)) in shape.get_vertices().iter().enumerate() {
-                if idx < 2 {
-                    continue;
+            match shape.get_shape_type() {
+                ShapeType::ConstrCircle => {
+                    for (idx, (_, vertex)) in shape.get_vertices().iter().enumerate() {
+                        if idx < 2 {
+                            continue;
+                        }
+                        let dist = (pos - vertex.curr()).hypot();
+                        if dist <= threshold && dist < best_dist {
+                            best_dist = dist;
+                            best = Some(vertex.curr());
+                        }
+                    }
                 }
-                let dist = (pos - vertex.curr).hypot();
-                if dist <= threshold && dist < best_dist {
-                    best_dist = dist;
-                    best = Some(vertex.curr);
+                ShapeType::ConstrLine => {
+                    for (_, vertex) in shape.get_vertices().iter() {
+                        let dist = (pos - vertex.curr()).hypot();
+                        if dist <= threshold && dist < best_dist {
+                            best_dist = dist;
+                            best = Some(vertex.curr());
+                        }
+                    }
                 }
+                _ => {}
             }
         }
         let user_ui = canvas.get_user_ui_mut();
         if let Some(target) = best {
             user_ui.draw_pos = target;
-            user_ui.pointer.set(target);
+            user_ui.pointer.set_curr(target);
             user_ui.magnetized = true;
         } else {
             user_ui.magnetized = false;
@@ -722,6 +777,7 @@ impl AppVars {
 }
 
 pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
+    use ShapeType::*;
     log!("Creating application variables");
     log!("Initializing icons");
     let document = window.document().expect("should have a document on window");
@@ -733,6 +789,7 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         init_element!(document, "toolpathCanvas", HtmlCanvasElement);
     let tooltip: HtmlElement = init_element!(document, "tooltip", HtmlElement);
     let left_panel: HtmlElement = init_element!(document, "left-panel", HtmlElement);
+    let shapes_panel: HtmlElement = init_element!(document, "shapes-panel", HtmlElement);
     let top_menu: HtmlElement = init_element!(document, "top-menu", HtmlElement);
     let canvases: [Canvas; CanvasKind::COUNT] = [
         Canvas::new(c_back, Size::new(3000., 1500.))?, // Background
@@ -743,13 +800,13 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
     ];
     let active_canvas = CanvasKind::Draw;
     let mut user_icons: HashSet<ShapeType> = HashSet::new();
-    use ShapeType::*;
     user_icons.insert(Arrow);
     user_icons.insert(Disc);
     user_icons.insert(Square);
     user_icons.insert(Oblong);
     user_icons.insert(Poly);
     user_icons.insert(Text);
+    user_icons.insert(Voronoi);
     user_icons.insert(ConstrLine);
     user_icons.insert(ConstrCircle);
 
@@ -769,6 +826,7 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         document,
         top_menu,
         left_panel,
+        shapes_panel,
         canvases,
         active_canvas,
         active_view: Tabs::Draw,
@@ -810,6 +868,7 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         last_ws_error: None,
         last_http_error: None,
         cnc,
+        shapes_drag_from: None,
     }));
 
     if let Some(cnc) = app_vars.borrow().cnc.clone() {
@@ -840,6 +899,7 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
     init_toolpath_splitter(app_vars.clone())?;
     init_icons(app_vars.clone())?;
     init_status(app_vars.clone())?;
+    init_shapes_panel(app_vars.clone())?;
     init_draw_canvas(app_vars.clone())?;
     init_gcode_canvas(app_vars.clone())?;
     init_toolpath_canvas(app_vars.clone())?;
@@ -857,6 +917,704 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
     draw_grid_and_rules(av.clone());
     update_status_bar(av.clone());
     render_draw_view(av.clone());
+
+    Ok(())
+}
+
+fn shape_type_label(shape_type: ShapeType) -> &'static str {
+    match shape_type {
+        ShapeType::Disc => "Disc",
+        ShapeType::Square => "Square",
+        ShapeType::Oblong => "Oblong",
+        ShapeType::Poly => "Polygon",
+        ShapeType::Text => "Text",
+        ShapeType::Svg => "Svg",
+        ShapeType::Voronoi => "Voronoi",
+        ShapeType::ConstrLine => "Line",
+        ShapeType::ConstrCircle { .. } => "Circle",
+        ShapeType::Arrow => "Arrow",
+    }
+}
+
+fn set_vertex_pos(value: &mut Value, pos: Vec2) {
+    value.set_curr(pos);
+    value.save();
+}
+
+fn add_shape_property_input(
+    document: &Document,
+    body: &HtmlElement,
+    label: &str,
+    value: f64,
+) -> Option<HtmlInputElement> {
+    let row = document.create_element("label").ok()?;
+    row.set_class_name("shape-prop-row");
+
+    let name = document.create_element("span").ok()?;
+    name.set_class_name("shape-prop-label");
+    name.set_text_content(Some(label));
+    let _ = row.append_child(&name);
+
+    let input: HtmlInputElement = document.create_element("input").ok()?.dyn_into().ok()?;
+    input.set_class_name("shape-prop-input");
+    input.set_type("number");
+    input.set_step("0.01");
+    input.set_value(&format!("{value:.3}"));
+    let _ = row.append_child(&input);
+
+    let _ = body.append_child(&row);
+    Some(input)
+}
+
+fn update_shape_properties_panel(av: &RefAV, ordered: &[EUId]) {
+    let Ok(mut avb) = av.try_borrow_mut() else {
+        return;
+    };
+    let Some(body) = avb.document.get_element_by_id("shape-properties-body") else {
+        return;
+    };
+    let Ok(body) = body.dyn_into::<HtmlElement>() else {
+        return;
+    };
+    body.set_inner_html("");
+
+    if !matches!(avb.active_view, Tabs::Draw) {
+        return;
+    }
+
+    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+    let selected: Vec<EUId> = ordered
+        .iter()
+        .copied()
+        .filter(|eid| canvas.dataset.shapes_selected.contains(eid))
+        .collect();
+    if selected.is_empty() {
+        let Ok(msg) = avb.document.create_element("div") else {
+            return;
+        };
+        msg.set_class_name("shape-prop-empty");
+        msg.set_text_content(Some("No shape selected"));
+        let _ = body.append_child(&msg);
+        return;
+    }
+    if selected.len() > 1 {
+        let Ok(msg) = avb.document.create_element("div") else {
+            return;
+        };
+        msg.set_class_name("shape-prop-empty");
+        msg.set_text_content(Some("Multiple shapes selected"));
+        let _ = body.append_child(&msg);
+        return;
+    }
+
+    let eid = selected[0];
+    let shape_type = match canvas.dataset.get_element(eid) {
+        Some(shape) => shape.get_shape_type(),
+        None => return,
+    };
+
+    match shape_type {
+        ShapeType::Disc | ShapeType::ConstrCircle { .. } => {
+            let (center, _edge, radius) = match canvas.dataset.get_element(eid) {
+                Some(shape) => {
+                    let center = shape.get_vertices().val(0).curr();
+                    let edge = shape.get_vertices().val(1).curr();
+                    let radius = (edge - center).hypot();
+                    (center, edge, radius)
+                }
+                None => return,
+            };
+
+            let Some(cx_input) =
+                add_shape_property_input(&avb.document, &body, "Center X", center.x)
+            else {
+                return;
+            };
+            let Some(cy_input) =
+                add_shape_property_input(&avb.document, &body, "Center Y", center.y)
+            else {
+                return;
+            };
+            let Some(r_input) =
+                add_shape_property_input(&avb.document, &body, "Radius", radius.max(2.0))
+            else {
+                return;
+            };
+
+            let av_cx = av.clone();
+            let cx_input_clone = cx_input.clone();
+            let on_cx = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                let Ok(value) = cx_input_clone.value().parse::<f64>() else {
+                    return;
+                };
+                let Ok(mut avb) = av_cx.try_borrow_mut() else {
+                    return;
+                };
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                {
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                        return;
+                    };
+                    let center = shape.get_vertices().val(0).curr();
+                    let edge = shape.get_vertices().val(1).curr();
+                    let radius = (edge - center).hypot();
+                    let dir = if radius > 1e-6 {
+                        (edge - center) / radius
+                    } else {
+                        Vec2::new(1.0, 0.0)
+                    };
+                    let new_center = Vec2::new(value, center.y);
+                    let new_edge = new_center + dir * radius;
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), new_center);
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), new_edge);
+                    shape.set_bezpath();
+                }
+                canvas.dataset.mark_final_polygon_dirty();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+                drop(avb);
+                render_draw_view(av_cx.clone());
+            });
+            let _ =
+                cx_input.add_event_listener_with_callback("change", on_cx.as_ref().unchecked_ref());
+            on_cx.forget();
+
+            let av_cy = av.clone();
+            let cy_input_clone = cy_input.clone();
+            let on_cy = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                let Ok(value) = cy_input_clone.value().parse::<f64>() else {
+                    return;
+                };
+                let Ok(mut avb) = av_cy.try_borrow_mut() else {
+                    return;
+                };
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                {
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                        return;
+                    };
+                    let center = shape.get_vertices().val(0).curr();
+                    let edge = shape.get_vertices().val(1).curr();
+                    let radius = (edge - center).hypot();
+                    let dir = if radius > 1e-6 {
+                        (edge - center) / radius
+                    } else {
+                        Vec2::new(1.0, 0.0)
+                    };
+                    let new_center = Vec2::new(center.x, value);
+                    let new_edge = new_center + dir * radius;
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), new_center);
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), new_edge);
+                    shape.set_bezpath();
+                }
+                canvas.dataset.mark_final_polygon_dirty();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+                drop(avb);
+                render_draw_view(av_cy.clone());
+            });
+            let _ =
+                cy_input.add_event_listener_with_callback("change", on_cy.as_ref().unchecked_ref());
+            on_cy.forget();
+
+            let av_r = av.clone();
+            let r_input_clone = r_input.clone();
+            let on_r = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                let Ok(value) = r_input_clone.value().parse::<f64>() else {
+                    return;
+                };
+                let Ok(mut avb) = av_r.try_borrow_mut() else {
+                    return;
+                };
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                {
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                        return;
+                    };
+                    let center = shape.get_vertices().val(0).curr();
+                    let edge = shape.get_vertices().val(1).curr();
+                    let radius = (edge - center).hypot();
+                    let dir = if radius > 1e-6 {
+                        (edge - center) / radius
+                    } else {
+                        Vec2::new(1.0, 0.0)
+                    };
+                    let new_radius = value.max(0.0);
+                    let new_edge = center + dir * new_radius;
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), new_edge);
+                    shape.set_bezpath();
+                }
+                canvas.dataset.mark_final_polygon_dirty();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+                drop(avb);
+                render_draw_view(av_r.clone());
+            });
+            let _ =
+                r_input.add_event_listener_with_callback("change", on_r.as_ref().unchecked_ref());
+            on_r.forget();
+        }
+        ShapeType::Square | ShapeType::Voronoi => {
+            let (min, max) = match canvas.dataset.get_element(eid) {
+                Some(shape) => {
+                    let min = shape.get_vertices().val(0).curr();
+                    let max = shape.get_vertices().val(2).curr();
+                    (min, max)
+                }
+                None => return,
+            };
+
+            let Some(min_x_input) = add_shape_property_input(&avb.document, &body, "Min X", min.x)
+            else {
+                return;
+            };
+            let Some(min_y_input) = add_shape_property_input(&avb.document, &body, "Min Y", min.y)
+            else {
+                return;
+            };
+            let Some(max_x_input) = add_shape_property_input(&avb.document, &body, "Max X", max.x)
+            else {
+                return;
+            };
+            let Some(max_y_input) = add_shape_property_input(&avb.document, &body, "Max Y", max.y)
+            else {
+                return;
+            };
+
+            let av_min_x = av.clone();
+            let min_x_clone = min_x_input.clone();
+            let on_min_x = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                let Ok(value) = min_x_clone.value().parse::<f64>() else {
+                    return;
+                };
+                let Ok(mut avb) = av_min_x.try_borrow_mut() else {
+                    return;
+                };
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                {
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                        return;
+                    };
+                    let min = shape.get_vertices().val(0).curr();
+                    let max = shape.get_vertices().val(2).curr();
+                    let min_x = value.min(max.x);
+                    let max_x = value.max(max.x);
+                    let min_y = min.y.min(max.y);
+                    let max_y = min.y.max(max.y);
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), Vec2::new(min_x, min_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), Vec2::new(min_x, max_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(2), Vec2::new(max_x, max_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(3), Vec2::new(max_x, min_y));
+                    shape.set_bezpath();
+                }
+                canvas.dataset.mark_final_polygon_dirty();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+                drop(avb);
+                render_draw_view(av_min_x.clone());
+            });
+            let _ = min_x_input
+                .add_event_listener_with_callback("change", on_min_x.as_ref().unchecked_ref());
+            on_min_x.forget();
+
+            let av_min_y = av.clone();
+            let min_y_clone = min_y_input.clone();
+            let on_min_y = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                let Ok(value) = min_y_clone.value().parse::<f64>() else {
+                    return;
+                };
+                let Ok(mut avb) = av_min_y.try_borrow_mut() else {
+                    return;
+                };
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                {
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                        return;
+                    };
+                    let min = shape.get_vertices().val(0).curr();
+                    let max = shape.get_vertices().val(2).curr();
+                    let min_x = min.x.min(max.x);
+                    let max_x = min.x.max(max.x);
+                    let min_y = value.min(max.y);
+                    let max_y = value.max(max.y);
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), Vec2::new(min_x, min_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), Vec2::new(min_x, max_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(2), Vec2::new(max_x, max_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(3), Vec2::new(max_x, min_y));
+                    shape.set_bezpath();
+                }
+                canvas.dataset.mark_final_polygon_dirty();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+                drop(avb);
+                render_draw_view(av_min_y.clone());
+            });
+            let _ = min_y_input
+                .add_event_listener_with_callback("change", on_min_y.as_ref().unchecked_ref());
+            on_min_y.forget();
+
+            let av_max_x = av.clone();
+            let max_x_clone = max_x_input.clone();
+            let on_max_x = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                let Ok(value) = max_x_clone.value().parse::<f64>() else {
+                    return;
+                };
+                let Ok(mut avb) = av_max_x.try_borrow_mut() else {
+                    return;
+                };
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                {
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                        return;
+                    };
+                    let min = shape.get_vertices().val(0).curr();
+                    let max = shape.get_vertices().val(2).curr();
+                    let min_x = min.x.min(value);
+                    let max_x = min.x.max(value);
+                    let min_y = min.y.min(max.y);
+                    let max_y = min.y.max(max.y);
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), Vec2::new(min_x, min_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), Vec2::new(min_x, max_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(2), Vec2::new(max_x, max_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(3), Vec2::new(max_x, min_y));
+                    shape.set_bezpath();
+                }
+                canvas.dataset.mark_final_polygon_dirty();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+                drop(avb);
+                render_draw_view(av_max_x.clone());
+            });
+            let _ = max_x_input
+                .add_event_listener_with_callback("change", on_max_x.as_ref().unchecked_ref());
+            on_max_x.forget();
+
+            let av_max_y = av.clone();
+            let max_y_clone = max_y_input.clone();
+            let on_max_y = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                let Ok(value) = max_y_clone.value().parse::<f64>() else {
+                    return;
+                };
+                let Ok(mut avb) = av_max_y.try_borrow_mut() else {
+                    return;
+                };
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                {
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                        return;
+                    };
+                    let min = shape.get_vertices().val(0).curr();
+                    let max = shape.get_vertices().val(2).curr();
+                    let min_x = min.x.min(max.x);
+                    let max_x = min.x.max(max.x);
+                    let min_y = min.y.min(value);
+                    let max_y = min.y.max(value);
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), Vec2::new(min_x, min_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), Vec2::new(min_x, max_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(2), Vec2::new(max_x, max_y));
+                    set_vertex_pos(shape.get_vertices_mut().val_mut(3), Vec2::new(max_x, min_y));
+                    shape.set_bezpath();
+                }
+                canvas.dataset.mark_final_polygon_dirty();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+                drop(avb);
+                render_draw_view(av_max_y.clone());
+            });
+            let _ = max_y_input
+                .add_event_listener_with_callback("change", on_max_y.as_ref().unchecked_ref());
+            on_max_y.forget();
+        }
+        _ => {
+            let Ok(msg) = avb.document.create_element("div") else {
+                return;
+            };
+            msg.set_class_name("shape-prop-empty");
+            msg.set_text_content(Some("No editable properties"));
+            let _ = body.append_child(&msg);
+        }
+    }
+}
+
+pub(crate) fn update_shapes_panel(av: RefAV) {
+    let avb = av.borrow_mut();
+    let Some(list) = avb.document.get_element_by_id("shapes-list") else {
+        return;
+    };
+    let Ok(list) = list.dyn_into::<HtmlElement>() else {
+        return;
+    };
+    if !matches!(avb.active_view, Tabs::Draw) {
+        let _ = avb.shapes_panel.style().set_property("display", "none");
+        list.set_inner_html("");
+        drop(avb);
+        update_shape_properties_panel(&av, &[]);
+        return;
+    }
+    let _ = avb.shapes_panel.style().set_property("display", "flex");
+    list.set_inner_html("");
+
+    let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+    let ordered = canvas.dataset.ordered_shapes();
+    let mut counts: HashMap<&'static str, usize> = HashMap::new();
+
+    for (idx, eid) in ordered.iter().enumerate() {
+        let Some(shape) = canvas.dataset.shapes.get(eid) else {
+            continue;
+        };
+        let shape_type = shape.get_shape_type();
+        if matches!(
+            shape_type,
+            ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+        ) {
+            continue;
+        }
+        let base = shape_type_label(shape_type);
+        let entry = counts.entry(base).or_insert(0);
+        *entry += 1;
+        let default_name = format!("{base}{}", *entry);
+        let display_name = shape
+            .get_name()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or(default_name);
+
+        let Ok(row) = avb.document.create_element("div") else {
+            continue;
+        };
+        row.set_class_name("shape-row");
+        let _ = row.set_attribute("draggable", "true");
+        let _ = row.set_attribute("data-index", &idx.to_string());
+        if canvas.dataset.shapes_selected.contains(eid) {
+            let _ = row.class_list().add_1("selected");
+        }
+
+        let Ok(name_el) = avb.document.create_element("span") else {
+            continue;
+        };
+        name_el.set_class_name("shape-name");
+        name_el.set_text_content(Some(&display_name));
+
+        let Ok(op_el) = avb.document.create_element("span") else {
+            continue;
+        };
+        let (op_label, op_class) = match shape.get_operation() {
+            Operation::Union => ("Union", "union"),
+            Operation::Difference => ("Diff", "difference"),
+        };
+        op_el.set_class_name(&format!("shape-op {op_class}"));
+        op_el.set_text_content(Some(op_label));
+
+        let Ok(delete_el) = avb.document.create_element("button") else {
+            continue;
+        };
+        delete_el.set_class_name("shape-delete");
+        delete_el.set_text_content(Some("×"));
+        let _ = delete_el.set_attribute("title", "Delete shape");
+
+        let _ = row.append_child(&name_el);
+        let _ = row.append_child(&op_el);
+        let _ = row.append_child(&delete_el);
+        let _ = list.append_child(&row);
+    }
+
+    drop(avb);
+    update_shape_properties_panel(&av, &ordered);
+}
+
+fn reorder_shapes_by_index(av: RefAV, from_idx: usize, to_idx: usize) {
+    let mut avb = av.borrow_mut();
+    if !matches!(avb.active_view, Tabs::Draw) {
+        return;
+    }
+    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+    let mut ordered = canvas.dataset.ordered_shapes();
+    if from_idx >= ordered.len() {
+        return;
+    }
+    let target_idx = to_idx.min(ordered.len());
+    if from_idx == target_idx {
+        return;
+    }
+    let eid = ordered.remove(from_idx);
+    let insert_idx = if target_idx > from_idx {
+        target_idx.saturating_sub(1)
+    } else {
+        target_idx
+    };
+    ordered.insert(insert_idx, eid);
+    canvas.dataset.set_order_sequence(&ordered);
+    canvas.dataset.mark_final_polygon_dirty();
+    canvas.dataset.calc_final_polygon();
+    avb.refresh_toolpath_cache();
+    avb.refresh_gcode_cache();
+    drop(avb);
+    render_draw_view(av);
+}
+
+pub(crate) fn init_shapes_panel(av: RefAV) -> Result<(), JsValue> {
+    let document = av.borrow().document.clone();
+    let list: HtmlElement = init_element!(document, "shapes-list", HtmlElement);
+
+    let av_click = av.clone();
+    let on_click = Closure::<dyn FnMut(Event)>::new(move |evt: Event| {
+        let Ok(target) = evt.target().unwrap().dyn_into::<Element>() else {
+            return;
+        };
+        let Ok(Some(row)) = target.closest(".shape-row") else {
+            return;
+        };
+        let Some(idx) = row
+            .get_attribute("data-index")
+            .and_then(|value| value.parse::<usize>().ok())
+        else {
+            return;
+        };
+        let is_delete = target.class_list().contains("shape-delete");
+        if let Ok(mut avb) = av_click.try_borrow_mut() {
+            if !matches!(avb.active_view, Tabs::Draw) {
+                return;
+            }
+            let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+            let ordered = canvas.dataset.ordered_shapes();
+            let Some(eid) = ordered.get(idx).copied() else {
+                return;
+            };
+            if is_delete {
+                canvas.dataset.pop_element(eid);
+                canvas.dataset.calc_final_polygon();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+            } else {
+                canvas.dataset.select_only(eid);
+            }
+        }
+        render_draw_view(av_click.clone());
+    });
+    list.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
+    on_click.forget();
+
+    let av_dblclick = av.clone();
+    let on_dblclick = Closure::<dyn FnMut(Event)>::new(move |evt: Event| {
+        let Ok(target) = evt.target().unwrap().dyn_into::<Element>() else {
+            return;
+        };
+        let Ok(Some(name_el)) = target.closest(".shape-name") else {
+            return;
+        };
+        let Ok(Some(row)) = name_el.closest(".shape-row") else {
+            return;
+        };
+        let Some(idx) = row
+            .get_attribute("data-index")
+            .and_then(|value| value.parse::<usize>().ok())
+        else {
+            return;
+        };
+        if let Ok(mut avb) = av_dblclick.try_borrow_mut() {
+            if !matches!(avb.active_view, Tabs::Draw) {
+                return;
+            }
+            let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+            let ordered = canvas.dataset.ordered_shapes();
+            let Some(eid) = ordered.get(idx).copied() else {
+                return;
+            };
+            let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                return;
+            };
+            let base = shape_type_label(shape.get_shape_type());
+            let current = shape
+                .get_name()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| base.to_string());
+            if let Some(window) = web_sys::window() {
+                if let Ok(result) = window.prompt_with_message_and_default("Shape name:", &current)
+                {
+                    if let Some(name) = result {
+                        shape.set_name(Some(name));
+                    }
+                }
+            }
+        }
+        render_draw_view(av_dblclick.clone());
+    });
+    list.add_event_listener_with_callback("dblclick", on_dblclick.as_ref().unchecked_ref())?;
+    on_dblclick.forget();
+
+    let av_dragstart = av.clone();
+    let on_dragstart = Closure::<dyn FnMut(Event)>::new(move |evt: Event| {
+        let Some(target) = evt.target().and_then(|t| t.dyn_into::<Element>().ok()) else {
+            return;
+        };
+        let Ok(Some(row)) = target.closest(".shape-row") else {
+            return;
+        };
+        let Some(idx) = row
+            .get_attribute("data-index")
+            .and_then(|value| value.parse::<usize>().ok())
+        else {
+            return;
+        };
+        let _ = row.class_list().add_1("dragging");
+        if let Ok(mut avb) = av_dragstart.try_borrow_mut() {
+            avb.shapes_drag_from = Some(idx);
+        }
+        let _ = evt.dyn_into::<DragEvent>();
+    });
+    list.add_event_listener_with_callback("dragstart", on_dragstart.as_ref().unchecked_ref())?;
+    on_dragstart.forget();
+
+    let av_dragend = av.clone();
+    let on_dragend = Closure::<dyn FnMut(Event)>::new(move |evt: Event| {
+        let Ok(target) = evt.target().unwrap().dyn_into::<Element>() else {
+            return;
+        };
+        let Ok(Some(row)) = target.closest(".shape-row") else {
+            return;
+        };
+        let _ = row.class_list().remove_1("dragging");
+        if let Ok(mut avb) = av_dragend.try_borrow_mut() {
+            avb.shapes_drag_from = None;
+        }
+    });
+    list.add_event_listener_with_callback("dragend", on_dragend.as_ref().unchecked_ref())?;
+    on_dragend.forget();
+
+    let on_dragover = Closure::<dyn FnMut(Event)>::new(move |evt: Event| {
+        evt.prevent_default();
+        let _ = evt.dyn_into::<DragEvent>();
+    });
+    list.add_event_listener_with_callback("dragover", on_dragover.as_ref().unchecked_ref())?;
+    on_dragover.forget();
+
+    let av_drop = av.clone();
+    let on_drop = Closure::<dyn FnMut(Event)>::new(move |evt: Event| {
+        let Ok(evt) = evt.dyn_into::<DragEvent>() else {
+            return;
+        };
+        evt.prevent_default();
+        let from_idx = av_drop.borrow().shapes_drag_from.unwrap_or(usize::MAX);
+        if from_idx == usize::MAX {
+            return;
+        }
+        let Some(target) = evt.target().and_then(|t| t.dyn_into::<Element>().ok()) else {
+            return;
+        };
+        let to_idx = target
+            .closest(".shape-row")
+            .ok()
+            .flatten()
+            .and_then(|row| row.get_attribute("data-index"))
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(usize::MAX);
+        reorder_shapes_by_index(av_drop.clone(), from_idx, to_idx);
+        if let Ok(mut avb) = av_drop.try_borrow_mut() {
+            avb.shapes_drag_from = None;
+        }
+    });
+    list.add_event_listener_with_callback("drop", on_drop.as_ref().unchecked_ref())?;
+    on_drop.forget();
 
     Ok(())
 }
@@ -1558,7 +2316,24 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
                 let file_reader: FileReader = target.dyn_into().unwrap();
                 if let Some(result) = file_reader.result().unwrap().as_string() {
                     log!("SVG file content loaded!");
-                    load_svg_to_dataset(av_for_load.clone(), result, combine_paths);
+                    let (tl, br) = {
+                        let avb = av_for_load.borrow();
+                        let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+                        let size = canvas.get_canvas_size();
+                        let scale = canvas.get_scale();
+                        let offset = canvas.get_offset();
+                        let tl = to_draw(Vec2::new(0.0, 0.0), scale, offset);
+                        let br = to_draw(Vec2::new(size.width, size.height), scale, offset);
+                        (tl, br)
+                    };
+                    let sh = GeneralShape::new_shape_svg_fit(0, result, combine_paths, tl, br);
+                    if let Some(shape) = sh {
+                        let canvas_user =
+                            &mut av_for_load.borrow_mut().canvases[CanvasKind::Draw.idx()];
+                        canvas_user.dataset.push_element(shape);
+                        canvas_user.dataset.mark_final_polygon_dirty();
+                        canvas_user.dataset.calc_final_polygon();
+                    };
                 }
             }) as Box<dyn FnMut(_)>);
 

@@ -1,14 +1,14 @@
+use std::collections::HashMap;
+
 use crate::app::RefAV;
 use crate::canvas::CanvasKind;
-use crate::dom::ShapeType;
 use crate::render::center_paths_canvas;
-use crate::shape::{GeneralShape, Operation, SvgData, SvgFillRule, TextData, TextFont};
+use crate::shape::{GeneralShape, Operation, ShapeType, SvgData, SvgFillRule};
 use crate::shapes::DataSet;
 use crate::status::update_status_bar;
-use crate::types::EUId;
+use crate::types::{EUId, Value};
 use js_sys::{Array, Date, JSON};
-use kurbo::{flatten, BezPath, PathEl, Shape, Size, Vec2};
-use svg::parser::{Event as SvgEvent, Parser as SvgParser};
+use kurbo::{BezPath, PathEl, Shape, Size, Vec2};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -119,12 +119,16 @@ pub(crate) fn build_json_from_dataset(dataset: &DataSet, meta: &ExportInfo) -> O
         out.push_str("    {\n");
         out.push_str(&format!("      \"id\": {},\n", eid));
         out.push_str(&format!("      \"type\": \"{shape_type}\",\n"));
+        if let Some(name) = elem.get_name() {
+            out.push_str(&format!("      \"name\": \"{}\",\n", json_escape(name)));
+        }
         out.push_str(&format!("      \"operation\": \"{op_name}\",\n"));
+        out.push_str(&format!("      \"order\": {},\n", elem.get_order()));
         out.push_str(&format!(
             "      \"rotation\": {:.6},\n",
             elem.get_rotation()
         ));
-        if let Some(count) = elem.constr_circle_vertices() {
+        if let Some(count) = elem.get_magnets_number() {
             out.push_str(&format!("      \"constr_vertices\": {count},\n"));
         }
         let vertices = elem.get_vertices();
@@ -136,50 +140,37 @@ pub(crate) fn build_json_from_dataset(dataset: &DataSet, meta: &ExportInfo) -> O
                 ",\n"
             };
             let rounded = v
-                .rounded
+                .get_radius()
                 .map(|val| val.to_string())
                 .unwrap_or("null".to_string());
-            let binds = if v.bind.is_empty() {
+            let binds = if v.get_binds().is_empty() {
                 "[]".to_string()
             } else {
                 let mut binds_str = String::new();
                 binds_str.push('[');
-                for (b_idx, (bind_eid, _)) in v.bind.iter().enumerate() {
-                    if b_idx > 0 {
-                        binds_str.push_str(", ");
-                    }
-                    binds_str.push_str(&format!("{bind_eid}"));
+                for (dest_eid, dest_vid) in v.get_binds().iter() {
+                    let bind = format!("{{\"eid\": {}, \"vid\": {}}}", dest_eid, dest_vid);
+                    binds_str.push_str(&bind);
                 }
                 binds_str.push(']');
                 binds_str
             };
             out.push_str(&format!(
                 "        {{\"x\": {:.6}, \"y\": {:.6}, \"rounded\": {rounded}, \"binds\": {binds}}}{separator}",
-                v.curr.x, v.curr.y
+                v.curr().x, v.curr().y
             ));
         }
         out.push_str("      ]");
 
-        if let Some(text) = elem.get_text() {
-            out.push_str(",\n      \"text\": {\n");
-            out.push_str(&format!(
-                "        \"content\": \"{}\",\n",
-                json_escape(&text.text)
-            ));
-            let scale = text
-                .scale
-                .map(|value| format!("{value:.6}"))
-                .unwrap_or_else(|| "null".to_string());
-            out.push_str(&format!("        \"scale\": {scale},\n"));
-            out.push_str(&format!(
-                "        \"auto_fit\": {},\n",
-                if text.auto_fit { "true" } else { "false" }
-            ));
-            let font_name = text_font_to_name(&text.font);
-            out.push_str(&format!("        \"font\": \"{font_name}\"\n"));
-            out.push_str("      }");
-        } else if let Some(svg) = elem.get_svg() {
-            out.push_str(",\n      \"svg\": {\n");
+        if let (Some(svg), Some(svg_key)) = (
+            elem.get_svg(),
+            match elem.get_shape_type() {
+                ShapeType::Svg => Some("svg"),
+                ShapeType::Voronoi => Some("voronoi"),
+                _ => None,
+            },
+        ) {
+            out.push_str(&format!(",\n      \"{svg_key}\": {{\n"));
             let fill_rule = match svg.fill_rule {
                 SvgFillRule::NonZero => "nonzero",
                 SvgFillRule::EvenOdd => "evenodd",
@@ -243,6 +234,7 @@ pub(crate) fn name_to_icon(name: &str) -> Option<ShapeType> {
         "poly" => Some(ShapeType::Poly),
         "text" => Some(ShapeType::Text),
         "svg" => Some(ShapeType::Svg),
+        "voronoi" => Some(ShapeType::Voronoi),
         "constr_line" => Some(ShapeType::ConstrLine),
         "constr_circle" => Some(ShapeType::ConstrCircle),
         _ => None,
@@ -253,14 +245,6 @@ pub(crate) fn name_to_operation(name: String) -> Option<Operation> {
     match name.as_str() {
         "union" => Some(Operation::Union),
         "difference" => Some(Operation::Difference),
-        _ => None,
-    }
-}
-
-pub(crate) fn name_to_text_font(name: String) -> Option<TextFont> {
-    match name.as_str() {
-        "stencilia" => Some(TextFont::Stencilia),
-        "urbanist" => Some(TextFont::Urbanist),
         _ => None,
     }
 }
@@ -357,8 +341,9 @@ pub(crate) fn icon_to_name(icon: ShapeType) -> &'static str {
         ShapeType::Poly => "poly",
         ShapeType::Text => "text",
         ShapeType::Svg => "svg",
+        ShapeType::Voronoi => "voronoi",
         ShapeType::ConstrLine => "constr_line",
-        ShapeType::ConstrCircle => "constr_circle",
+        ShapeType::ConstrCircle { .. } => "constr_circle",
         _ => "unknown",
     }
 }
@@ -367,13 +352,6 @@ pub(crate) fn operation_to_name(operation: Operation) -> &'static str {
     match operation {
         Operation::Union => "union",
         Operation::Difference => "difference",
-    }
-}
-
-pub(crate) fn text_font_to_name(font: &TextFont) -> &'static str {
-    match font {
-        TextFont::Stencilia => "stencilia",
-        TextFont::Urbanist => "urbanist",
     }
 }
 
@@ -424,6 +402,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
     canvas.dataset.vertices_highlighted.clear();
     canvas.dataset.shapes_selector = crate::shapes::ShapeSelector::new();
 
+    let mut fallback_order: i32 = 0;
     for shape_value in shapes_array.iter() {
         let Some(type_name) = get_string(&shape_value, "type") else {
             continue;
@@ -434,20 +413,23 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         let operation = get_string(&shape_value, "operation")
             .and_then(name_to_operation)
             .unwrap_or(Operation::Union);
+        let name = get_string(&shape_value, "name")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let mut order = get_f64(&shape_value, "order").and_then(|val| {
+            if val.is_finite() {
+                Some(val.round() as i32)
+            } else {
+                None
+            }
+        });
+        if order.is_none() {
+            order = Some(fallback_order);
+        }
+        if let Some(order_val) = order {
+            fallback_order = fallback_order.max(order_val.saturating_add(1));
+        }
         let rotation = get_f64(&shape_value, "rotation").unwrap_or(0.0);
-        let constr_circle_vertices = if icon == ShapeType::ConstrCircle {
-            get_prop(&shape_value, "constr_vertices")
-                .and_then(|val| val.as_f64())
-                .and_then(|val| {
-                    if val.is_finite() && val >= 0.0 {
-                        Some(val.round() as usize)
-                    } else {
-                        None
-                    }
-                })
-        } else {
-            None
-        };
 
         let vertices_value = get_prop(&shape_value, "vertices");
         let Some(vertices_value) = vertices_value else {
@@ -455,7 +437,6 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         };
         let vertices_array = Array::from(&vertices_value);
         let mut vertices = Vec::new();
-        let mut rounded = Vec::new();
         for vertex_value in vertices_array.iter() {
             let x = match get_f64(&vertex_value, "x") {
                 Some(value) => value,
@@ -465,33 +446,16 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
                 Some(value) => value,
                 None => continue,
             };
-            let round_value = get_prop(&vertex_value, "rounded")
-                .and_then(|val| val.as_f64())
-                .map(|val| val as u32);
-            vertices.push(Vec2::new(x, y));
-            rounded.push(round_value);
+            vertices.push(Value::new(Vec2::new(x, y)));
         }
 
-        let text_data = if icon == ShapeType::Text {
-            get_prop(&shape_value, "text").and_then(|text_value| {
-                let content = get_string(&text_value, "content")?;
-                let scale = get_f64(&text_value, "scale")
-                    .or_else(|| get_f64(&text_value, "size"))
-                    .and_then(|value| if value > 0.0 { Some(value) } else { None });
-                let auto_fit = get_prop(&text_value, "auto_fit")
-                    .and_then(|val| val.as_bool())
-                    .unwrap_or(false);
-                let font = get_string(&text_value, "font")
-                    .and_then(name_to_text_font)
-                    .unwrap_or(TextFont::Stencilia);
-                Some(TextData::new(content, font, scale, auto_fit))
-            })
-        } else {
-            None
-        };
-
-        let svg_data = if icon == ShapeType::Svg {
-            get_prop(&shape_value, "svg").map(|svg_value| {
+        let svg_data = if matches!(icon, ShapeType::Svg | ShapeType::Voronoi) {
+            let svg_value = if icon == ShapeType::Voronoi {
+                get_prop(&shape_value, "voronoi").or_else(|| get_prop(&shape_value, "svg"))
+            } else {
+                get_prop(&shape_value, "svg")
+            };
+            svg_value.map(|svg_value| {
                 let fill_rule = get_string(&svg_value, "fill_rule")
                     .map(|rule| match rule.as_str() {
                         "evenodd" => SvgFillRule::EvenOdd,
@@ -524,14 +488,16 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             None
         };
 
-        let Some(mut elem) = GeneralShape::from_raw(
+        let Some(mut elem) = GeneralShape::new(
             icon,
-            operation,
             vertices,
-            &rounded,
-            text_data,
+            HashMap::new(),
+            0,
+            None,
             svg_data,
-            constr_circle_vertices,
+            None,
+            operation,
+            name,
         ) else {
             continue;
         };
@@ -541,6 +507,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
 
         canvas.dataset.shapes.insert(EUId::new(), elem);
     }
+    canvas.dataset.sync_next_order();
 
     canvas.dataset.refresh_svg_cache();
     canvas.dataset.mark_final_polygon_dirty();
@@ -557,261 +524,6 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         }
         center_paths_canvas(canvas, &paths);
     }
-    drop(avb);
-    update_status_bar(av);
-}
-
-pub(crate) fn parse_svg_length(value: &str) -> Option<(f64, String)> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let mut number = String::new();
-    let mut unit = String::new();
-    for ch in trimmed.chars() {
-        if ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+' {
-            if unit.is_empty() {
-                number.push(ch);
-            } else {
-                return None;
-            }
-        } else {
-            unit.push(ch);
-        }
-    }
-    let value = number.parse::<f64>().ok()?;
-    let unit = if unit.is_empty() { "px" } else { unit.as_str() };
-    Some((value, unit.to_string()))
-}
-
-pub(crate) fn length_unit_to_mm(unit: &str) -> Option<f64> {
-    match unit {
-        "mm" => Some(1.0),
-        "cm" => Some(10.0),
-        "in" => Some(25.4),
-        "px" => Some(1.0),
-        _ => None,
-    }
-}
-
-pub(crate) fn parse_view_box(value: &str) -> Option<(f64, f64, f64, f64)> {
-    let parts: Vec<f64> = value
-        .split(|ch: char| ch.is_whitespace() || ch == ',')
-        .filter(|part| !part.is_empty())
-        .filter_map(|part| part.parse::<f64>().ok())
-        .collect();
-    if parts.len() != 4 {
-        return None;
-    }
-    Some((parts[0], parts[1], parts[2], parts[3]))
-}
-
-pub(crate) fn parse_style_value(style: &str, key: &str) -> Option<String> {
-    style
-        .split(';')
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .find_map(|entry| {
-            let mut parts = entry.splitn(2, ':');
-            let name = parts.next()?.trim();
-            let value = parts.next()?.trim();
-            if name == key {
-                Some(value.to_string())
-            } else {
-                None
-            }
-        })
-}
-
-pub(crate) fn fill_rule_from_attrs(
-    attrs: &svg::node::Attributes,
-    fallback: SvgFillRule,
-) -> SvgFillRule {
-    let fill_rule = attrs
-        .get("fill-rule")
-        .map(|val| val.to_string())
-        .or_else(|| {
-            attrs
-                .get("style")
-                .and_then(|style| parse_style_value(style.as_ref(), "fill-rule"))
-        })
-        .unwrap_or_else(|| "nonzero".to_string());
-    match fill_rule.as_str() {
-        "evenodd" => SvgFillRule::EvenOdd,
-        _ => fallback,
-    }
-}
-
-pub(crate) fn bezpath_to_rings(path: &BezPath, tolerance: f64) -> Vec<Vec<Vec2>> {
-    let mut rings = Vec::new();
-    let mut flattened = BezPath::new();
-    flatten(path, tolerance, |el| flattened.push(el));
-    let mut current_ring: Vec<Vec2> = Vec::new();
-
-    for el in flattened.elements() {
-        match el {
-            PathEl::MoveTo(p) => {
-                if current_ring.len() >= 3 {
-                    rings.push(current_ring);
-                }
-                current_ring = vec![Vec2::new(p.x, p.y)];
-            }
-            PathEl::LineTo(p) => current_ring.push(Vec2::new(p.x, p.y)),
-            PathEl::ClosePath => {
-                if current_ring.len() >= 3 {
-                    rings.push(current_ring.clone());
-                }
-                current_ring.clear();
-            }
-            _ => {}
-        }
-    }
-    if current_ring.len() >= 3 {
-        rings.push(current_ring);
-    }
-
-    rings
-}
-
-pub(crate) fn normalize_ring(mut ring: Vec<Vec2>) -> Vec<Vec2> {
-    if ring.len() > 1 {
-        let first = ring[0];
-        let last = ring[ring.len() - 1];
-        if (first - last).hypot() < 1e-6 {
-            ring.pop();
-        }
-    }
-    ring
-}
-
-pub(crate) fn load_svg_to_dataset(av: RefAV, svg_data: String, combine_paths: bool) {
-    let mut avb = av.borrow_mut();
-    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-    let mut paths = Vec::new();
-    let mut view_box: Option<(f64, f64, f64, f64)> = None;
-    let mut width: Option<(f64, String)> = None;
-    let mut height: Option<(f64, String)> = None;
-
-    let parser = SvgParser::new(svg_data.as_str());
-    for event in parser {
-        match event {
-            SvgEvent::Tag(tag, _, attributes) => {
-                if tag == "svg" {
-                    if let Some(val) = attributes.get("viewBox") {
-                        view_box = parse_view_box(val.as_ref());
-                    }
-                    if let Some(val) = attributes.get("width") {
-                        width = parse_svg_length(val.as_ref());
-                    }
-                    if let Some(val) = attributes.get("height") {
-                        height = parse_svg_length(val.as_ref());
-                    }
-                }
-                if tag == "path" {
-                    if let Some(d) = attributes.get("d") {
-                        if let Ok(path) = BezPath::from_svg(d.as_ref()) {
-                            if !path.is_empty() {
-                                let fill_rule =
-                                    fill_rule_from_attrs(&attributes, SvgFillRule::NonZero);
-                                paths.push((path, fill_rule));
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if paths.is_empty() {
-        return;
-    }
-
-    let mut scale = 1.0;
-    if let (Some((w, wu)), Some((h, hu))) = (width, height) {
-        if let (Some(wx), Some(hx)) = (length_unit_to_mm(&wu), length_unit_to_mm(&hu)) {
-            let view = view_box.unwrap_or((0.0, 0.0, w, h));
-            let view_w = view.2.max(1.0);
-            let view_h = view.3.max(1.0);
-            let sx = (w * wx) / view_w;
-            let sy = (h * hx) / view_h;
-            scale = sx.min(sy);
-        }
-    }
-
-    let mut shape_rings: Vec<(Vec<Vec<Vec2>>, SvgFillRule)> = Vec::new();
-    let mut all_rings = Vec::new();
-    for (path, fill_rule) in paths {
-        let rings = bezpath_to_rings(&path, 0.5);
-        if rings.is_empty() {
-            continue;
-        }
-        let mut normalized_rings: Vec<Vec<Vec2>> = rings.into_iter().map(normalize_ring).collect();
-        if fill_rule == SvgFillRule::EvenOdd {
-            for ring in normalized_rings.iter_mut().skip(1) {
-                ring.reverse();
-            }
-        }
-
-        if combine_paths {
-            all_rings.extend(normalized_rings);
-        } else {
-            shape_rings.push((normalized_rings, fill_rule));
-        }
-    }
-
-    if combine_paths && !all_rings.is_empty() {
-        shape_rings.push((all_rings, SvgFillRule::NonZero));
-    }
-
-    let mut min_x = f64::INFINITY;
-    let mut min_y = f64::INFINITY;
-    let mut max_x = f64::NEG_INFINITY;
-    let mut max_y = f64::NEG_INFINITY;
-    for (rings, _) in shape_rings.iter() {
-        for ring in rings.iter() {
-            for p in ring {
-                min_x = min_x.min(p.x);
-                min_y = min_y.min(p.y);
-                max_x = max_x.max(p.x);
-                max_y = max_y.max(p.y);
-            }
-        }
-    }
-
-    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
-        return;
-    }
-
-    let bbox_w = (max_x - min_x).max(1.0);
-    let bbox_h = (max_y - min_y).max(1.0);
-    let view_size = canvas.get_canvas_size();
-    let view_world_w = (view_size.width / canvas.get_scale()).max(1.0);
-    let view_world_h = (view_size.height / canvas.get_scale()).max(1.0);
-    let scaled_w = bbox_w * scale;
-    let scaled_h = bbox_h * scale;
-    if scaled_w > view_world_w || scaled_h > view_world_h {
-        let fit_scale = (view_world_w / scaled_w)
-            .min(view_world_h / scaled_h)
-            .min(1.0);
-        scale *= fit_scale;
-    }
-
-    for (mut rings, fill_rule) in shape_rings.into_iter() {
-        for ring in rings.iter_mut() {
-            for p in ring.iter_mut() {
-                p.x = (p.x - min_x) * scale;
-                p.y = (p.y - min_y) * scale;
-            }
-        }
-        if let Some(shape) = GeneralShape::new_svg(rings, fill_rule) {
-            canvas.dataset.shapes.insert(EUId::new(), shape);
-        }
-    }
-
-    canvas.dataset.refresh_svg_cache();
-    canvas.dataset.mark_final_polygon_dirty();
-    canvas.dataset.calc_final_polygon();
     drop(avb);
     update_status_bar(av);
 }

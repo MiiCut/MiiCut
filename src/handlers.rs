@@ -1,24 +1,24 @@
 use crate::app::RefAV;
 use crate::canvas::{CanvasKind, Color};
-use crate::dom::{get_element_height, get_element_width, ShapeType, Tabs};
+use crate::dom::{get_element_height, get_element_width, Tabs};
 use crate::inputs::{ButtonLevel, MouseButton, SystemMouse, UserAction};
 use crate::math::MyError;
 use crate::render::{
     render_draw_view, render_gcode_view, render_machine_view, render_toolpath_view,
 };
-use crate::shape::{GeneralShape, TextFont};
-use crate::shapes::{toolpath_to_plasma_gcode, DataSet, Toolpath};
-use crate::types::EUId;
-use kurbo::Vec2;
+use crate::shape::{GeneralShape, ShapeType};
+use crate::shapes::{toolpath_to_plasma_gcode, Toolpath};
+
 use wasm_bindgen::JsCast;
 use web_sys::{Event, HtmlElement, KeyboardEvent, MouseEvent, WheelEvent, Window};
 
 pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
+    use ShapeType::*;
     let mut avb = av.borrow_mut();
     let is_draw_view = avb.active_canvas == CanvasKind::Draw;
     let mut do_render = false;
     match avb.icon_selected {
-        ShapeType::Arrow => match user_action {
+        Arrow => match user_action {
             UserAction::Move(button, level) => {
                 if level == ButtonLevel::Up {
                     if !is_draw_view {
@@ -37,7 +37,7 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         do_render = true;
                     }
                 } else {
-                    let canvas = avb.get_user_canvas_mut();
+                    let canvas = avb.get_active_canvas_mut();
                     canvas.move_offset();
                     do_render = true;
                 }
@@ -51,12 +51,12 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         let pos = avb.canvases[CanvasKind::Draw.idx()]
                             .get_user_ui()
                             .pointer
-                            .curr;
-                        let constr_circle = {
-                            let dataset = &avb.canvases[CanvasKind::Draw.idx()].dataset;
-                            find_constr_circle_at(dataset, pos)
-                        };
-                        if let Some((eid, current_count)) = constr_circle {
+                            .curr();
+
+                        if let Some((eid, current_count)) = avb.canvases[CanvasKind::Draw.idx()]
+                            .dataset
+                            .find_constr_circle_at(pos)
+                        {
                             if let Some(new_count) =
                                 prompt_constr_circle_vertices(&avb.window, current_count)
                             {
@@ -64,7 +64,7 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                                     .dataset
                                     .get_element_mut(eid)
                                 {
-                                    elem.set_constr_circle_vertices(new_count);
+                                    elem.set_magnets_number(new_count);
                                     do_render = true;
                                 }
                             }
@@ -86,7 +86,7 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                             return Ok(());
                         }
                     }
-                    let canvas = avb.get_user_canvas_mut();
+                    let canvas = avb.get_active_canvas_mut();
                     canvas.dataset.save_elements_positions();
                     if avb.set_element_select_vertex() {
                         do_render = true;
@@ -99,7 +99,7 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                     avb.set_select_elements();
                     do_render = true;
                 } else {
-                    avb.get_user_canvas_mut().save_offset();
+                    avb.get_active_canvas_mut().save_offset();
                 }
             }
             UserAction::ClickUp(button, _) => {
@@ -123,84 +123,90 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                 }
             }
         },
-        ShapeType::Disc
-        | ShapeType::Square
-        | ShapeType::Oblong
-        | ShapeType::ConstrLine
-        | ShapeType::ConstrCircle
-        | ShapeType::Poly
-        | ShapeType::Text => match user_action {
+        Disc
+        | Square
+        | Oblong
+        | Voronoi { .. }
+        | ConstrLine
+        | ConstrCircle { .. }
+        | Poly
+        | Text { .. } => match user_action {
             UserAction::Move(_, _) => {
                 if is_draw_view && avb.element_on_creation.is_some() {
                     do_render = true;
                 }
             }
-            UserAction::ClickDown(MouseButton::Left, clicks) => {
+            UserAction::ClickDown(MouseButton::Left, _) => {
                 if !is_draw_view {
                     return Ok(());
                 }
-                let element_on_creation = avb.element_on_creation.clone();
-                let point = {
-                    let canvas = avb.get_user_canvas_mut();
-                    canvas.get_user_ui().pointer.curr
-                };
-                if let Some((cs, vs)) = element_on_creation {
+                if let Some((cs, mut vs)) = avb.element_on_creation.clone() {
+                    vs.push(avb.get_active_canvas().get_user_ui().pointer.curr());
+                    let canvas = avb.get_active_canvas_mut();
+                    let mut finished = false;
                     match cs {
-                        ShapeType::Disc
-                        | ShapeType::Square
-                        | ShapeType::Oblong
-                        | ShapeType::ConstrLine
-                        | ShapeType::ConstrCircle
-                        | ShapeType::Text => {
-                            if vs.len() == 1 {
-                                let mut vs = vs.clone();
-                                vs.push(point);
-                                if let Some(mut e) = if cs == ShapeType::Text {
-                                    GeneralShape::new_text(
-                                        "TEXT".to_string(),
-                                        TextFont::Stencilia,
-                                        vs[0],
-                                        vs[1],
-                                    )
-                                } else {
-                                    GeneralShape::new(cs, &vs)
-                                } {
-                                    if cs == ShapeType::Text {
-                                        e.fit_text_bbox_width_to_content();
-                                    }
-                                    let canvas = avb.get_user_canvas_mut();
-                                    canvas.dataset.push_element(e);
-                                }
+                        ShapeType::Disc => {
+                            if let Some(e) = GeneralShape::new_shape_disc(vs[0], vs[1], 0) {
+                                let eid = canvas.dataset.push_element(e);
+                                canvas.dataset.select_only(eid);
+                                finished = true;
                             }
-                            avb.element_on_creation = None;
-                            avb.go_to_arrow_tool();
+                        }
+                        ShapeType::Square => {
+                            if let Some(e) = GeneralShape::new_shape_rectangle(vs[0], vs[1], 0) {
+                                let eid = canvas.dataset.push_element(e);
+                                canvas.dataset.select_only(eid);
+                                finished = true;
+                            }
+                        }
+                        ShapeType::Oblong => {
+                            if let Some(e) = GeneralShape::new_shape_oblong(vs[0], vs[1], 0) {
+                                let eid = canvas.dataset.push_element(e);
+                                canvas.dataset.select_only(eid);
+                                finished = true;
+                            }
+                        }
+                        ShapeType::Voronoi { .. } => {
+                            if let Some(e) = GeneralShape::new_shape_voronoi(vs[0], vs[1], 0) {
+                                let eid = canvas.dataset.push_element(e);
+                                canvas.dataset.select_only(eid);
+                                finished = true;
+                            }
+                        }
+                        ShapeType::ConstrLine { .. } => {
+                            if let Some(e) = GeneralShape::new_shape_constr_line(vs[0], vs[1], 0) {
+                                let eid = canvas.dataset.push_element(e);
+                                canvas.dataset.select_only(eid);
+                                finished = true;
+                            }
+                        }
+                        ShapeType::ConstrCircle { .. } => {
+                            if let Some(e) = GeneralShape::new_shape_constr_circle(vs[0], vs[1], 0)
+                            {
+                                let eid = canvas.dataset.push_element(e);
+                                canvas.dataset.select_only(eid);
+                                finished = true;
+                            }
+                        }
+                        ShapeType::Text { .. } => {
+                            if let Some(e) = GeneralShape::new_shape_text(vs[0], vs[1], 0) {
+                                let eid = canvas.dataset.push_element(e);
+                                canvas.dataset.select_only(eid);
+                                finished = true;
+                            }
                         }
                         ShapeType::Poly => {
-                            if vs.first().is_some() {
-                                if clicks == 2 {
-                                    if let Some(e) = GeneralShape::new(cs, &vs) {
-                                        let canvas = avb.get_user_canvas_mut();
-                                        canvas.dataset.push_element(e);
-                                        avb.element_on_creation = None;
-                                        avb.go_to_arrow_tool();
-                                    } else {
-                                        log!("Error creating element: {:?}", cs);
-                                    }
-                                } else {
-                                    let mut vs = vs.clone();
-                                    vs.push(point);
-                                    avb.element_on_creation = Some((cs, vs));
-                                }
-                            } else {
-                                let mut vs = vs.clone();
-                                vs.push(point);
-                                avb.element_on_creation = Some((cs, vs));
-                            }
+                            avb.element_on_creation = Some((cs, vs));
                         }
                         _ => {}
                     }
+                    if finished {
+                        avb.element_on_creation = None;
+                        avb.go_to_arrow_tool();
+                    }
                 } else {
-                    avb.element_on_creation = Some((avb.icon_selected, vec![point]));
+                    let v1 = avb.get_active_canvas().get_user_ui().pointer.curr();
+                    avb.element_on_creation = Some((avb.icon_selected, vec![v1]));
                 }
                 do_render = true;
             }
@@ -420,7 +426,10 @@ pub(crate) fn _cnc_send(av: RefAV, cmd: String) {
 pub(crate) fn resize_canvases(av: RefAV) {
     let mut avb = av.borrow_mut();
 
-    let draw_width = get_element_width(&avb.left_panel) as u32;
+    let mut draw_width = get_element_width(&avb.left_panel) as u32;
+    if matches!(avb.active_view, Tabs::Draw) {
+        draw_width = draw_width.saturating_add(get_element_width(&avb.shapes_panel) as u32);
+    }
     let draw_height = get_element_height(&avb.top_menu) as u32;
     let width = avb.window.inner_width().unwrap().as_f64().unwrap() as u32;
     let height = avb.window.inner_height().unwrap().as_f64().unwrap() as u32;
@@ -577,6 +586,7 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
     let gcode = avb.document.get_element_by_id("view-gcode");
     let machine = avb.document.get_element_by_id("view-machine");
     let left_panel = avb.document.get_element_by_id("left-panel");
+    let shapes_panel = avb.document.get_element_by_id("shapes-panel");
     let file_menu = avb.document.get_element_by_id("file-menu");
 
     let set_active = |el: &Option<web_sys::Element>, active: bool| {
@@ -615,6 +625,16 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
             }
             Tabs::Machine => {}
         }
+        if let Ok(panel) = panel.clone().dyn_into::<web_sys::HtmlElement>() {
+            if matches!(selected, Tabs::Draw) {
+                let _ = panel.style().set_property("display", "flex");
+            } else {
+                let _ = panel.style().set_property("display", "none");
+            }
+        }
+    }
+
+    if let Some(panel) = shapes_panel.as_ref() {
         if let Ok(panel) = panel.clone().dyn_into::<web_sys::HtmlElement>() {
             if matches!(selected, Tabs::Draw) {
                 let _ = panel.style().set_property("display", "flex");
@@ -730,30 +750,6 @@ fn render_active_view(av: RefAV) {
     }
 }
 
-fn find_constr_circle_at(dataset: &DataSet, pos: Vec2) -> Option<(EUId, usize)> {
-    dataset
-        .shapes
-        .iter()
-        .filter_map(|(eid, elem)| {
-            if elem.get_shape_type() != ShapeType::ConstrCircle || !elem.contains(pos) {
-                return None;
-            }
-            let vertices = elem.get_vertices();
-            if vertices.len() < 2 {
-                return None;
-            }
-            let center = vertices.val(0).curr;
-            let edge = vertices.val(1).curr;
-            let radius = (edge - center).hypot();
-            let distance = (pos - center).hypot();
-            let delta = (distance - radius).abs();
-            let count = elem.constr_circle_vertices().unwrap_or(3);
-            Some((*eid, delta, count))
-        })
-        .min_by(|(_, a_delta, _), (_, b_delta, _)| a_delta.total_cmp(b_delta))
-        .map(|(eid, _, count)| (eid, count))
-}
-
 fn prompt_constr_circle_vertices(window: &Window, current: usize) -> Option<usize> {
     let default_value = format!("{current}");
     let input = window
@@ -778,8 +774,9 @@ fn icon_tooltip(icon: ShapeType) -> &'static str {
         ShapeType::Poly => "Polygon",
         ShapeType::Text => "Text",
         ShapeType::Svg => "SVG",
+        ShapeType::Voronoi => "Voronoi",
         ShapeType::ConstrLine => "Construction Line",
-        ShapeType::ConstrCircle => "Construction Circle",
+        ShapeType::ConstrCircle { .. } => "Construction Circle",
     }
 }
 

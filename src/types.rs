@@ -1,11 +1,9 @@
 use crate::math::{fillet_at_apex, ApexType, EPSILON};
 use kurbo::Vec2;
-use std::cmp::{max, min};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
+use std::hash::Hash;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug, Clone)]
@@ -158,7 +156,7 @@ impl<K: PartialEq + Clone + Debug> VecRing<K> {
             let c = &self.vec[ip1].1;
 
             let apex = b
-                .rounded
+                .get_radius()
                 .and_then(|r| fillet_at_apex(a.curr, b.curr, c.curr, r as f64))
                 .map(|(s, center, e)| ApexType::Arc { s, c: center, e })
                 .unwrap_or(ApexType::Vertex { a: b.curr });
@@ -193,24 +191,81 @@ impl Minimum {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ValuePropertyKind {
+    Radius,
+    Bind { eid: EUId, vid: VUId },
+}
+
+#[derive(Debug, Clone)]
+pub enum ValueProperty {
+    Radius {
+        value: Option<u32>,
+        last_value: Option<u32>,
+    },
+    Bind {
+        eid: EUId,
+        vid: VUId,
+    },
+}
+impl ValueProperty {
+    pub fn as_radius(&self) -> Option<(Option<u32>, Option<u32>)> {
+        match self {
+            ValueProperty::Radius { value, last_value } => Some((*value, *last_value)),
+            _ => None,
+        }
+    }
+    pub fn as_radius_mut(&mut self) -> Option<(&mut Option<u32>, &mut Option<u32>)> {
+        match self {
+            ValueProperty::Radius { value, last_value } => Some((value, last_value)),
+            _ => None,
+        }
+    }
+
+    pub fn as_bind(&self) -> Option<(EUId, VUId)> {
+        match self {
+            ValueProperty::Bind { eid, vid } => Some((*eid, *vid)),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Value {
-    pub rounded: Option<u32>,
-    pub last_rounded: Option<u32>,
-    pub saved: Vec2,
-    pub last: Vec2,
-    pub curr: Vec2,
-    pub bind: HashSet<(EUId, VUId)>,
+    properties: HashMap<ValuePropertyKind, ValueProperty>,
+    saved: Vec2,
+    curr: Vec2,
 }
 impl Value {
     pub fn new(value: Vec2) -> Self {
+        let mut properties = HashMap::new();
+        properties.insert(
+            ValuePropertyKind::Radius,
+            ValueProperty::Radius {
+                value: None,
+                last_value: None,
+            },
+        );
         Self {
-            rounded: None,
-            last_rounded: None,
+            properties,
             saved: value,
-            last: value,
             curr: value,
-            bind: HashSet::new(),
+        }
+    }
+    pub fn new_from_coords(x: f64, y: f64) -> Self {
+        let mut properties = HashMap::new();
+        properties.insert(
+            ValuePropertyKind::Radius,
+            ValueProperty::Radius {
+                value: None,
+                last_value: None,
+            },
+        );
+        let value = Vec2::new(x, y);
+        Self {
+            properties,
+            saved: value,
+            curr: value,
         }
     }
     pub fn save(&mut self) {
@@ -219,20 +274,92 @@ impl Value {
     pub fn add(&mut self, value: Vec2) {
         self.curr = self.saved + value;
     }
-    pub fn set(&mut self, value: Vec2) {
+
+    pub fn change_apex_type(&mut self) {
+        if let Some(ValueProperty::Radius {
+            value: radius,
+            last_value: last_radius,
+        }) = self.properties.get_mut(&ValuePropertyKind::Radius)
+        {
+            if radius.is_none() {
+                if last_radius.is_none() {
+                    *radius = Some(10);
+                } else {
+                    *radius = *last_radius;
+                }
+            } else {
+                *last_radius = *radius;
+                *radius = None;
+            }
+        }
+    }
+
+    pub fn curr(&self) -> Vec2 {
+        self.curr
+    }
+    pub fn set_curr(&mut self, value: Vec2) {
         self.curr = value;
     }
-    pub fn change_apex_type(&mut self) {
-        if self.rounded.is_none() {
-            if self.last_rounded.is_none() {
-                self.rounded = Some(10);
-            } else {
-                self.rounded = self.last_rounded;
-            }
+    pub fn saved(&self) -> Vec2 {
+        self.saved
+    }
+    pub fn set_saved(&mut self, value: Vec2) {
+        self.saved = value;
+    }
+    pub fn set_saved_x(&mut self, x: f64) {
+        self.saved.x = x;
+    }
+    pub fn set_saved_y(&mut self, y: f64) {
+        self.saved.y = y;
+    }
+    pub fn get_radius(&self) -> Option<u32> {
+        if let Some(ValueProperty::Radius { value, .. }) =
+            self.properties.get(&ValuePropertyKind::Radius)
+        {
+            *value
         } else {
-            self.last_rounded = self.rounded;
-            self.rounded = None;
+            None
         }
+    }
+    pub fn get_binds(&self) -> Vec<(EUId, VUId)> {
+        let mut out = Vec::new();
+        for (key, prop) in &self.properties {
+            if let ValuePropertyKind::Bind { .. } = key {
+                if let Some((eid, vid)) = prop.as_bind() {
+                    out.push((eid, vid));
+                }
+            }
+        }
+        out
+    }
+    pub fn get_properties(&self) -> &HashMap<ValuePropertyKind, ValueProperty> {
+        &self.properties
+    }
+    pub fn get_properties_mut(&mut self) -> &mut HashMap<ValuePropertyKind, ValueProperty> {
+        &mut self.properties
+    }
+    pub fn property_remove(&mut self, key: &ValuePropertyKind) {
+        self.properties.remove(key);
+    }
+    pub fn property_remove_all_binds(&mut self) {
+        let bind_keys: Vec<ValuePropertyKind> = self
+            .properties
+            .keys()
+            .filter_map(|k| match k {
+                ValuePropertyKind::Bind { .. } => Some(k.clone()),
+                _ => None,
+            })
+            .collect();
+        for key in bind_keys {
+            self.properties.remove(&key);
+        }
+    }
+    pub fn property_insert_bind(&mut self, key: ValuePropertyKind) {
+        let value = match key {
+            ValuePropertyKind::Bind { eid, vid } => ValueProperty::Bind { eid, vid },
+            _ => return,
+        };
+        self.properties.insert(key, value);
     }
 }
 
@@ -353,82 +480,67 @@ impl SegBundle {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Binding<T: Copy + Clone + PartialEq + Ord + Hash> {
-    bind: HashSet<Couple<T>>,
-}
-impl<T: Copy + Clone + PartialEq + Ord + Hash> Binding<T> {
-    pub fn new() -> Self {
-        Self {
-            bind: HashSet::new(),
-        }
-    }
-    pub fn contains(&self, elem: T) -> bool {
-        self.bind.iter().any(|couple| couple.contains(&elem))
-    }
-    pub fn get_other(&self, elem: T) -> Option<T> {
-        self.bind
-            .iter()
-            .find(|couple| couple.contains(&elem))
-            .map(|couple| if couple.0 == elem { couple.1 } else { couple.0 })
-    }
-    // pub fn group_by_first_element(&self) -> Vec<HashSet<Couple<T>>> {
-    //     let mut grouped: HashMap<T, HashSet<Couple<T>>> = HashMap::new();
+// #[derive(Clone, Debug)]
+// pub struct Binding<T: Copy + Clone + PartialEq + Ord + Hash> {
+//     bind: HashSet<Couple<T>>,
+// }
+// impl<T: Copy + Clone + PartialEq + Ord + Hash> Binding<T> {
+//     pub fn new() -> Self {
+//         Self {
+//             bind: HashSet::new(),
+//         }
+//     }
+//     pub fn contains(&self, elem: T) -> bool {
+//         self.bind.iter().any(|couple| couple.contains(&elem))
+//     }
+//     pub fn get_other(&self, elem: T) -> Option<T> {
+//         self.bind
+//             .iter()
+//             .find(|couple| couple.contains(&elem))
+//             .map(|couple| if couple.0 == elem { couple.1 } else { couple.0 })
+//     }
+// }
+// impl<T> Deref for Binding<T>
+// where
+//     T: Copy + Clone + PartialEq + Ord + Hash,
+// {
+//     type Target = HashSet<Couple<T>>;
 
-    //     // Group the couples by their first element
-    //     for couple in &self.bind {
-    //         let group_key = couple.0; // Group by the first element (t1)
-    //         grouped
-    //             .entry(group_key)
-    //             .or_insert_with(HashSet::new)
-    //             .insert(*couple);
-    //     }
+//     fn deref(&self) -> &Self::Target {
+//         &self.bind
+//     }
+// }
+// impl<T> DerefMut for Binding<T>
+// where
+//     T: Copy + Clone + PartialEq + Ord + Hash,
+// {
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         &mut self.bind
+//     }
+// }
 
-    //     // Extract all grouped sets into a vector
-    //     grouped.into_iter().map(|(_, group)| group).collect()
-    // }
-}
-impl<T> Deref for Binding<T>
-where
-    T: Copy + Clone + PartialEq + Ord + Hash,
-{
-    type Target = HashSet<Couple<T>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.bind
-    }
-}
-impl<T> DerefMut for Binding<T>
-where
-    T: Copy + Clone + PartialEq + Ord + Hash,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.bind
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Couple<T: Copy + Clone + PartialEq + Hash + Ord>(pub T, pub T);
-impl<T: Copy + Clone + Hash + PartialEq + Ord> Couple<T> {
-    pub fn contains(&self, elem: &T) -> bool {
-        self.0 == *elem || self.1 == *elem
-    }
-}
-impl<T: Copy + Clone + PartialEq + Ord + Hash> PartialEq for Couple<T> {
-    fn eq(&self, other: &Self) -> bool {
-        (self.0 == other.0 && self.1 == other.1) || (self.0 == other.1 && self.1 == other.0)
-    }
-}
-impl<T: Copy + Clone + PartialEq + Ord + Hash> Eq for Couple<T> {}
-impl<T: Copy + Clone + PartialEq + Ord + Hash> Hash for Couple<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        // sort the two IDs so (a,b) and (b,a) become the same pair
-        let a = min(self.0, self.1);
-        let b = max(self.0, self.1);
-        a.hash(state);
-        b.hash(state);
-    }
-}
+// #[derive(Copy, Clone, Debug)]
+// pub struct Couple<T: Copy + Clone + PartialEq + Hash + Ord>(pub T, pub T);
+// impl<T: Copy + Clone + Hash + PartialEq + Ord> Couple<T> {
+//     pub fn contains(&self, elem: &T) -> bool {
+//         self.0 == *elem || self.1 == *elem
+//     }
+// }
+// impl<T: Copy + Clone + PartialEq + Ord + Hash> PartialEq for Couple<T> {
+//     fn eq(&self, other: &Self) -> bool {
+//         (self.0 == other.0 && self.1 == other.1) || (self.0 == other.1 && self.1 == other.0)
+//     }
+// }
+// impl<T: Copy + Clone + PartialEq + Ord + Hash> Eq for Couple<T> {}
+// impl<T: Copy + Clone + PartialEq + Ord + Hash> Hash for Couple<T> {
+//     fn hash<H: Hasher>(&self, state: &mut H) {
+//         // sort the two IDs so (a,b) and (b,a) become the same pair
+//         let a = min(self.0, self.1);
+//         let b = max(self.0, self.1);
+//         a.hash(state);
+//         b.hash(state);
+//     }
+// }
 
 static COUNTER_VALUE: AtomicUsize = AtomicUsize::new(0);
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

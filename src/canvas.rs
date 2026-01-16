@@ -1,26 +1,17 @@
-use std::mem;
-
-// #![cfg(not(test))]
-// A macro to provide `println!(..)`-style syntax for `console.log` logging.
-// macro_rules! log {
-//     ( $( $t:tt )* ) => {
-//         web_sys::console::log_1(&format!( $( $t )* ).into());
-//     }
-// }
 use crate::{
     clipboard::Clipboard,
     dimensions::{dim_hv, dim_radius},
-    dom::ShapeType,
     inputs::{SystemMouse, UserAction, UserUI},
     math::*,
     prefab::*,
-    shape::{GeneralShape, SvgFillRule},
+    shape::{GeneralShape, ShapeProperty, ShapePropertyKind, ShapeType, SvgFillRule},
     shapes::DataSet,
-    types::{Binding, Couple, EUId, SegBundle, VUId},
+    types::{EUId, SegBundle, VUId, Value, ValueProperty, ValuePropertyKind},
     undoredo::UndoRedo,
 };
 use js_sys::Array;
 use kurbo::{BezPath, PathEl, Point, Rect, Size, Vec2};
+use std::mem;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CanvasRenderingContext2d, CanvasWindingRule, HtmlCanvasElement, MouseEvent};
 
@@ -376,50 +367,6 @@ impl Canvas {
             undo_redo: UndoRedo::new(),
         })
     }
-    // pub fn draw_grid_and_rules(&mut self) {
-    //     self.ctx.clear_rect(
-    //         0.,
-    //         0.,
-    //         self.canvas.width() as f64,
-    //         self.canvas.height() as f64,
-    //     );
-    //     // Rules
-    //     let (path, pattern, colors, texts) = self.grid_rules.draw_rules(
-    //         self.get_size(),
-    //         self.get_grid_size(),
-    //         self.offset,
-    //         self.scale,
-    //     );
-    //     self.draw_path(
-    //         &path,
-    //         pattern,
-    //         colors.fill_color,
-    //         colors.stroke_color,
-    //         texts,
-    //     );
-    //     // Primary grid
-    //     let (path, pattern, colors, texts) = self
-    //         .grid_rules
-    //         .draw_grid_primary(self.get_size(), self.get_grid_size());
-    //     self.draw_path(
-    //         &path,
-    //         pattern,
-    //         colors.fill_color,
-    //         colors.stroke_color,
-    //         texts,
-    //     );
-    //     // Secondary grid
-    //     let (path, pattern, colors, texts) = self
-    //         .grid_rules
-    //         .draw_grid_secondary(self.get_size(), self.get_grid_size());
-    //     self.draw_path(
-    //         &path,
-    //         pattern,
-    //         colors.fill_color,
-    //         colors.stroke_color,
-    //         texts,
-    //     );
-    // }
 
     pub fn get_canvas(&self) -> &HtmlCanvasElement {
         &self.canvas
@@ -453,7 +400,7 @@ impl Canvas {
         self.offset = offset
     }
     pub fn move_offset(&mut self) {
-        let delta = self.user_ui.pointer.curr - self.user_ui.pointer.saved;
+        let delta = self.user_ui.pointer.curr() - self.user_ui.pointer.saved();
         self.offset = to_canvas(delta, self.scale, self.offset);
     }
     pub fn save_offset(&mut self) {
@@ -545,15 +492,33 @@ impl Canvas {
                 .map(|e| {
                     !matches!(
                         e.get_shape_type(),
-                        ShapeType::ConstrLine | ShapeType::ConstrCircle
+                        ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
                     )
                 })
                 .unwrap_or(false);
+
             let moved = self
                 .dataset
                 .get_element_mut(last_eid)
                 .map(|e| e.move_vertex(last_vid, &self.user_ui))
                 .unwrap_or(false);
+
+            if let Some(e) = self.dataset.get_element_mut(last_eid) {
+                if let ShapeType::ConstrCircle = e.get_shape_type() {
+                    if let Some(ShapeProperty::Magnets { value: magnets, .. }) =
+                        e.get_properties().get(&ShapePropertyKind::Magnets).cloned()
+                    {
+                        let vs = e.get_vertices_mut();
+                        let v1 = vs.val(0).curr();
+                        let v2 = vs.val(1).curr();
+                        let vs_magnets = get_magnets_vertices(v1, v2, magnets);
+                        for (idx, (_, v)) in e.get_vertices_mut().iter_mut().skip(2).enumerate() {
+                            *v = Value::new(vs_magnets[idx]);
+                        }
+                    }
+                }
+            }
+
             if moved && affects_final {
                 self.dataset.mark_final_polygon_dirty();
             }
@@ -924,8 +889,8 @@ impl Canvas {
     }
     pub fn draw_dimensions(&mut self, e: &GeneralShape) {
         match e.get_shape_type() {
-            ShapeType::Disc | ShapeType::ConstrCircle => {
-                let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
+            ShapeType::Disc | ShapeType::ConstrCircle { .. } => {
+                let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 if v.len() >= 2 {
                     if let Some(seg) = SegBundle::new(v[0], v[1]) {
                         // Draw the radius segment
@@ -942,7 +907,7 @@ impl Canvas {
                 }
             }
             ShapeType::ConstrLine => {
-                let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
+                let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 if v.len() == 2 {
                     if let Some(seg) = SegBundle::new(v[0], v[1]) {
                         let (path, pattern, colors, text) = dim_hv(seg, self.get_canvas_infos());
@@ -956,8 +921,8 @@ impl Canvas {
                     }
                 }
             }
-            ShapeType::Square | ShapeType::Text | ShapeType::Svg => {
-                let points: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
+            ShapeType::Square | ShapeType::Text | ShapeType::Svg | ShapeType::Voronoi => {
+                let points: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 let rotation = e.get_rotation();
                 for (idx, (v1, v2)) in points
                     .iter()
@@ -1001,7 +966,7 @@ impl Canvas {
                 }
             }
             ShapeType::Oblong => {
-                let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr).collect();
+                let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 if v.len() == 3 {
                     if let Some(seg1) = SegBundle::new(v[0], v[1]) {
                         // Draw the main segment
@@ -1034,7 +999,7 @@ impl Canvas {
                     .get_vertices()
                     .iter()
                     .zip(e.get_vertices().iter().cycle().skip(1))
-                    .map(|(v1, v2)| (v1.1.curr, v2.1.curr))
+                    .map(|(v1, v2)| (v1.1.curr(), v2.1.curr()))
                 {
                     if let Some(seg) = SegBundle::new(v1, v2) {
                         let (path, pattern, colors, text) = dim_hv(seg, self.get_canvas_infos());
@@ -1054,7 +1019,7 @@ impl Canvas {
 
     pub fn draw_vs(&mut self, e: &GeneralShape) {
         for (vid, vertex) in e.get_vertices().iter() {
-            let pos = e.vertex_display_pos(vertex.curr);
+            let pos = e.vertex_display_pos(vertex.curr());
             let vid_sel = self
                 .dataset
                 .vertices_selected
@@ -1086,28 +1051,66 @@ impl Canvas {
             );
         }
     }
-    pub fn draw_vertices(&mut self) -> Binding<(EUId, VUId)> {
-        let mut binds = Binding::<(EUId, VUId)>::new();
-
+    pub fn draw_vertices(&mut self) {
         // move shapes out of self.dataset temporarily
         let shapes = mem::take(&mut self.dataset.shapes);
 
-        for (eid, e) in shapes.iter() {
+        for (_, e) in shapes.iter() {
             self.draw_vs(e);
             self.draw_dimensions(e);
-            for (vid, vertex) in e.get_vertices().iter() {
-                binds.extend(
-                    vertex
-                        .bind
-                        .iter()
-                        .map(|(eid2, vid2)| Couple((*eid, *vid), (*eid2, *vid2))),
-                );
-            }
         }
         // put back
         self.dataset.shapes = shapes;
-        binds
     }
+    pub fn draw_bindings(&mut self) {
+        // move shapes out of self.dataset temporarily
+        let shapes = mem::take(&mut self.dataset.shapes);
+        for (_, source_e) in shapes.iter() {
+            for (_, source_v) in source_e.get_vertices().iter() {
+                let source_binds: Vec<(EUId, VUId)> = source_v
+                    .get_properties()
+                    .iter()
+                    .filter_map(|(k, v)| match (k, v) {
+                        (
+                            ValuePropertyKind::Bind { .. },
+                            ValueProperty::Bind {
+                                eid: dest_eid,
+                                vid: dest_vid,
+                            },
+                        ) => Some((*dest_eid, *dest_vid)),
+                        _ => None,
+                    })
+                    .collect();
+                if source_binds.is_empty() {
+                    continue;
+                }
+                for (dest_eid, dest_vid) in source_binds.iter() {
+                    log!("Drawing binding to {:?}  {:?}", dest_eid, dest_vid);
+                    if let Some(dest_e) = self.dataset.get_element(*dest_eid) {
+                        if let Some(dest_v) = dest_e.get_vertices().val_from_key(*dest_vid) {
+                            let start = source_e.vertex_display_pos(source_v.curr());
+                            let end = dest_e.vertex_display_pos(dest_v.curr());
+                            if let Some(seg) = SegBundle::new(start, end) {
+                                let (path, pattern, colors, text) =
+                                    dim_hv(seg, self.get_canvas_infos());
+                                self.draw_path(
+                                    &path,
+                                    pattern,
+                                    colors.fill_color,
+                                    colors.stroke_color,
+                                    text,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // put back shapes
+        self.dataset.shapes = shapes;
+    }
+
     pub fn draw_paths_creation(&mut self, e: &GeneralShape) {
         let stroke_color = get_stroke_color(false, false);
         let path = e.get_bezpath();
@@ -1126,9 +1129,10 @@ impl Canvas {
         for (eid, e) in self.dataset.shapes.iter() {
             let is_selected = self.dataset.shapes_selected.contains(eid);
             let is_highlighted = self.dataset.shapes_highlighted.contains(eid);
+            let is_voronoi = e.get_shape_type() == ShapeType::Voronoi;
             let is_construction = matches!(
                 e.get_shape_type(),
-                ShapeType::ConstrLine | ShapeType::ConstrCircle
+                ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
             );
             let stroke_color = if !is_selected && !is_highlighted {
                 if is_construction {
@@ -1155,8 +1159,23 @@ impl Canvas {
             } else {
                 Pattern::Point
             };
-            if e.get_shape_type() == ShapeType::Svg {
-                if svg_bbox_only {
+            if e.get_shape_type() == ShapeType::Text {
+                if let Some(paths) = e.get_text_paths() {
+                    self.draw_svg_paths(
+                        paths,
+                        pattern,
+                        fill_color,
+                        stroke_color,
+                        SvgFillRule::NonZero,
+                    );
+                } else {
+                    let path = e.get_bezpath();
+                    self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
+                }
+                continue;
+            }
+            if matches!(e.get_shape_type(), ShapeType::Svg | ShapeType::Voronoi) {
+                if svg_bbox_only && !is_voronoi {
                     let path = e.get_bezpath();
                     self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
                     continue;

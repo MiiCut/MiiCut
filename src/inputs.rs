@@ -79,7 +79,7 @@ impl UserUI {
 
         // Pointer update
         self.pointer
-            .set((self.draw_pos / self.snap.linear()).round() * self.snap.linear());
+            .set_curr((self.draw_pos / self.snap.linear()).round() * self.snap.linear());
 
         match sys_mouse {
             SystemMouse::Down(clicks) => {

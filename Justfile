@@ -6,8 +6,8 @@ default:
     just --list
 
 # -------- Formatage --------
-fmt:
-    cd src && cargo fmt
+# fmt:
+#     cd src && cargo fmt
 
 # -------- Build --------
 build:
@@ -34,12 +34,12 @@ clippy:
 # -------- Fix (SCOPÉ PAR CRATE) --------
 fix package:
     cd src && cargo fmt
-    cd src && cargo clippy -p {{package}} --fix --allow-dirty --allow-staged
+    cd src && (cargo clippy -p {{package}} --fix --allow-dirty --allow-staged || cargo clippy -p {{package}})
 
 # -------- Fix global (fallback) --------
-fix-all:
-    cd src && cargo fmt
-    cd src && cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+# fix-all:
+#     cd src && cargo fmt
+#     cd src && (cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged || cargo clippy --all-targets --all-features)
 
 # -------- CI --------
 ci:
