@@ -104,6 +104,6 @@ The application is built and served using a Rust + Trunk workflow.
 ### Build
 
 ```bash
-cargo b --release
+cargo build --release
 trunk serve --release
 ```

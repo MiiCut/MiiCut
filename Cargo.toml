@@ -2,6 +2,12 @@
 name = "MiiCut"
 version = "0.1.0"
 edition = "2021"
+authors = ["Olivier Monnom"]
+license = "MIT"
+description = "All-in-one 2D CAD/CAM web app for cutting workflows with SVG import/export, toolpath and G-code preview."
+homepage = "https://miicut.github.io/MiiCut/"
+repository = "https://github.com/miicut/MiiCut"
+
 
 [dependencies]
 # kurbo = { git = "https://github.com/linebender/kurbo" }
