@@ -1,8 +1,8 @@
 use crate::inputs::UserUI;
-use crate::math::{geo_multipolygon_to_bez_paths, snap_vertex};
+use crate::math::{geo_multipolygon_to_bez_paths, get_magnets_vertices, snap_vertex, EPSILON};
 use crate::shape::{GeneralShape, Operation, ShapeType};
 use crate::type_vertex::Vertex;
-use crate::types::{EUId, Snap, VUId};
+use crate::types::{EUId, Property, PropertyValue, Snap, VUId};
 use geo::algorithm::unary_union;
 use geo::{BooleanOps, Coord, LineString, MultiPolygon, Polygon};
 use kurbo::{flatten, stroke, BezPath, Cap, Join, PathEl, Shape, Stroke, StrokeOpts, Vec2};
@@ -496,6 +496,7 @@ pub fn toolpath_to_plasma_gcode(tp: &Toolpath, p: &ToolpathParams) -> String {
 #[derive(Debug)]
 pub struct DataSet {
     pub shapes: HashMap<EUId, GeneralShape>,
+    pub grouped_shapes: HashMap<EUId, GeneralShape>,
     pub shapes_selected: HashSet<EUId>,
     pub shapes_highlighted: HashSet<EUId>,
     pub shapes_selector: ShapeSelector,
@@ -511,6 +512,7 @@ impl DataSet {
     pub fn new() -> Self {
         DataSet {
             shapes: HashMap::new(),
+            grouped_shapes: HashMap::new(),
             shapes_selected: HashSet::new(),
             shapes_highlighted: HashSet::new(),
             shapes_selector: ShapeSelector::new(),
@@ -538,6 +540,94 @@ impl DataSet {
             self.final_polygon_dirty = true;
         }
         eid
+    }
+    fn is_groupable_shape(shape: &GeneralShape) -> bool {
+        !matches!(
+            shape.get_shape_type(),
+            ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+        )
+    }
+    fn group_bbox_from_children(&self, children: &[EUId]) -> Option<(Vec2, Vec2)> {
+        let mut min = Vec2::new(f64::INFINITY, f64::INFINITY);
+        let mut max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for eid in children {
+            let shape = self.shapes.get(eid).or_else(|| self.grouped_shapes.get(eid))?;
+            let bbox = shape.get_bezpath().bounding_box();
+            if bbox.is_zero_area() {
+                continue;
+            }
+            min.x = min.x.min(bbox.x0);
+            min.y = min.y.min(bbox.y0);
+            max.x = max.x.max(bbox.x1);
+            max.y = max.y.max(bbox.y1);
+        }
+        if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
+            return None;
+        }
+        Some((min, max))
+    }
+    pub fn group_selected(&mut self) -> Option<EUId> {
+        let selected: Vec<EUId> = self.shapes_selected.iter().copied().collect();
+        if selected.len() < 2 {
+            return None;
+        }
+        let mut children = Vec::new();
+        let mut order = i32::MAX;
+        for eid in selected {
+            let Some(shape) = self.shapes.get(&eid) else {
+                continue;
+            };
+            if !Self::is_groupable_shape(shape) {
+                continue;
+            }
+            order = order.min(shape.get_order());
+            children.push(eid);
+        }
+        if children.len() < 2 {
+            return None;
+        }
+        let (min, max) = self.group_bbox_from_children(&children)?;
+        let group = GeneralShape::new_shape_group(min, max, order, children.clone())?;
+        for eid in &children {
+            if let Some(shape) = self.shapes.remove(eid) {
+                self.grouped_shapes.insert(*eid, shape);
+            }
+        }
+        let group_id = EUId::new();
+        self.shapes.insert(group_id, group);
+        self.shapes_selected.clear();
+        self.shapes_selected.insert(group_id);
+        self.shapes_highlighted.clear();
+        self.vertex_selected = None;
+        self.vertex_highlighted = None;
+        self.final_polygon_dirty = true;
+        Some(group_id)
+    }
+    pub fn ungroup_selected(&mut self) -> Option<Vec<EUId>> {
+        let selected: Vec<EUId> = self.shapes_selected.iter().copied().collect();
+        if selected.len() != 1 {
+            return None;
+        }
+        let group_id = selected[0];
+        let children = self.shapes.get(&group_id)?.get_group_children()?.to_vec();
+        let group = self.shapes.remove(&group_id)?;
+        if !group.is_group() {
+            self.shapes.insert(group_id, group);
+            return None;
+        }
+        let mut restored = Vec::new();
+        for eid in children.iter() {
+            if let Some(child) = self.grouped_shapes.remove(eid) {
+                self.shapes.insert(*eid, child);
+                restored.push(*eid);
+            }
+        }
+        self.shapes_selected = restored.iter().copied().collect();
+        self.shapes_highlighted.clear();
+        self.vertex_selected = None;
+        self.vertex_highlighted = None;
+        self.final_polygon_dirty = true;
+        Some(restored)
     }
     pub fn sync_next_order(&mut self) {
         let mut max_order = -1;
@@ -638,6 +728,13 @@ impl DataSet {
                 }
             }
             if let Some(shape) = removed.as_ref() {
+                if shape.is_group() {
+                    if let Some(children) = shape.get_group_children() {
+                        for child in children {
+                            self.grouped_shapes.remove(child);
+                        }
+                    }
+                }
                 if !matches!(
                     shape.get_shape_type(),
                     ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
@@ -817,6 +914,13 @@ impl DataSet {
                 self.shapes_selector
                     .refresh_selectable_elems(HashSet::new());
                 deleted = true;
+                if shape.is_group() {
+                    if let Some(children) = shape.get_group_children() {
+                        for child in children {
+                            self.grouped_shapes.remove(child);
+                        }
+                    }
+                }
                 if !matches!(
                     shape.get_shape_type(),
                     ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
@@ -859,6 +963,9 @@ impl DataSet {
         for (_, elem) in self.shapes.iter_mut() {
             elem.save_vertices_positions();
         }
+        for (_, elem) in self.grouped_shapes.iter_mut() {
+            elem.save_vertices_positions();
+        }
     }
 
     pub fn move_elements(&mut self, userui: &UserUI) -> bool {
@@ -887,6 +994,18 @@ impl DataSet {
         }
         // Move all selected elements and their binded elements
         for eid in sel_and_bind {
+            let is_group = self
+                .shapes
+                .get(&eid)
+                .map(|shape| shape.is_group())
+                .unwrap_or(false);
+            if is_group {
+                if self.move_group_any(eid, delta).is_some() {
+                    moved = true;
+                    affects_final = true;
+                }
+                continue;
+            }
             if let Some(e) = self.shapes.get_mut(&eid) {
                 e.move_shape(delta);
                 moved = true;
@@ -904,8 +1023,200 @@ impl DataSet {
         moved
     }
 
+    fn move_group_any(&mut self, group_id: EUId, delta: Vec2) -> Option<()> {
+        let (children, in_shapes) = if let Some(group) = self.shapes.get(&group_id) {
+            (group.get_group_children().unwrap_or_default().to_vec(), true)
+        } else {
+            let group = self.grouped_shapes.get(&group_id)?;
+            (group.get_group_children().unwrap_or_default().to_vec(), false)
+        };
+        for child_id in children {
+            let is_group = self
+                .grouped_shapes
+                .get(&child_id)
+                .map(GeneralShape::is_group)
+                .unwrap_or(false);
+            if is_group {
+                let _ = self.move_group_any(child_id, delta);
+                continue;
+            }
+            if let Some(child) = self.grouped_shapes.get_mut(&child_id) {
+                child.move_shape(delta);
+            }
+        }
+        if in_shapes {
+            self.shapes.get_mut(&group_id)?.move_shape(delta);
+        } else {
+            self.grouped_shapes.get_mut(&group_id)?.move_shape(delta);
+        }
+        Some(())
+    }
+
+    fn apply_uniform_scale_to_shape(shape: &mut GeneralShape, origin: Vec2, scale: f64) {
+        let shape_type = shape.get_shape_type();
+        if matches!(shape_type, ShapeType::Disc | ShapeType::ConstrCircle { .. }) {
+            if shape.get_vertices().len() < 2 {
+                return;
+            }
+            let center_saved = shape.get_vertices().val(0).saved();
+            let edge_saved = shape.get_vertices().val(1).saved();
+            let mut dir = edge_saved - center_saved;
+            if dir.hypot() < EPSILON {
+                dir = Vec2::new(1.0, 0.0);
+            } else {
+                dir = dir.normalize();
+            }
+            let new_center = origin + (center_saved - origin) * scale;
+            let new_edge = new_center + dir * (edge_saved - center_saved).hypot() * scale;
+            let v0 = shape.get_vertices_mut().val_mut(0);
+            v0.set_curr(new_center);
+            let v1 = shape.get_vertices_mut().val_mut(1);
+            v1.set_curr(new_edge);
+            if matches!(shape_type, ShapeType::ConstrCircle { .. }) {
+                if let Some(PropertyValue::Magnets { value, .. }) =
+                    shape.get_properties().get(&Property::Magnets).cloned()
+                {
+                    let count = value.curr();
+                    let v1 = shape.get_vertices().val(0).curr();
+                    let v2 = shape.get_vertices().val(1).curr();
+                    let vs_magnets = get_magnets_vertices(v1, v2, count);
+                    for (idx, (_, v)) in shape.get_vertices_mut().iter_mut().skip(2).enumerate() {
+                        v.set_curr(vs_magnets[idx]);
+                    }
+                }
+            }
+        } else {
+            for (_, vertex) in shape.get_vertices_mut().iter_mut() {
+                let saved = vertex.saved();
+                let new_pos = origin + (saved - origin) * scale;
+                vertex.set_curr(new_pos);
+            }
+        }
+        if let Some(PropertyValue::Scale { value, .. }) =
+            shape.get_properties_mut().get_mut(&Property::Scale)
+        {
+            let new_value = value.curr() * scale;
+            value.set_curr(new_value);
+        }
+        shape.update_properties();
+        shape.set_bezpath();
+    }
+
+    fn scale_group_by_factor(&mut self, group_id: EUId, origin: Vec2, scale: f64) -> Option<()> {
+        let children = if let Some(group) = self.shapes.get(&group_id) {
+            group.get_group_children()?.to_vec()
+        } else {
+            let group = self.grouped_shapes.get(&group_id)?;
+            group.get_group_children()?.to_vec()
+        };
+        for child_id in children.iter() {
+            if let Some(child) = self.grouped_shapes.get(child_id) {
+                if child.is_group() {
+                    let _ = self.scale_group_by_factor(*child_id, origin, scale);
+                    continue;
+                }
+            }
+            if let Some(child) = self.grouped_shapes.get_mut(child_id) {
+                Self::apply_uniform_scale_to_shape(child, origin, scale);
+            }
+        }
+        let vertices_saved = if let Some(group) = self.shapes.get(&group_id) {
+            group
+                .get_vertices()
+                .iter()
+                .map(|(_, v)| v.saved())
+                .collect::<Vec<_>>()
+        } else {
+            let group = self.grouped_shapes.get(&group_id)?;
+            group
+                .get_vertices()
+                .iter()
+                .map(|(_, v)| v.saved())
+                .collect::<Vec<_>>()
+        };
+        let group = if let Some(group) = self.shapes.get_mut(&group_id) {
+            group
+        } else {
+            self.grouped_shapes.get_mut(&group_id)?
+        };
+        for (idx, saved) in vertices_saved.iter().enumerate() {
+            let new_pos = origin + (*saved - origin) * scale;
+            let vertex = group.get_vertices_mut().val_mut(idx as i64);
+            vertex.set_curr(new_pos);
+        }
+        if let Some(PropertyValue::Scale { value, .. }) =
+            group.get_properties_mut().get_mut(&Property::Scale)
+        {
+            let new_value = value.curr() * scale;
+            value.set_curr(new_value);
+        }
+        group.update_properties();
+        group.set_bezpath();
+        Some(())
+    }
+
+    pub fn scale_group_by_vertex(&mut self, group_id: EUId, vid: VUId, userui: &UserUI) -> bool {
+        let (opposite_pos, drag_saved) = {
+            let group = match self.shapes.get(&group_id) {
+                Some(group) => group,
+                None => return false,
+            };
+            if !group.is_group() {
+                return false;
+            }
+            let drag_idx = match group.get_vertices().get_idx(&vid) {
+                Some(idx) => idx,
+                None => return false,
+            };
+            let opposite_idx = match drag_idx {
+                0 => 2,
+                1 => 3,
+                2 => 0,
+                3 => 1,
+                _ => return false,
+            };
+            let drag_saved = group.get_vertices().val(drag_idx as i64).saved();
+            let opposite_pos = group.get_vertices().val(opposite_idx as i64).saved();
+            (opposite_pos, drag_saved)
+        };
+
+        let mut delta = userui.pointer.curr() - userui.pointer.saved();
+        if !userui.magnetized {
+            let snap = userui.snap;
+            delta = (delta / snap.linear()).round() * snap.linear();
+        }
+        let new_pos = drag_saved + delta;
+        let dx0 = drag_saved.x - opposite_pos.x;
+        let dy0 = drag_saved.y - opposite_pos.y;
+        let dx1 = new_pos.x - opposite_pos.x;
+        let dy1 = new_pos.y - opposite_pos.y;
+        let sx = if dx0.abs() > EPSILON {
+            dx1 / dx0
+        } else {
+            1.0
+        };
+        let sy = if dy0.abs() > EPSILON {
+            dy1 / dy0
+        } else {
+            1.0
+        };
+        let scale = if dx1.abs() >= dy1.abs() { sx } else { sy };
+        if scale <= 0.0 {
+            return false;
+        }
+
+        let _ = self.scale_group_by_factor(group_id, opposite_pos, scale);
+        self.final_polygon_dirty = true;
+        true
+    }
+
     pub fn refresh_svg_cache(&mut self) {
         for (_, shape) in self.shapes.iter_mut() {
+            if matches!(shape.get_shape_type(), ShapeType::Svg | ShapeType::Voronoi) {
+                shape.set_bezpath();
+            }
+        }
+        for (_, shape) in self.grouped_shapes.iter_mut() {
             if matches!(shape.get_shape_type(), ShapeType::Svg | ShapeType::Voronoi) {
                 shape.set_bezpath();
             }
@@ -957,6 +1268,57 @@ impl DataSet {
         Some(())
     }
 
+    fn calc_group_polygon(&self, children: &[EUId]) -> MultiPolygon<f64> {
+        let mut ordered: Vec<(i32, EUId)> = children
+            .iter()
+            .filter_map(|eid| {
+                self.grouped_shapes
+                    .get(eid)
+                    .map(|shape| (shape.get_order(), *eid))
+            })
+            .collect();
+        ordered.sort_by(|(order_a, eid_a), (order_b, eid_b)| {
+            order_a.cmp(order_b).then_with(|| eid_a.cmp(eid_b))
+        });
+
+        let mut result = MultiPolygon::new(vec![]);
+        for (_, eid) in ordered {
+            let Some(shape) = self.grouped_shapes.get(&eid) else {
+                continue;
+            };
+            let (shape_poly, op) = if shape.is_group() {
+                let children = shape.get_group_children().unwrap_or_default();
+                (self.calc_group_polygon(children), shape.get_operation())
+            } else {
+                let mut polys = Vec::new();
+                for poly in shape.get_polygon().iter() {
+                    polys.push(normalize_polygon_orientation(poly));
+                }
+                (MultiPolygon::new(polys), shape.get_operation())
+            };
+            if shape_poly.0.is_empty() {
+                continue;
+            }
+            result = match op {
+                Operation::Union => {
+                    if result.0.is_empty() {
+                        shape_poly
+                    } else {
+                        result.boolean_op(&shape_poly, geo::OpType::Union)
+                    }
+                }
+                Operation::Difference => {
+                    if result.0.is_empty() {
+                        result
+                    } else {
+                        result.boolean_op(&shape_poly, geo::OpType::Difference)
+                    }
+                }
+            };
+        }
+        result
+    }
+
     pub fn calc_final_polygon(&mut self) {
         if !self.final_polygon_dirty {
             return;
@@ -967,11 +1329,16 @@ impl DataSet {
             let Some(shape) = self.shapes.get(&eid) else {
                 continue;
             };
-            let mut polys = Vec::new();
-            for poly in shape.get_polygon().iter() {
-                polys.push(normalize_polygon_orientation(poly));
-            }
-            let shape_poly = MultiPolygon::new(polys);
+            let shape_poly = if shape.is_group() {
+                let children = shape.get_group_children().unwrap_or_default();
+                self.calc_group_polygon(children)
+            } else {
+                let mut polys = Vec::new();
+                for poly in shape.get_polygon().iter() {
+                    polys.push(normalize_polygon_orientation(poly));
+                }
+                MultiPolygon::new(polys)
+            };
             if shape_poly.0.is_empty() {
                 continue;
             }

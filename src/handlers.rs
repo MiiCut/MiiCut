@@ -502,6 +502,12 @@ pub(crate) fn on_window_keydown(av: RefAV, event: Event) {
                 }
                 do_render = true;
             }
+            "Enter" => {
+                if let Ok(mut avb) = av.try_borrow_mut() {
+                    avb.group_toggle_pressed();
+                }
+                do_render = true;
+            }
             " " => {
                 if let Ok(mut avb) = av.try_borrow_mut() {
                     avb.space_pressed();
@@ -759,6 +765,7 @@ fn icon_tooltip(icon: ShapeType) -> &'static str {
         ShapeType::Text => "Text",
         ShapeType::Svg => "SVG",
         ShapeType::Voronoi => "Voronoi",
+        ShapeType::Group => "Group",
         ShapeType::ConstrLine => "Construction Line",
         ShapeType::ConstrCircle { .. } => "Construction Circle",
     }

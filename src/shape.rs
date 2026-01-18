@@ -129,6 +129,7 @@ pub enum ShapeType {
     Text,
     Svg,
     Voronoi,
+    Group,
     ConstrLine,
     ConstrCircle,
 }
@@ -144,6 +145,7 @@ impl ShapeType {
             Text => "icon-text",
             Svg => "icon-svg",
             Voronoi => "icon-voronoi",
+            Group => "icon-group",
             ConstrLine => "icon-constr-line",
             ConstrCircle => "icon-constr-circle",
         }
@@ -200,6 +202,7 @@ pub struct GeneralShape {
     text_shape_data: Option<TextData>,
     svg_shape_data: Option<SvgData>,
     voronoi_shape_data: Option<SvgData>,
+    group_shape_data: Option<GroupShape>,
 
     bezpath: BezPath,
     polygon: MultiPolygon<f64>,
@@ -223,10 +226,27 @@ impl Clone for GeneralShape {
             text_shape_data: self.text_shape_data.clone(),
             svg_shape_data: self.svg_shape_data.clone(),
             voronoi_shape_data: self.voronoi_shape_data.clone(),
+            group_shape_data: self.group_shape_data.clone(),
             bezpath: self.bezpath.clone(),
             polygon: self.polygon.clone(),
             rotation: self.rotation.clone(),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GroupShape {
+    children: Vec<EUId>,
+}
+impl GroupShape {
+    pub fn new(children: Vec<EUId>) -> Self {
+        Self { children }
+    }
+    pub fn children(&self) -> &[EUId] {
+        &self.children
+    }
+    pub fn set_children(&mut self, children: Vec<EUId>) {
+        self.children = children;
     }
 }
 impl GeneralShape {
@@ -253,7 +273,7 @@ impl GeneralShape {
         self.operation.difference();
     }
 
-    fn bb(v1: Vec2, v2: Vec2) -> Vec<Vertex> {
+    pub(crate) fn bb(v1: Vec2, v2: Vec2) -> Vec<Vertex> {
         let min_x = v1.x.min(v2.x);
         let max_x = v1.x.max(v2.x);
         let min_y = v1.y.min(v2.y);
@@ -298,6 +318,7 @@ impl GeneralShape {
             vs,
             properties,
             order,
+            None,
             None,
             None,
             None,
@@ -374,6 +395,7 @@ impl GeneralShape {
             None,
             None,
             None,
+            None,
             Operation::Union,
             None,
         )
@@ -414,6 +436,7 @@ impl GeneralShape {
             vs,
             properties,
             order,
+            None,
             None,
             None,
             None,
@@ -498,6 +521,7 @@ impl GeneralShape {
             Some(TextData::new(Some(poly))),
             None,
             None,
+            None,
             Operation::Union,
             None,
         )
@@ -543,6 +567,7 @@ impl GeneralShape {
             values,
             properties,
             order,
+            None,
             None,
             None,
             None,
@@ -624,6 +649,7 @@ impl GeneralShape {
             None,
             None,
             Some(voronoi_svg),
+            None,
             Operation::Union,
             None,
         )
@@ -707,6 +733,7 @@ impl GeneralShape {
             order,
             None,
             Some(svg),
+            None,
             None,
             Operation::Union,
             None,
@@ -815,6 +842,72 @@ impl GeneralShape {
             None,
             Some(svg),
             None,
+            None,
+            Operation::Union,
+            None,
+        )
+    }
+    pub fn new_shape_group(v1: Vec2, v2: Vec2, order: i32, children: Vec<EUId>) -> Option<Self> {
+        if v1 == v2 || children.is_empty() {
+            return None;
+        }
+        let vs = GeneralShape::bb(v1, v2);
+
+        use PropertyValue::*;
+        let mut properties = Properties::new();
+        properties.add(
+            Property::BottomLeft,
+            BottomLeft {
+                idx: 0,
+                value: vs[0].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopLeft,
+            TopLeft {
+                idx: 1,
+                value: vs[1].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopRight,
+            TopRight {
+                idx: 2,
+                value: vs[2].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::BottomRight,
+            BottomRight {
+                idx: 3,
+                value: vs[3].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(
+                    Self::DEFAULT_SCALE,
+                    Self::MIN_SCALE,
+                    Self::MAX_SCALE,
+                    Self::SCALE_STEP,
+                ),
+            },
+        );
+
+        GeneralShape::new(
+            ShapeType::Group,
+            vs,
+            properties,
+            order,
+            None,
+            None,
+            None,
+            Some(GroupShape::new(children)),
             Operation::Union,
             None,
         )
@@ -846,6 +939,7 @@ impl GeneralShape {
             vs,
             properties,
             order,
+            None,
             None,
             None,
             None,
@@ -894,6 +988,7 @@ impl GeneralShape {
             None,
             None,
             None,
+            None,
             Operation::Union,
             None,
         )
@@ -907,6 +1002,7 @@ impl GeneralShape {
         text_shape: Option<TextData>,
         svg_shape: Option<SvgData>,
         voronoi_shape: Option<SvgData>,
+        group_shape: Option<GroupShape>,
         operation: Operation,
         shape_name: Option<String>,
     ) -> Option<Self> {
@@ -934,6 +1030,7 @@ impl GeneralShape {
             text_shape_data: text_shape,
             svg_shape_data: svg_shape,
             voronoi_shape_data: voronoi_shape,
+            group_shape_data: group_shape,
 
             bezpath: BezPath::new(),
             polygon: MultiPolygon::new(vec![]),
@@ -1244,6 +1341,7 @@ impl GeneralShape {
                 self.set_bezpath();
                 true
             }
+            ShapeType::Group => false,
 
             ShapeType::Arrow => {
                 // Arrow is not a closed shape, so we don't move it
@@ -1566,6 +1664,17 @@ impl GeneralShape {
     pub fn get_bezpath(&self) -> &BezPath {
         &self.bezpath
     }
+    pub fn is_group(&self) -> bool {
+        matches!(self.shape_type, ShapeType::Group)
+    }
+    pub fn get_group_children(&self) -> Option<&[EUId]> {
+        self.group_shape_data.as_ref().map(GroupShape::children)
+    }
+    pub fn set_group_children(&mut self, children: Vec<EUId>) {
+        if let Some(group) = self.group_shape_data.as_mut() {
+            group.set_children(children);
+        }
+    }
 
     pub fn get_text(&self) -> Option<String> {
         if let Some(PropertyValue::Text { value }) = self.properties.get(&Property::Text) {
@@ -1724,7 +1833,7 @@ impl GeneralShape {
                 }
                 self.bezpath = path;
             }
-            ShapeType::Square => {
+            ShapeType::Square | ShapeType::Group => {
                 let apices = self.vertices.get_apices();
                 self.bezpath = bezpath_from_apices(&apices);
             }

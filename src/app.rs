@@ -435,6 +435,79 @@ impl AppVars {
             }
         }
     }
+    pub(crate) fn group_toggle_pressed(&mut self) {
+        if let ShapeType::Arrow = self.icon_selected {
+            let canvas_user = self.get_active_canvas_mut();
+            let elems_sel: Vec<EUId> = canvas_user
+                .dataset
+                .shapes_selected
+                .iter()
+                .copied()
+                .collect();
+            if elems_sel.len() > 1 {
+                if canvas_user.dataset.group_selected().is_some() {
+                    canvas_user.dataset.mark_final_polygon_dirty();
+                    canvas_user.dataset.calc_final_polygon();
+                }
+                return;
+            }
+            if elems_sel.len() == 1 {
+                if let Some(elem) = canvas_user.dataset.get_element_mut(elems_sel[0]) {
+                    if elem.is_group() {
+                        if canvas_user.dataset.ungroup_selected().is_some() {
+                            canvas_user.dataset.mark_final_polygon_dirty();
+                            canvas_user.dataset.calc_final_polygon();
+                        }
+                        return;
+                    }
+                }
+            }
+
+            let vs_sel: Vec<(EUId, VUId)> = canvas_user
+                .dataset
+                .vertex_selected
+                .iter()
+                .copied()
+                .collect();
+            let vs_high: Vec<(EUId, VUId)> = canvas_user
+                .dataset
+                .vertex_highlighted
+                .iter()
+                .copied()
+                .collect();
+
+            if vs_sel.len() == 1 && vs_high.len() == 1 && vs_sel != vs_high {
+                let (eid1, vid1) = vs_sel[0];
+                let (eid2, vid2) = vs_high[0];
+                if eid1 == eid2 {
+                    canvas_user
+                        .dataset
+                        .create_vertices_between(eid1, vid1, eid2, vid2);
+                } else {
+                    canvas_user
+                        .dataset
+                        .bind_unbind_vertex_to(eid1, vid1, eid2, vid2);
+                }
+                return;
+            }
+
+        } else {
+            if let ShapeType::Poly = self.icon_selected {
+                let el_on_creation = self.element_on_creation.clone();
+                let canvas_user = self.get_active_canvas_mut();
+                if let Some((_, vs)) = el_on_creation {
+                    if let Some(e) = GeneralShape::new_shape_poly(vs, 0) {
+                        let eid = canvas_user.dataset.push_element(e);
+                        canvas_user.dataset.select_only(eid);
+                        canvas_user.dataset.mark_final_polygon_dirty();
+                        canvas_user.dataset.calc_final_polygon();
+                        self.element_on_creation = None;
+                        self.go_to_arrow_tool();
+                    }
+                }
+            }
+        }
+    }
     pub(crate) fn space_pressed(&mut self) {
         if let ShapeType::Arrow = self.icon_selected {
             let canvas_user = self.get_active_canvas_mut();
@@ -492,19 +565,17 @@ impl AppVars {
                     }
                 }
             }
-        } else {
-            if let ShapeType::Poly = self.icon_selected {
-                let el_on_creation = self.element_on_creation.clone();
-                let canvas_user = self.get_active_canvas_mut();
-                if let Some((_, vs)) = el_on_creation {
-                    if let Some(e) = GeneralShape::new_shape_poly(vs, 0) {
-                        let eid = canvas_user.dataset.push_element(e);
-                        canvas_user.dataset.select_only(eid);
-                        canvas_user.dataset.mark_final_polygon_dirty();
-                        canvas_user.dataset.calc_final_polygon();
-                        self.element_on_creation = None;
-                        self.go_to_arrow_tool();
-                    }
+        } else if let ShapeType::Poly = self.icon_selected {
+            let el_on_creation = self.element_on_creation.clone();
+            let canvas_user = self.get_active_canvas_mut();
+            if let Some((_, vs)) = el_on_creation {
+                if let Some(e) = GeneralShape::new_shape_poly(vs, 0) {
+                    let eid = canvas_user.dataset.push_element(e);
+                    canvas_user.dataset.select_only(eid);
+                    canvas_user.dataset.mark_final_polygon_dirty();
+                    canvas_user.dataset.calc_final_polygon();
+                    self.element_on_creation = None;
+                    self.go_to_arrow_tool();
                 }
             }
         }
@@ -894,6 +965,7 @@ fn shape_type_label(shape_type: ShapeType) -> &'static str {
         ShapeType::Text => "Text",
         ShapeType::Svg => "Svg",
         ShapeType::Voronoi => "Voronoi",
+        ShapeType::Group => "Group",
         ShapeType::ConstrLine => "Line",
         ShapeType::ConstrCircle { .. } => "Circle",
         ShapeType::Arrow => "Arrow",
@@ -1049,6 +1121,7 @@ fn update_help_panel(av: &RefAV) -> Option<()> {
         "Suppr/Backspace",
         "delete selection",
     );
+    let _ = add_help_row(&document, &body, "Enter", "group / ungroup selection");
     let _ = add_help_row(&document, &body, "Ctrl+C/V", "copy / paste");
     let _ = add_help_row(&document, &body, "Ctrl+S", "save");
     let _ = add_help_row(
@@ -1098,10 +1171,22 @@ fn update_context_help(av: &RefAV) -> Option<()> {
                 title = "Vertex".to_string();
                 lines.push("Vertex: ↑ / ↓ to change radius.".to_string());
                 lines.push("Vertex: Space to change apex type.".to_string());
+            } else if canvas.dataset.shapes_selected.len() > 1 {
+                title = "Group".to_string();
+                lines.push("Group: Enter to group selection.".to_string());
             } else if canvas.dataset.shapes_selected.len() == 1 {
-                title = "Shape".to_string();
-                lines.push("Shape: Space to toggle Union/Diff.".to_string());
-                lines.push("Shape: ↑ / ↓ to change order.".to_string());
+                if let Some(eid) = canvas.dataset.shapes_selected.iter().next() {
+                    if let Some(shape) = canvas.dataset.shapes.get(eid) {
+                        if shape.is_group() {
+                            title = "Group".to_string();
+                            lines.push("Group: Enter to ungroup.".to_string());
+                        } else {
+                            title = "Shape".to_string();
+                            lines.push("Shape: Space to toggle Union/Diff.".to_string());
+                            lines.push("Shape: ↑ / ↓ to change order.".to_string());
+                        }
+                    }
+                }
             }
         }
 
