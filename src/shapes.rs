@@ -1,7 +1,8 @@
 use crate::inputs::UserUI;
 use crate::math::{geo_multipolygon_to_bez_paths, snap_vertex};
 use crate::shape::{GeneralShape, Operation, ShapeType};
-use crate::types::{EUId, Snap, VUId, Value, ValueProperty, ValuePropertyKind};
+use crate::type_vertex::Vertex;
+use crate::types::{EUId, Snap, VUId};
 use geo::algorithm::unary_union;
 use geo::{BooleanOps, Coord, LineString, MultiPolygon, Polygon};
 use kurbo::{flatten, stroke, BezPath, Cap, Join, PathEl, Shape, Stroke, StrokeOpts, Vec2};
@@ -498,9 +499,8 @@ pub struct DataSet {
     pub shapes_selected: HashSet<EUId>,
     pub shapes_highlighted: HashSet<EUId>,
     pub shapes_selector: ShapeSelector,
-    pub vertices_selected: HashSet<(EUId, VUId)>,
-    pub vertices_highlighted: HashSet<(EUId, VUId)>,
-    pub last_vertex_selected: Option<(EUId, VUId)>,
+    pub vertex_selected: Option<(EUId, VUId)>,
+    pub vertex_highlighted: Option<(EUId, VUId)>,
     next_order: i32,
 
     pub final_polygon: MultiPolygon<f64>,
@@ -514,9 +514,8 @@ impl DataSet {
             shapes_selected: HashSet::new(),
             shapes_highlighted: HashSet::new(),
             shapes_selector: ShapeSelector::new(),
-            vertices_selected: HashSet::new(),
-            vertices_highlighted: HashSet::new(),
-            last_vertex_selected: None,
+            vertex_selected: None,
+            vertex_highlighted: None,
             final_polygon: MultiPolygon::new(vec![]),
             final_paths: Vec::new(),
             final_polygon_dirty: true,
@@ -614,9 +613,8 @@ impl DataSet {
     pub fn select_only(&mut self, eid: EUId) {
         self.shapes_selected.clear();
         self.shapes_highlighted.clear();
-        self.vertices_selected.clear();
-        self.vertices_highlighted.clear();
-        self.last_vertex_selected = None;
+        self.vertex_selected = None;
+        self.vertex_highlighted = None;
         self.shapes_selected.insert(eid);
     }
     pub fn pop_element(&mut self, eid: EUId) -> Option<GeneralShape> {
@@ -629,14 +627,14 @@ impl DataSet {
             self.shapes_highlighted.remove(&eid);
 
             // drop all (EUId, VUId) matching this EUId
-            self.vertices_selected
-                .retain(|(sel_eid, _)| sel_eid != &eid);
-            self.vertices_highlighted
-                .retain(|(high_eid, _)| high_eid != &eid);
-            // also for the last
-            if let Some((last_eid, _)) = self.last_vertex_selected {
-                if last_eid == eid {
-                    self.last_vertex_selected = None;
+            if let Some((sel_eid, _)) = self.vertex_selected {
+                if sel_eid == eid {
+                    self.vertex_selected = None;
+                }
+            }
+            if let Some((high_eid, _)) = self.vertex_highlighted {
+                if high_eid == eid {
+                    self.vertex_highlighted = None;
                 }
             }
             if let Some(shape) = removed.as_ref() {
@@ -706,7 +704,7 @@ impl DataSet {
                 // Create new vertex between the selected and highlighted vertices
                 let new_v = (
                     VUId::new(),
-                    Value::new(snap_vertex(
+                    Vertex::new(snap_vertex(
                         (v1_sel.curr() + v2_sel.curr()) / 2.0,
                         Snap::new(),
                     )),
@@ -743,72 +741,23 @@ impl DataSet {
         let mut selection_changed = false;
         for (eid, element) in self.shapes.iter_mut() {
             if let Some(vid_sel) = element.select_vertex(draw_pos) {
-                // Check if element was already in the vertices_selected set
-                // if self.vertices_selected.contains(&(*eid, vid_sel)) {
-                //     // Element is already selected, remove it
-                //     self.vertices_selected.remove(&(*eid, vid_sel));
-                //     self.last_vertex_selected = None;
-                //     selection_changed = true;
-                // } else {
-                self.vertices_selected.insert((*eid, vid_sel));
-                self.last_vertex_selected = Some((*eid, vid_sel));
+                self.vertex_selected = Some((*eid, vid_sel));
                 selection_changed = true;
-                // }
             }
         }
         if !selection_changed {
-            self.vertices_selected.clear();
-            self.last_vertex_selected = None;
+            self.vertex_selected = None;
         } else {
             self.shapes_selected.clear();
         }
         selection_changed
-
-        // match (self.vertices_selected, vsel_new) {
-        //     (None, None) => return false,
-        //     (None, Some(vselnew)) => {
-        //         self.vertices_selected = Some(vselnew);
-        //         return true;
-        //     }
-        //     (Some(_), None) => {
-        //         self.vertices_selected = None;
-        //         return false;
-        //     }
-        //     (Some(vsel), Some(vselnew)) => {
-        //         match (
-        //             userui.keys_states.ctrl_cmd_pressed,
-        //             userui.keys_states.shift_pressed,
-        //         ) {
-        //             (false, false) => {
-        //                 self.vertices_selected = Some(vselnew);
-        //                 return true;
-        //             }
-        //             (false, true) => {
-        //                 if self.bind_unbind_vertices(vsel.0, vsel.1, vselnew.0, vselnew.1) {
-        //                     return true;
-        //                 } else {
-        //                     self.vertices_selected = None;
-        //                     return true;
-        //                 }
-        //             }
-        //             (true, false) => {
-        //                 self.create_vertices_between(vsel.0, vsel.1, vselnew.0, vselnew.1);
-        //                 return true;
-        //             }
-        //             (true, true) => {
-        //                 self.delete_vertices_between(vsel.0, vsel.1, vselnew.0, vselnew.1);
-        //                 return true;
-        //             }
-        //         }
-        //     }
-        // }
     }
     pub fn highlight_vertices(&mut self, draw_pos: Vec2) -> bool {
-        self.vertices_highlighted.clear();
+        self.vertex_highlighted = None;
         let mut highlight_changed = false;
         for (eid, element) in self.shapes.iter_mut() {
             if let Some(vid_sel) = element.highlight_vertex(draw_pos) {
-                self.vertices_highlighted.insert((*eid, vid_sel));
+                self.vertex_highlighted = Some((*eid, vid_sel));
                 highlight_changed = true;
             }
         }
@@ -863,8 +812,8 @@ impl DataSet {
             if let Some(shape) = self.shapes.remove(eid) {
                 self.shapes_highlighted.remove(eid);
                 self.shapes_selected.remove(eid);
-                self.vertices_selected.clear();
-                self.vertices_highlighted.clear();
+                self.vertex_selected = None;
+                self.vertex_highlighted = None;
                 self.shapes_selector
                     .refresh_selectable_elems(HashSet::new());
                 deleted = true;
@@ -883,7 +832,7 @@ impl DataSet {
     }
 
     pub fn selection_affects_final_polygon(&self) -> bool {
-        if let Some((eid, _)) = self.last_vertex_selected {
+        if let Some((eid, _)) = self.vertex_selected {
             if let Some(e) = self.shapes.get(&eid) {
                 if !matches!(
                     e.get_shape_type(),
@@ -974,45 +923,38 @@ impl DataSet {
         vid_source: VUId,
         eid_dest: EUId,
         vid_dest: VUId,
-    ) {
+    ) -> Option<()> {
         // Ensure vertices belong to different elements
         if eid_source == eid_dest {
             log!("Cannot bind/unbind vertices from the same element");
-            return;
+            return None;
         }
 
         let v_source = self
             .get_element_mut(eid_source)
-            .and_then(|elem| elem.get_vertex_mut(&vid_source));
+            .and_then(|elem| elem.get_vertex_mut(&vid_source))?;
 
-        if let Some(ValueProperty::Bind { .. }) = v_source.as_ref().and_then(|v| {
-            v.get_properties().get(&ValuePropertyKind::Bind {
-                eid: eid_dest,
-                vid: vid_dest,
-            })
-        }) {
-            v_source.and_then(|v| {
-                v.get_properties_mut().remove(&ValuePropertyKind::Bind {
-                    eid: eid_dest,
-                    vid: vid_dest,
-                });
-                Some(())
-            });
+        if v_source.has_bind(eid_dest, vid_dest) {
+            // Unbind
+            log!(
+                "Unbinding vertex {:?} of element {:?} from vertex {:?} of element {:?}",
+                vid_source,
+                eid_source,
+                vid_dest,
+                eid_dest
+            );
+            v_source.remove_bind(eid_dest, vid_dest);
         } else {
-            v_source.and_then(|v| {
-                v.get_properties_mut().insert(
-                    ValuePropertyKind::Bind {
-                        eid: eid_dest,
-                        vid: vid_dest,
-                    },
-                    ValueProperty::Bind {
-                        eid: eid_dest,
-                        vid: vid_dest,
-                    },
-                );
-                Some(())
-            });
+            log!(
+                "Binding vertex {:?} of element {:?} to vertex {:?} of element {:?}",
+                vid_source,
+                eid_source,
+                vid_dest,
+                eid_dest
+            );
+            v_source.add_bind(eid_dest, vid_dest);
         }
+        Some(())
     }
 
     pub fn calc_final_polygon(&mut self) {

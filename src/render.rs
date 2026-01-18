@@ -82,11 +82,22 @@ pub(crate) fn render_draw_view(av: RefAV) {
             Voronoi => {
                 if vs.len() == 1 {
                     vs.push(canvas_draw.get_user_ui().pointer.curr());
-                    if let Some(e) = GeneralShape::new_shape_voronoi(vs[0], vs[1], 0) {
-                        canvas_draw.draw_paths_creation(&e);
-                        canvas_draw.draw_vs(&e);
-                        canvas_draw.draw_dimensions(&e);
-                    }
+                    let min = Vec2::new(vs[0].x.min(vs[1].x), vs[0].y.min(vs[1].y));
+                    let max = Vec2::new(vs[0].x.max(vs[1].x), vs[0].y.max(vs[1].y));
+                    let mut path = BezPath::new();
+                    path.move_to(Point::new(min.x, min.y));
+                    path.line_to(Point::new(min.x, max.y));
+                    path.line_to(Point::new(max.x, max.y));
+                    path.line_to(Point::new(max.x, min.y));
+                    path.close_path();
+                    let colors = get_vertices_colors(false, false);
+                    canvas_draw.draw_path(
+                        &path,
+                        Pattern::OnCreation,
+                        colors.fill_color,
+                        colors.stroke_color,
+                        vec![],
+                    );
                 }
             }
             ConstrLine => {
@@ -142,7 +153,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
                                 );
                                 if let Some(seg) = SegBundle::new(vs[i], vs[i + 1]) {
                                     let (path, pattern, colors, text) =
-                                        dim_hv(seg, canvas_draw.get_canvas_infos());
+                                        dim_hv(seg, canvas_draw.get_canvas_infos(), false);
                                     canvas_draw.draw_path(
                                         &path,
                                         pattern,

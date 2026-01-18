@@ -4,9 +4,10 @@ use crate::{
     inputs::{SystemMouse, UserAction, UserUI},
     math::*,
     prefab::*,
-    shape::{GeneralShape, ShapeProperty, ShapePropertyKind, ShapeType, SvgFillRule},
+    shape::{GeneralShape, ShapeType, SvgFillRule},
     shapes::DataSet,
-    types::{EUId, SegBundle, VUId, Value, ValueProperty, ValuePropertyKind},
+    type_vertex::Vertex,
+    types::{EUId, Property, PropertyValue, SegBundle, VUId},
     undoredo::UndoRedo,
 };
 use js_sys::Array;
@@ -484,47 +485,29 @@ impl Canvas {
     pub fn highlight_vertices(&mut self) -> bool {
         self.dataset.highlight_vertices(self.user_ui.draw_pos)
     }
-    pub fn move_vertices_selected(&mut self) -> bool {
-        if let Some((last_eid, last_vid)) = self.dataset.last_vertex_selected {
-            let affects_final = self
-                .dataset
-                .get_element(last_eid)
-                .map(|e| {
-                    !matches!(
-                        e.get_shape_type(),
-                        ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
-                    )
-                })
-                .unwrap_or(false);
+    pub fn move_vertices_selected(&mut self) -> Option<()> {
+        let (eid, vid) = self.dataset.vertex_selected?;
+        self.dataset
+            .get_element_mut(eid)?
+            .move_vertex_by_mouse(vid, &self.user_ui)?;
 
-            let moved = self
-                .dataset
-                .get_element_mut(last_eid)
-                .map(|e| e.move_vertex(last_vid, &self.user_ui))
-                .unwrap_or(false);
-
-            if let Some(e) = self.dataset.get_element_mut(last_eid) {
-                if let ShapeType::ConstrCircle = e.get_shape_type() {
-                    if let Some(ShapeProperty::Magnets { value: magnets, .. }) =
-                        e.get_properties().get(&ShapePropertyKind::Magnets).cloned()
-                    {
-                        let vs = e.get_vertices_mut();
-                        let v1 = vs.val(0).curr();
-                        let v2 = vs.val(1).curr();
-                        let vs_magnets = get_magnets_vertices(v1, v2, magnets);
-                        for (idx, (_, v)) in e.get_vertices_mut().iter_mut().skip(2).enumerate() {
-                            *v = Value::new(vs_magnets[idx]);
-                        }
-                    }
+        let e = self.dataset.get_element_mut(eid)?;
+        if let ShapeType::ConstrCircle = e.get_shape_type() {
+            if let Some(PropertyValue::Magnets { value: magnets, .. }) =
+                e.get_properties().get(&Property::Magnets).cloned()
+            {
+                let vs = e.get_vertices_mut();
+                let v1 = vs.val(0).curr();
+                let v2 = vs.val(1).curr();
+                let vs_magnets = get_magnets_vertices(v1, v2, magnets.curr());
+                for (idx, (_, v)) in e.get_vertices_mut().iter_mut().skip(2).enumerate() {
+                    *v = Vertex::new(vs_magnets[idx]);
                 }
-            }
-
-            if moved && affects_final {
                 self.dataset.mark_final_polygon_dirty();
             }
-            return moved;
         }
-        false
+
+        return Some(());
     }
 
     // Rendering
@@ -910,7 +893,8 @@ impl Canvas {
                 let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 if v.len() == 2 {
                     if let Some(seg) = SegBundle::new(v[0], v[1]) {
-                        let (path, pattern, colors, text) = dim_hv(seg, self.get_canvas_infos());
+                        let (path, pattern, colors, text) =
+                            dim_hv(seg, self.get_canvas_infos(), false);
                         self.draw_path(
                             &path,
                             pattern,
@@ -932,7 +916,7 @@ impl Canvas {
                 {
                     if let Some(seg) = SegBundle::new(*v1, *v2) {
                         let (path, pattern, colors, mut text) =
-                            dim_hv(seg, self.get_canvas_infos());
+                            dim_hv(seg, self.get_canvas_infos(), false);
                         if idx == 0 && rotation.abs() > EPSILON {
                             let mut deg = rotation.to_degrees();
                             while deg <= -180.0 {
@@ -1002,7 +986,8 @@ impl Canvas {
                     .map(|(v1, v2)| (v1.1.curr(), v2.1.curr()))
                 {
                     if let Some(seg) = SegBundle::new(v1, v2) {
-                        let (path, pattern, colors, text) = dim_hv(seg, self.get_canvas_infos());
+                        let (path, pattern, colors, text) =
+                            dim_hv(seg, self.get_canvas_infos(), false);
                         self.draw_path(
                             &path,
                             pattern,
@@ -1022,12 +1007,12 @@ impl Canvas {
             let pos = e.vertex_display_pos(vertex.curr());
             let vid_sel = self
                 .dataset
-                .vertices_selected
+                .vertex_selected
                 .iter()
                 .any(|&(_, sel_vid)| &sel_vid == vid);
             let vid_high = self
                 .dataset
-                .vertices_highlighted
+                .vertex_highlighted
                 .iter()
                 .any(|&(_, high_vid)| &high_vid == vid);
 
@@ -1039,6 +1024,15 @@ impl Canvas {
                     Pattern::Composed(false),
                     Color::Transparent,
                     Color::Red,
+                    vec![],
+                );
+            } else if vid_high {
+                let ring = point_path(pos, 0.45);
+                self.draw_path(
+                    &ring,
+                    Pattern::Composed(false),
+                    Color::Transparent,
+                    Color::Green40,
                     vec![],
                 );
             }
@@ -1065,34 +1059,22 @@ impl Canvas {
     pub fn draw_bindings(&mut self) {
         // move shapes out of self.dataset temporarily
         let shapes = mem::take(&mut self.dataset.shapes);
+
         for (_, source_e) in shapes.iter() {
             for (_, source_v) in source_e.get_vertices().iter() {
-                let source_binds: Vec<(EUId, VUId)> = source_v
-                    .get_properties()
-                    .iter()
-                    .filter_map(|(k, v)| match (k, v) {
-                        (
-                            ValuePropertyKind::Bind { .. },
-                            ValueProperty::Bind {
-                                eid: dest_eid,
-                                vid: dest_vid,
-                            },
-                        ) => Some((*dest_eid, *dest_vid)),
-                        _ => None,
-                    })
-                    .collect();
+                let source_binds: Vec<(EUId, VUId)> =
+                    source_v.get_binds().iter().cloned().collect();
                 if source_binds.is_empty() {
                     continue;
                 }
                 for (dest_eid, dest_vid) in source_binds.iter() {
-                    log!("Drawing binding to {:?}  {:?}", dest_eid, dest_vid);
-                    if let Some(dest_e) = self.dataset.get_element(*dest_eid) {
+                    if let Some(dest_e) = shapes.get(dest_eid) {
                         if let Some(dest_v) = dest_e.get_vertices().val_from_key(*dest_vid) {
                             let start = source_e.vertex_display_pos(source_v.curr());
                             let end = dest_e.vertex_display_pos(dest_v.curr());
                             if let Some(seg) = SegBundle::new(start, end) {
                                 let (path, pattern, colors, text) =
-                                    dim_hv(seg, self.get_canvas_infos());
+                                    dim_hv(seg, self.get_canvas_infos(), true);
                                 self.draw_path(
                                     &path,
                                     pattern,
@@ -1135,11 +1117,7 @@ impl Canvas {
                 ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
             );
             let stroke_color = if !is_selected && !is_highlighted {
-                if is_construction {
-                    Color::Rules
-                } else {
-                    Color::Gray20
-                }
+                Color::Gray20
             } else {
                 get_stroke_color(is_selected, is_highlighted)
             };
@@ -1293,7 +1271,7 @@ impl Pattern {
             Basic => (pattern_dashed, 1., false),
             Helper => (pattern_dashed, 1., false),
             Text => (pattern_solid, 1., false),
-            Dim => (pattern_solid, 1., false),
+            Dim => (pattern_solid, 1., true),
         };
         (line_dash, line_width, filled)
     }

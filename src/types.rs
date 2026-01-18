@@ -1,365 +1,234 @@
 use crate::math::{fillet_at_apex, ApexType, EPSILON};
+use crate::shape::TextFont;
+use crate::type_scalar::Scalar;
+use crate::type_vertex::{ScalarU32, Vertex};
 use kurbo::Vec2;
 use std::collections::HashMap;
+use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::hash::Hash;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[derive(Debug, Clone)]
-pub struct VecRing<K> {
-    vec: Vec<(K, Value)>,
-}
-impl<K: PartialEq + Clone + Debug> VecRing<K> {
-    pub fn from_slice(slice: &[(K, Value)]) -> Option<Self> {
-        if slice.is_empty() {
-            None
-        } else {
-            Some(Self { vec: slice.into() })
-        }
-    }
-    pub fn dist_ok(&self, idx1: i64, idx2: i64, dist: i64) -> Option<()> {
-        let n = self.vec.len() as i64;
-        if n == 0 {
-            return None;
-        }
-        let i = ((idx1 % n) + n) % n;
-        let j = ((idx2 % n) + n) % n;
-        let diff = (i - j).abs();
-        let min_dist = diff.min(n - diff);
-        (min_dist == dist).then_some(())
-    }
-    pub fn insert_one_between(&mut self, key1: &K, key2: &K, kv: (K, Value)) -> Option<K> {
-        let n = self.vec.len();
-        if n < 2 {
-            return None;
-        }
-
-        // find positions of the two keys
-        let i = self.vec.iter().position(|(k, _)| k == key1)?;
-        let j = self.vec.iter().position(|(k, _)| k == key2)?;
-
-        // decide where to insert:
-        // if key1 → key2, insert at j
-        // if key2 → key1, insert at i
-        let insert_at = if (i + 1) % n == j {
-            j
-        } else if (j + 1) % n == i {
-            i
-        } else {
-            return None;
-        };
-        let (key, val) = kv;
-        self.vec.insert(insert_at, (key.clone(), val));
-        Some(key)
-    }
-    pub fn insert_two_between(
-        &mut self,
-        key1: &K,
-        key2: &K,
-        kv1: (K, Value),
-        kv2: (K, Value),
-    ) -> Option<(K, K)> {
-        let n = self.vec.len();
-        if n < 2 {
-            return None;
-        }
-
-        // find positions of the two keys
-        let i = self.vec.iter().position(|(k, _)| k == key1)?;
-        let j = self.vec.iter().position(|(k, _)| k == key2)?;
-
-        // decide where to insert:
-        // if key1 → key2, insert at j
-        // if key2 → key1, insert at i
-        let insert_at = if (i + 1) % n == j {
-            j
-        } else if (j + 1) % n == i {
-            i
-        } else {
-            return None;
-        };
-        let (key1, val1) = kv1;
-        let (key2, val2) = kv2;
-        self.vec.insert(insert_at, (key2.clone(), val2));
-        self.vec.insert(insert_at, (key1.clone(), val1));
-        Some((key1, key2))
-    }
-    pub fn remove(&mut self, idx: &i64) {
-        let len = self.vec.len() as i64;
-        let idx = (idx).rem_euclid(len) as usize;
-        self.vec.remove(idx);
-    }
-    pub fn get_idx(&self, key: &K) -> Option<i64> {
-        self.vec
-            .iter()
-            .position(|(k, _)| k == key)
-            .and_then(|i| Some(i as i64))
-    }
-    pub fn key(&self, idx: i64) -> &K {
-        let len = self.vec.len() as i64;
-        let i = idx.rem_euclid(len) as usize;
-        &self.vec[i].0
-    }
-    pub fn key_mut(&mut self, idx: i64) -> &mut K {
-        let len = self.vec.len() as i64;
-        let i = idx.rem_euclid(len) as usize;
-        &mut self.vec[i].0
-    }
-    pub fn val(&self, idx: i64) -> &Value {
-        let len = self.vec.len() as i64;
-        let i = idx.rem_euclid(len) as usize;
-        &self.vec[i].1
-    }
-    pub fn val_mut(&mut self, idx: i64) -> &mut Value {
-        let len = self.vec.len() as i64;
-        let i = idx.rem_euclid(len) as usize;
-        &mut self.vec[i].1
-    }
-    pub fn val_from_key(&self, key: K) -> Option<&Value> {
-        self.vec.iter().find_map(|(k, v)| (k == &key).then(|| v))
-    }
-    pub fn val_mut_from_key(&mut self, key: K) -> Option<&mut Value> {
-        self.vec
-            .iter_mut()
-            .find_map(|(k, v)| (k == &key).then(|| v))
-    }
-    pub fn push(&mut self, e: (K, Value)) {
-        self.vec.push(e);
-    }
-    pub fn replace_first(&mut self, e: (K, Value)) {
-        self.vec[0] = e;
-    }
-    pub fn last_mut(&mut self) -> &mut (K, Value) {
-        let len1 = self.vec.len() - 1;
-        &mut self.vec[len1]
-    }
-    pub fn len(&self) -> usize {
-        self.vec.len()
-    }
-    pub fn iter(&self) -> std::slice::Iter<'_, (K, Value)> {
-        self.vec.iter()
-    }
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, (K, Value)> {
-        self.vec.iter_mut()
-    }
-    pub fn get_apices(&self) -> Vec<ApexType> {
-        let n = self.vec.len();
-        assert!(n >= 3);
-        let mut out = Vec::with_capacity(n);
-
-        for i in 0..n {
-            let im1 = if i == 0 { n - 1 } else { i - 1 };
-            let ip1 = if i + 1 == n { 0 } else { i + 1 };
-            let a = &self.vec[im1].1;
-            let b = &self.vec[i].1;
-            let c = &self.vec[ip1].1;
-
-            let apex = b
-                .get_radius()
-                .and_then(|r| fillet_at_apex(a.curr, b.curr, c.curr, r as f64))
-                .map(|(s, center, e)| ApexType::Arc { s, c: center, e })
-                .unwrap_or(ApexType::Vertex { a: b.curr });
-
-            out.push(apex);
-        }
-        out
-    }
-}
-
-#[derive(Copy, Debug, Clone)]
-pub struct Minimum {
-    min_bundle: Option<(f64, i64, Vec2)>,
-}
-impl Minimum {
-    pub fn new() -> Self {
-        Self { min_bundle: None }
-    }
-    pub fn update(&mut self, value: f64, index: i64, pos: Vec2) {
-        if let Some((min, idx_min, pos_min)) = self.min_bundle.as_mut() {
-            if value < *min {
-                *min = value;
-                *idx_min = index;
-                *pos_min = pos;
-            }
-        } else {
-            self.min_bundle = Some((value, index, pos));
-        }
-    }
-    pub fn get_min(&self) -> Option<(f64, i64, Vec2)> {
-        self.min_bundle
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ValuePropertyKind {
+pub enum Property {
+    Center,
     Radius,
-    Bind { eid: EUId, vid: VUId },
+    Angle,
+    Scale,
+    BottomLeft,
+    TopLeft,
+    TopRight,
+    BottomRight,
+    Pt1,
+    Pt2,
+    Thickness,
+    Text,
+    Font,
+    Seeds,
+    Magnets,
+    Apex { idx: usize },
+}
+impl Property {
+    pub fn order(&self) -> usize {
+        match self {
+            Property::Center => 10,
+            Property::Radius => 20,
+            Property::Angle => 30,
+            Property::Scale => 40,
+            Property::BottomLeft => 50,
+            Property::TopLeft => 60,
+            Property::TopRight => 70,
+            Property::BottomRight => 80,
+            Property::Pt1 => 90,
+            Property::Pt2 => 100,
+            Property::Thickness => 110,
+            Property::Text => 120,
+            Property::Font => 130,
+            Property::Seeds => 140,
+            Property::Magnets => 150,
+            Property::Apex { idx } => 1000 + idx,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
-pub enum ValueProperty {
+pub enum PropertyValue {
+    Center {
+        idx: usize, // index of the vertex in the shape's vertex list
+        value: Vec2,
+    },
     Radius {
-        value: Option<u32>,
-        last_value: Option<u32>,
+        idx: usize, // index of the vertex in the shape's vertex list
+        value: Scalar<f64>,
     },
-    Bind {
-        eid: EUId,
-        vid: VUId,
+    Angle {
+        value: Scalar<f64>,
+    },
+    Scale {
+        value: Scalar<f64>,
+    },
+    TopLeft {
+        idx: usize, // index of the vertex in the shape's vertex list
+        value: Vec2,
+        radius: Option<ScalarU32>,
+    },
+    TopRight {
+        idx: usize, // index of the vertex in the shape's vertex list
+        value: Vec2,
+        radius: Option<ScalarU32>,
+    },
+    BottomRight {
+        idx: usize, // index of the vertex in the shape's vertex list
+        value: Vec2,
+        radius: Option<ScalarU32>,
+    },
+    BottomLeft {
+        idx: usize, // index of the vertex in the shape's vertex list
+        value: Vec2,
+        radius: Option<ScalarU32>,
+    },
+    Pt1 {
+        idx: usize, // index of the vertex in the shape's vertex list
+        value: Vec2,
+    },
+    Pt2 {
+        idx: usize, // index of the vertex in the shape's vertex list
+        value: Vec2,
+    },
+    Thickness {
+        value: Scalar<f64>,
+    },
+    Text {
+        value: String,
+    },
+    Font {
+        value: TextFont,
+    },
+    Seeds {
+        value: Scalar<u64>,
+    },
+    Magnets {
+        value: Scalar<usize>,
+    },
+    Apex {
+        idx: usize, // index of the vertex in the shape's vertex list
+        value: Vec2,
+        radius: Option<ScalarU32>,
     },
 }
-impl ValueProperty {
-    pub fn as_radius(&self) -> Option<(Option<u32>, Option<u32>)> {
+impl fmt::Display for PropertyValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use PropertyValue::*;
         match self {
-            ValueProperty::Radius { value, last_value } => Some((*value, *last_value)),
+            Center { .. } => write!(f, "center"),
+            Angle { .. } => write!(f, "angle"),
+            Radius { .. } => write!(f, "radius"),
+            Scale { .. } => write!(f, "scale"),
+            BottomLeft { .. } => write!(f, "bot left"),
+            TopLeft { .. } => write!(f, "top left"),
+            TopRight { .. } => write!(f, "top right"),
+            BottomRight { .. } => write!(f, "bot right"),
+            Pt1 { .. } => write!(f, "pt1"),
+            Pt2 { .. } => write!(f, "pt2"),
+            Thickness { .. } => write!(f, "thickness"),
+            Text { .. } => write!(f, "text"),
+            Font { .. } => write!(f, "font"),
+            Seeds { .. } => write!(f, "seeds"),
+            Magnets { .. } => write!(f, "magnets"),
+            Apex { idx, .. } => write!(f, "apex {}", idx),
+        }
+    }
+}
+impl PropertyValue {
+    pub fn as_vec2(&self) -> Option<Vec2> {
+        match self {
+            PropertyValue::Center { value, .. } => Some(*value),
+            PropertyValue::TopLeft { value, .. } => Some(*value),
+            PropertyValue::TopRight { value, .. } => Some(*value),
+            PropertyValue::BottomRight { value, .. } => Some(*value),
+            PropertyValue::BottomLeft { value, .. } => Some(*value),
+            PropertyValue::Pt1 { value, .. } => Some(*value),
+            PropertyValue::Pt2 { value, .. } => Some(*value),
+            PropertyValue::Apex { value, .. } => Some(*value),
             _ => None,
         }
     }
-    pub fn as_radius_mut(&mut self) -> Option<(&mut Option<u32>, &mut Option<u32>)> {
+    pub fn as_font(&self) -> Option<&TextFont> {
         match self {
-            ValueProperty::Radius { value, last_value } => Some((value, last_value)),
+            PropertyValue::Font { value } => Some(value),
             _ => None,
         }
     }
-
-    pub fn as_bind(&self) -> Option<(EUId, VUId)> {
+    pub fn get_idx(&self) -> Option<usize> {
         match self {
-            ValueProperty::Bind { eid, vid } => Some((*eid, *vid)),
+            PropertyValue::Center { idx, .. }
+            | PropertyValue::TopLeft { idx, .. }
+            | PropertyValue::TopRight { idx, .. }
+            | PropertyValue::BottomRight { idx, .. }
+            | PropertyValue::BottomLeft { idx, .. }
+            | PropertyValue::Pt1 { idx, .. }
+            | PropertyValue::Pt2 { idx, .. }
+            | PropertyValue::Apex { idx, .. } => Some(*idx),
             _ => None,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Value {
-    properties: HashMap<ValuePropertyKind, ValueProperty>,
-    saved: Vec2,
-    curr: Vec2,
+pub struct Properties {
+    prop: HashMap<Property, PropertyValue>,
 }
-impl Value {
-    pub fn new(value: Vec2) -> Self {
-        let mut properties = HashMap::new();
-        properties.insert(
-            ValuePropertyKind::Radius,
-            ValueProperty::Radius {
-                value: None,
-                last_value: None,
-            },
-        );
+impl Properties {
+    pub fn new() -> Self {
         Self {
-            properties,
-            saved: value,
-            curr: value,
+            prop: HashMap::new(),
         }
     }
-    pub fn new_from_coords(x: f64, y: f64) -> Self {
-        let mut properties = HashMap::new();
-        properties.insert(
-            ValuePropertyKind::Radius,
-            ValueProperty::Radius {
-                value: None,
-                last_value: None,
-            },
-        );
-        let value = Vec2::new(x, y);
-        Self {
-            properties,
-            saved: value,
-            curr: value,
-        }
+    pub fn add(&mut self, key: Property, value: PropertyValue) {
+        self.prop.insert(key, value);
     }
-    pub fn save(&mut self) {
-        self.saved = self.curr;
+    pub fn get(&self, key: &Property) -> Option<&PropertyValue> {
+        self.prop.get(key)
     }
-    pub fn add(&mut self, value: Vec2) {
-        self.curr = self.saved + value;
+    pub fn get_mut(&mut self, key: &Property) -> Option<&mut PropertyValue> {
+        self.prop.get_mut(key)
     }
-
-    pub fn change_apex_type(&mut self) {
-        if let Some(ValueProperty::Radius {
-            value: radius,
-            last_value: last_radius,
-        }) = self.properties.get_mut(&ValuePropertyKind::Radius)
-        {
-            if radius.is_none() {
-                if last_radius.is_none() {
-                    *radius = Some(10);
-                } else {
-                    *radius = *last_radius;
+    pub fn iter(&self) -> impl Iterator<Item = (&Property, &PropertyValue)> {
+        self.prop.iter()
+    }
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&Property, &mut PropertyValue)> {
+        self.prop.iter_mut()
+    }
+    pub fn update_vertex_property(&mut self, idx: usize, new_value: Vec2) -> Option<()> {
+        for (_, val) in self.prop.iter_mut() {
+            match val {
+                PropertyValue::Center { idx: v_idx, value }
+                | PropertyValue::TopLeft {
+                    idx: v_idx, value, ..
                 }
-            } else {
-                *last_radius = *radius;
-                *radius = None;
+                | PropertyValue::TopRight {
+                    idx: v_idx, value, ..
+                }
+                | PropertyValue::BottomRight {
+                    idx: v_idx, value, ..
+                }
+                | PropertyValue::BottomLeft {
+                    idx: v_idx, value, ..
+                }
+                | PropertyValue::Pt1 { idx: v_idx, value }
+                | PropertyValue::Pt2 { idx: v_idx, value }
+                | PropertyValue::Apex {
+                    idx: v_idx, value, ..
+                } => {
+                    if *v_idx == idx {
+                        *value = new_value;
+                    }
+                }
+                _ => {}
             }
         }
-    }
-
-    pub fn curr(&self) -> Vec2 {
-        self.curr
-    }
-    pub fn set_curr(&mut self, value: Vec2) {
-        self.curr = value;
-    }
-    pub fn saved(&self) -> Vec2 {
-        self.saved
-    }
-    pub fn set_saved(&mut self, value: Vec2) {
-        self.saved = value;
-    }
-    pub fn set_saved_x(&mut self, x: f64) {
-        self.saved.x = x;
-    }
-    pub fn set_saved_y(&mut self, y: f64) {
-        self.saved.y = y;
-    }
-    pub fn get_radius(&self) -> Option<u32> {
-        if let Some(ValueProperty::Radius { value, .. }) =
-            self.properties.get(&ValuePropertyKind::Radius)
-        {
-            *value
-        } else {
-            None
-        }
-    }
-    pub fn get_binds(&self) -> Vec<(EUId, VUId)> {
-        let mut out = Vec::new();
-        for (key, prop) in &self.properties {
-            if let ValuePropertyKind::Bind { .. } = key {
-                if let Some((eid, vid)) = prop.as_bind() {
-                    out.push((eid, vid));
-                }
-            }
-        }
-        out
-    }
-    pub fn get_properties(&self) -> &HashMap<ValuePropertyKind, ValueProperty> {
-        &self.properties
-    }
-    pub fn get_properties_mut(&mut self) -> &mut HashMap<ValuePropertyKind, ValueProperty> {
-        &mut self.properties
-    }
-    pub fn property_remove(&mut self, key: &ValuePropertyKind) {
-        self.properties.remove(key);
-    }
-    pub fn property_remove_all_binds(&mut self) {
-        let bind_keys: Vec<ValuePropertyKind> = self
-            .properties
-            .keys()
-            .filter_map(|k| match k {
-                ValuePropertyKind::Bind { .. } => Some(k.clone()),
-                _ => None,
-            })
-            .collect();
-        for key in bind_keys {
-            self.properties.remove(&key);
-        }
-    }
-    pub fn property_insert_bind(&mut self, key: ValuePropertyKind) {
-        let value = match key {
-            ValuePropertyKind::Bind { eid, vid } => ValueProperty::Bind { eid, vid },
-            _ => return,
-        };
-        self.properties.insert(key, value);
+        Some(())
     }
 }
 
@@ -480,67 +349,29 @@ impl SegBundle {
     }
 }
 
-// #[derive(Clone, Debug)]
-// pub struct Binding<T: Copy + Clone + PartialEq + Ord + Hash> {
-//     bind: HashSet<Couple<T>>,
-// }
-// impl<T: Copy + Clone + PartialEq + Ord + Hash> Binding<T> {
-//     pub fn new() -> Self {
-//         Self {
-//             bind: HashSet::new(),
-//         }
-//     }
-//     pub fn contains(&self, elem: T) -> bool {
-//         self.bind.iter().any(|couple| couple.contains(&elem))
-//     }
-//     pub fn get_other(&self, elem: T) -> Option<T> {
-//         self.bind
-//             .iter()
-//             .find(|couple| couple.contains(&elem))
-//             .map(|couple| if couple.0 == elem { couple.1 } else { couple.0 })
-//     }
-// }
-// impl<T> Deref for Binding<T>
-// where
-//     T: Copy + Clone + PartialEq + Ord + Hash,
-// {
-//     type Target = HashSet<Couple<T>>;
-
-//     fn deref(&self) -> &Self::Target {
-//         &self.bind
-//     }
-// }
-// impl<T> DerefMut for Binding<T>
-// where
-//     T: Copy + Clone + PartialEq + Ord + Hash,
-// {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         &mut self.bind
-//     }
-// }
-
-// #[derive(Copy, Clone, Debug)]
-// pub struct Couple<T: Copy + Clone + PartialEq + Hash + Ord>(pub T, pub T);
-// impl<T: Copy + Clone + Hash + PartialEq + Ord> Couple<T> {
-//     pub fn contains(&self, elem: &T) -> bool {
-//         self.0 == *elem || self.1 == *elem
-//     }
-// }
-// impl<T: Copy + Clone + PartialEq + Ord + Hash> PartialEq for Couple<T> {
-//     fn eq(&self, other: &Self) -> bool {
-//         (self.0 == other.0 && self.1 == other.1) || (self.0 == other.1 && self.1 == other.0)
-//     }
-// }
-// impl<T: Copy + Clone + PartialEq + Ord + Hash> Eq for Couple<T> {}
-// impl<T: Copy + Clone + PartialEq + Ord + Hash> Hash for Couple<T> {
-//     fn hash<H: Hasher>(&self, state: &mut H) {
-//         // sort the two IDs so (a,b) and (b,a) become the same pair
-//         let a = min(self.0, self.1);
-//         let b = max(self.0, self.1);
-//         a.hash(state);
-//         b.hash(state);
-//     }
-// }
+#[derive(Copy, Debug, Clone)]
+pub struct Minimum {
+    min_bundle: Option<(f64, i64, Vec2)>,
+}
+impl Minimum {
+    pub fn new() -> Self {
+        Self { min_bundle: None }
+    }
+    pub fn update(&mut self, value: f64, index: i64, pos: Vec2) {
+        if let Some((min, idx_min, pos_min)) = self.min_bundle.as_mut() {
+            if value < *min {
+                *min = value;
+                *idx_min = index;
+                *pos_min = pos;
+            }
+        } else {
+            self.min_bundle = Some((value, index, pos));
+        }
+    }
+    pub fn get_min(&self) -> Option<(f64, i64, Vec2)> {
+        self.min_bundle
+    }
+}
 
 static COUNTER_VALUE: AtomicUsize = AtomicUsize::new(0);
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -573,5 +404,166 @@ impl EUId {
     pub fn new() -> Self {
         let id = COUNTER_NODE.fetch_add(1, Ordering::SeqCst);
         EUId { id }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VecRing<K> {
+    vec: Vec<(K, Vertex)>,
+}
+impl<K: PartialEq + Clone + Debug> VecRing<K> {
+    pub fn from_slice(slice: &[(K, Vertex)]) -> Option<Self> {
+        if slice.is_empty() {
+            None
+        } else {
+            Some(Self { vec: slice.into() })
+        }
+    }
+    pub fn dist_ok(&self, idx1: i64, idx2: i64, dist: i64) -> Option<()> {
+        let n = self.vec.len() as i64;
+        if n == 0 {
+            return None;
+        }
+        let i = ((idx1 % n) + n) % n;
+        let j = ((idx2 % n) + n) % n;
+        let diff = (i - j).abs();
+        let min_dist = diff.min(n - diff);
+        (min_dist == dist).then_some(())
+    }
+    pub fn insert_one_between(&mut self, key1: &K, key2: &K, kv: (K, Vertex)) -> Option<K> {
+        let n = self.vec.len();
+        if n < 2 {
+            return None;
+        }
+
+        // find positions of the two keys
+        let i = self.vec.iter().position(|(k, _)| k == key1)?;
+        let j = self.vec.iter().position(|(k, _)| k == key2)?;
+
+        // decide where to insert:
+        // if key1 → key2, insert at j
+        // if key2 → key1, insert at i
+        let insert_at = if (i + 1) % n == j {
+            j
+        } else if (j + 1) % n == i {
+            i
+        } else {
+            return None;
+        };
+        let (key, val) = kv;
+        self.vec.insert(insert_at, (key.clone(), val));
+        Some(key)
+    }
+    pub fn insert_two_between(
+        &mut self,
+        key1: &K,
+        key2: &K,
+        kv1: (K, Vertex),
+        kv2: (K, Vertex),
+    ) -> Option<(K, K)> {
+        let n = self.vec.len();
+        if n < 2 {
+            return None;
+        }
+
+        // find positions of the two keys
+        let i = self.vec.iter().position(|(k, _)| k == key1)?;
+        let j = self.vec.iter().position(|(k, _)| k == key2)?;
+
+        // decide where to insert:
+        // if key1 → key2, insert at j
+        // if key2 → key1, insert at i
+        let insert_at = if (i + 1) % n == j {
+            j
+        } else if (j + 1) % n == i {
+            i
+        } else {
+            return None;
+        };
+        let (key1, val1) = kv1;
+        let (key2, val2) = kv2;
+        self.vec.insert(insert_at, (key2.clone(), val2));
+        self.vec.insert(insert_at, (key1.clone(), val1));
+        Some((key1, key2))
+    }
+    pub fn remove(&mut self, idx: &i64) {
+        let len = self.vec.len() as i64;
+        let idx = (idx).rem_euclid(len) as usize;
+        self.vec.remove(idx);
+    }
+    pub fn get_idx(&self, key: &K) -> Option<i64> {
+        self.vec
+            .iter()
+            .position(|(k, _)| k == key)
+            .and_then(|i| Some(i as i64))
+    }
+    pub fn key(&self, idx: i64) -> &K {
+        let len = self.vec.len() as i64;
+        let i = idx.rem_euclid(len) as usize;
+        &self.vec[i].0
+    }
+    pub fn key_mut(&mut self, idx: i64) -> &mut K {
+        let len = self.vec.len() as i64;
+        let i = idx.rem_euclid(len) as usize;
+        &mut self.vec[i].0
+    }
+    pub fn val(&self, idx: i64) -> &Vertex {
+        let len = self.vec.len() as i64;
+        let i = idx.rem_euclid(len) as usize;
+        &self.vec[i].1
+    }
+    pub fn val_mut(&mut self, idx: i64) -> &mut Vertex {
+        let len = self.vec.len() as i64;
+        let i = idx.rem_euclid(len) as usize;
+        &mut self.vec[i].1
+    }
+    pub fn val_from_key(&self, key: K) -> Option<&Vertex> {
+        self.vec.iter().find_map(|(k, v)| (k == &key).then(|| v))
+    }
+    pub fn val_mut_from_key(&mut self, key: K) -> Option<&mut Vertex> {
+        self.vec
+            .iter_mut()
+            .find_map(|(k, v)| (k == &key).then(|| v))
+    }
+    pub fn push(&mut self, e: (K, Vertex)) {
+        self.vec.push(e);
+    }
+    pub fn replace_first(&mut self, e: (K, Vertex)) {
+        self.vec[0] = e;
+    }
+    pub fn last_mut(&mut self) -> &mut (K, Vertex) {
+        let len1 = self.vec.len() - 1;
+        &mut self.vec[len1]
+    }
+    pub fn len(&self) -> usize {
+        self.vec.len()
+    }
+    pub fn iter(&self) -> std::slice::Iter<'_, (K, Vertex)> {
+        self.vec.iter()
+    }
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, (K, Vertex)> {
+        self.vec.iter_mut()
+    }
+    pub fn get_apices(&self) -> Vec<ApexType> {
+        let n = self.vec.len();
+        assert!(n >= 3);
+        let mut out = Vec::with_capacity(n);
+
+        for i in 0..n {
+            let im1 = if i == 0 { n - 1 } else { i - 1 };
+            let ip1 = if i + 1 == n { 0 } else { i + 1 };
+            let a = &self.vec[im1].1;
+            let b = &self.vec[i].1;
+            let c = &self.vec[ip1].1;
+
+            let apex = b
+                .get_radius()
+                .and_then(|r| fillet_at_apex(a.curr(), b.curr(), c.curr(), r as f64))
+                .map(|(s, center, e)| ApexType::Arc { s, c: center, e })
+                .unwrap_or(ApexType::TypeVertex { a: b.curr() });
+
+            out.push(apex);
+        }
+        out
     }
 }

@@ -29,7 +29,7 @@ use crate::render::{
 use crate::shape::{GeneralShape, Operation, ShapeType};
 use crate::shapes::{multipolygon_to_toolpath, toolpath_to_plasma_gcode, Toolpath, ToolpathParams};
 use crate::status::update_status_bar;
-use crate::types::{EUId, VUId, Value, ValuePropertyKind};
+use crate::types::{EUId, Property, PropertyValue, VUId};
 use js_sys::{Array, Date, Object, Reflect, JSON};
 use kurbo::{BezPath, PathEl, Point, Size, Vec2};
 use std::collections::{HashMap, HashSet};
@@ -410,37 +410,6 @@ impl AppVars {
         }
     }
 
-    pub(crate) fn edit_text_at(&mut self, pos: Vec2) -> bool {
-        let canvas = &mut self.canvases[CanvasKind::Draw.idx()];
-        for (_eid, shape) in canvas.dataset.shapes.iter_mut() {
-            if !shape.contains(pos) {
-                continue;
-            }
-            if let ShapeType::Text = shape.get_shape_type() {
-                let current = shape.get_text().unwrap_or("".to_string());
-                let edited = self
-                    .window
-                    .prompt_with_message_and_default("Edit text", &current)
-                    .ok()
-                    .flatten();
-                if let Some(new_text) = edited {
-                    shape.set_text(new_text);
-                    canvas.dataset.mark_final_polygon_dirty();
-                    canvas.dataset.calc_final_polygon();
-                }
-                canvas.dataset.shapes_selected.clear();
-                canvas.dataset.shapes_highlighted.clear();
-                canvas.dataset.vertices_selected.clear();
-                canvas.dataset.vertices_highlighted.clear();
-                canvas
-                    .dataset
-                    .shapes_selector
-                    .refresh_selectable_elems(HashSet::new());
-                return true;
-            }
-        }
-        false
-    }
     pub(crate) fn del_back_pressed(&mut self) {
         if let ShapeType::Arrow = self.icon_selected {
             let canvas_user = self.get_active_canvas_mut();
@@ -454,7 +423,7 @@ impl AppVars {
             } else {
                 let vs_sel: Vec<(EUId, VUId)> = canvas_user
                     .dataset
-                    .vertices_selected
+                    .vertex_selected
                     .iter()
                     .copied()
                     .collect();
@@ -486,13 +455,20 @@ impl AppVars {
 
             let vs_sel: Vec<(EUId, VUId)> = canvas_user
                 .dataset
-                .vertices_selected
+                .vertex_selected
                 .iter()
                 .copied()
                 .collect();
-            if vs_sel.len() == 2 {
+            let vs_high: Vec<(EUId, VUId)> = canvas_user
+                .dataset
+                .vertex_highlighted
+                .iter()
+                .copied()
+                .collect();
+
+            if vs_sel.len() == 1 && vs_high.len() == 1 && vs_sel != vs_high {
                 let (eid1, vid1) = vs_sel[0];
-                let (eid2, vid2) = vs_sel[1];
+                let (eid2, vid2) = vs_high[0];
                 if eid1 == eid2 {
                     canvas_user
                         .dataset
@@ -534,37 +510,33 @@ impl AppVars {
         }
     }
 
-    pub(crate) fn change_vertex_radius(&mut self, inc: i32) -> Option<()> {
+    pub(crate) fn dec_vertex_radius(&mut self) -> Option<()> {
         if let ShapeType::Arrow = self.icon_selected {
             let canvas_user = self.get_active_canvas_mut();
-            let vs_sel: Vec<(EUId, VUId)> = canvas_user
-                .dataset
-                .vertices_selected
-                .iter()
-                .copied()
-                .collect();
+            let (eid, vid) = canvas_user.dataset.vertex_selected?;
+            let elem = canvas_user.dataset.get_element_mut(eid)?;
 
-            if vs_sel.len() == 1 {
-                let (eid, vid) = vs_sel[0];
-                let elem = canvas_user.dataset.get_element_mut(eid)?;
+            elem.get_vertex_mut(&vid)?.dec_radius();
 
-                let rad = elem
-                    .get_vertex_mut(&vid)?
-                    .get_properties_mut()
-                    .get_mut(&ValuePropertyKind::Radius)?
-                    .as_radius_mut()?
-                    .0
-                    .as_mut()?; // -> &mut u32
+            elem.set_bezpath();
+            canvas_user.dataset.mark_final_polygon_dirty();
+            canvas_user.dataset.calc_final_polygon();
+            return Some(());
+        }
+        None
+    }
+    pub(crate) fn inc_vertex_radius(&mut self) -> Option<()> {
+        if let ShapeType::Arrow = self.icon_selected {
+            let canvas_user = self.get_active_canvas_mut();
+            let (eid, vid) = canvas_user.dataset.vertex_selected?;
+            let elem = canvas_user.dataset.get_element_mut(eid)?;
 
-                let res = *rad as i32 + inc;
-                if res > 0 {
-                    *rad = res as u32;
-                    elem.set_bezpath();
-                    canvas_user.dataset.mark_final_polygon_dirty();
-                    canvas_user.dataset.calc_final_polygon();
-                    return Some(());
-                }
-            }
+            elem.get_vertex_mut(&vid)?.inc_radius();
+
+            elem.set_bezpath();
+            canvas_user.dataset.mark_final_polygon_dirty();
+            canvas_user.dataset.calc_final_polygon();
+            return Some(());
         }
         None
     }
@@ -572,8 +544,7 @@ impl AppVars {
     pub(crate) fn arrow_up_pressed(&mut self) {
         if matches!(self.active_view, Tabs::Draw) {
             let canvas = self.get_active_canvas_mut();
-            if canvas.dataset.shapes_selected.len() == 1
-                && canvas.dataset.vertices_selected.is_empty()
+            if canvas.dataset.shapes_selected.len() == 1 && canvas.dataset.vertex_selected.is_none()
             {
                 let eid = *canvas.dataset.shapes_selected.iter().next().unwrap();
                 if canvas.dataset.shift_order(eid, -1) {
@@ -585,17 +556,12 @@ impl AppVars {
                 return;
             }
         }
-        let inc = self.canvases[self.active_canvas.idx()]
-            .get_user_ui()
-            .snap
-            .linear() as i32;
-        self.change_vertex_radius(inc);
+        self.inc_vertex_radius();
     }
     pub(crate) fn arrow_down_pressed(&mut self) {
         if matches!(self.active_view, Tabs::Draw) {
             let canvas = self.get_active_canvas_mut();
-            if canvas.dataset.shapes_selected.len() == 1
-                && canvas.dataset.vertices_selected.is_empty()
+            if canvas.dataset.shapes_selected.len() == 1 && canvas.dataset.vertex_selected.is_none()
             {
                 let eid = *canvas.dataset.shapes_selected.iter().next().unwrap();
                 if canvas.dataset.shift_order(eid, 1) {
@@ -607,11 +573,7 @@ impl AppVars {
                 return;
             }
         }
-        let inc = -(self.canvases[self.active_canvas.idx()]
-            .get_user_ui()
-            .snap
-            .linear() as i32);
-        self.change_vertex_radius(inc);
+        self.dec_vertex_radius();
     }
 
     pub(crate) fn clear_toolpath_gcode(&mut self) {
@@ -673,26 +635,28 @@ impl AppVars {
     pub(crate) fn set_move_elements(&mut self) -> bool {
         self.get_active_canvas_mut().move_elements()
     }
-    pub(crate) fn set_move_vertices_selected(&mut self) -> bool {
+    pub(crate) fn set_move_vertices_selected(&mut self) -> Option<()> {
         self.get_active_canvas_mut().move_vertices_selected()
     }
 
     pub(crate) fn get_active_canvas(&self) -> &Canvas {
+        use CanvasKind::*;
         match self.active_canvas {
-            CanvasKind::Gcode => &self.canvases[CanvasKind::Gcode.idx()],
-            CanvasKind::Draw => &self.canvases[CanvasKind::Draw.idx()],
-            CanvasKind::Background => &self.canvases[CanvasKind::Draw.idx()],
-            CanvasKind::Grid => &self.canvases[CanvasKind::Draw.idx()],
-            CanvasKind::Toolpath => &self.canvases[CanvasKind::Toolpath.idx()],
+            Gcode => &self.canvases[Gcode.idx()],
+            Draw => &self.canvases[Draw.idx()],
+            Background => &self.canvases[Draw.idx()],
+            Grid => &self.canvases[Draw.idx()],
+            Toolpath => &self.canvases[Toolpath.idx()],
         }
     }
     pub(crate) fn get_active_canvas_mut(&mut self) -> &mut Canvas {
+        use CanvasKind::*;
         match self.active_canvas {
-            CanvasKind::Gcode => &mut self.canvases[CanvasKind::Gcode.idx()],
-            CanvasKind::Draw => &mut self.canvases[CanvasKind::Draw.idx()],
-            CanvasKind::Background => &mut self.canvases[CanvasKind::Draw.idx()],
-            CanvasKind::Grid => &mut self.canvases[CanvasKind::Draw.idx()],
-            CanvasKind::Toolpath => &mut self.canvases[CanvasKind::Toolpath.idx()],
+            Gcode => &mut self.canvases[Gcode.idx()],
+            Draw => &mut self.canvases[Draw.idx()],
+            Background => &mut self.canvases[Draw.idx()],
+            Grid => &mut self.canvases[Draw.idx()],
+            Toolpath => &mut self.canvases[Toolpath.idx()],
         }
     }
     pub(crate) fn update_canvas_inputs(
@@ -720,7 +684,7 @@ impl AppVars {
             canvas.set_cursor("default");
             return;
         }
-        let has_vertex = canvas.dataset.vertices_highlighted.len() == 1;
+        let has_vertex = canvas.dataset.vertex_highlighted.is_some();
         if has_vertex {
             if canvas.get_user_ui().keys_states.shift_pressed {
                 canvas.set_cursor("url(\"assets/cursor_rotate_16.png\") 8 8, auto");
@@ -936,17 +900,7 @@ fn shape_type_label(shape_type: ShapeType) -> &'static str {
     }
 }
 
-fn set_vertex_pos(value: &mut Value, pos: Vec2) {
-    value.set_curr(pos);
-    value.save();
-}
-
-fn add_shape_property_input(
-    document: &Document,
-    body: &HtmlElement,
-    label: &str,
-    value: f64,
-) -> Option<HtmlInputElement> {
+fn add_property_row(document: &Document, body: &HtmlElement, label: &str) -> Option<HtmlElement> {
     let row = document.create_element("label").ok()?;
     row.set_class_name("shape-prop-row");
 
@@ -955,385 +909,589 @@ fn add_shape_property_input(
     name.set_text_content(Some(label));
     let _ = row.append_child(&name);
 
+    let _ = body.append_child(&row);
+    row.dyn_into::<HtmlElement>().ok()
+}
+
+fn add_property_value(
+    document: &Document,
+    body: &HtmlElement,
+    label: &str,
+    value: &str,
+) -> Option<()> {
+    let row = add_property_row(document, body, label)?;
+    let value_el = document.create_element("span").ok()?;
+    value_el.set_text_content(Some(value));
+    let _ = row.append_child(&value_el);
+    Some(())
+}
+
+fn add_property_number_input(
+    document: &Document,
+    body: &HtmlElement,
+    label: &str,
+    value: Option<f64>,
+    step: f64,
+) -> Option<HtmlInputElement> {
+    let row = add_property_row(document, body, label)?;
     let input: HtmlInputElement = document.create_element("input").ok()?.dyn_into().ok()?;
     input.set_class_name("shape-prop-input");
     input.set_type("number");
-    input.set_step("0.01");
-    input.set_value(&format!("{value:.3}"));
+    input.set_step(&format!("{step:.3}"));
+    let _ = input.set_attribute("inputmode", "decimal");
+    if let Some(value) = value {
+        input.set_value(&format!("{value:.3}"));
+    }
     let _ = row.append_child(&input);
-
-    let _ = body.append_child(&row);
     Some(input)
 }
 
-fn update_shape_properties_panel(av: &RefAV, ordered: &[EUId]) {
-    let Ok(mut avb) = av.try_borrow_mut() else {
-        return;
-    };
-    let Some(body) = avb.document.get_element_by_id("shape-properties-body") else {
-        return;
-    };
-    let Ok(body) = body.dyn_into::<HtmlElement>() else {
-        return;
-    };
-    body.set_inner_html("");
+fn add_property_two_number_inputs(
+    document: &Document,
+    body: &HtmlElement,
+    label: &str,
+    value_a: Option<f64>,
+    value_b: Option<f64>,
+    step: f64,
+    decimals: usize,
+) -> Option<(HtmlInputElement, HtmlInputElement)> {
+    let row = add_property_row(document, body, label)?;
+    let input_a: HtmlInputElement = document.create_element("input").ok()?.dyn_into().ok()?;
+    input_a.set_class_name("shape-prop-input");
+    input_a.set_type("number");
+    input_a.set_step(&format!("{step:.1}"));
+    let _ = input_a.set_attribute("inputmode", "decimal");
+    if let Some(value) = value_a {
+        input_a.set_value(&format!("{value:.decimals$}", decimals = decimals));
+    }
+    let _ = row.append_child(&input_a);
 
-    if !matches!(avb.active_view, Tabs::Draw) {
-        return;
+    let input_b: HtmlInputElement = document.create_element("input").ok()?.dyn_into().ok()?;
+    input_b.set_class_name("shape-prop-input");
+    input_b.set_type("number");
+    input_b.set_step(&format!("{step:.1}"));
+    let _ = input_b.set_attribute("inputmode", "decimal");
+    if let Some(value) = value_b {
+        input_b.set_value(&format!("{value:.decimals$}", decimals = decimals));
+    }
+    let _ = row.append_child(&input_b);
+    Some((input_a, input_b))
+}
+
+fn add_property_text_input(
+    document: &Document,
+    body: &HtmlElement,
+    label: &str,
+    value: &str,
+) -> Option<HtmlInputElement> {
+    let row = add_property_row(document, body, label)?;
+    let input: HtmlInputElement = document.create_element("input").ok()?.dyn_into().ok()?;
+    input.set_class_name("shape-prop-input");
+    input.set_type("text");
+    input.set_value(value);
+    let _ = row.append_child(&input);
+    Some(input)
+}
+
+fn add_property_section(document: &Document, body: &HtmlElement, label: &str) -> Option<()> {
+    let row = add_property_row(document, body, label)?;
+    let spacer = document.create_element("span").ok()?;
+    spacer.set_text_content(Some(""));
+    let _ = row.append_child(&spacer);
+    Some(())
+}
+
+fn update_shape_properties_panel(av: &RefAV, ordered: &[EUId], allow_focus: bool) -> Option<()> {
+    let document = av.borrow().document.clone();
+    let Some(body) = document.get_element_by_id("shape-properties-body") else {
+        return None;
+    };
+    let body = body.dyn_into::<HtmlElement>().ok()?;
+    if !allow_focus {
+        let active = document.active_element()?;
+        if body.contains(Some(&active)) {
+            return None;
+        }
     }
 
-    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-    let selected: Vec<EUId> = ordered
-        .iter()
-        .copied()
-        .filter(|eid| canvas.dataset.shapes_selected.contains(eid))
-        .collect();
+    if !matches!(av.borrow().active_view, Tabs::Draw) {
+        return None;
+    }
+    body.set_inner_html("");
+
+    let selected: Vec<EUId> = {
+        let avb = av.borrow();
+        let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+        let mut selected: Vec<EUId> = ordered
+            .iter()
+            .copied()
+            .filter(|eid| canvas.dataset.shapes_selected.contains(eid))
+            .collect();
+        if selected.is_empty() {
+            selected = canvas.dataset.shapes_selected.iter().copied().collect();
+        }
+        selected
+    };
     if selected.is_empty() {
-        let Ok(msg) = avb.document.create_element("div") else {
-            return;
-        };
+        let msg = document.create_element("div").ok()?;
         msg.set_class_name("shape-prop-empty");
         msg.set_text_content(Some("No shape selected"));
         let _ = body.append_child(&msg);
-        return;
+        return Some(());
     }
     if selected.len() > 1 {
-        let Ok(msg) = avb.document.create_element("div") else {
-            return;
-        };
+        let msg = document.create_element("div").ok()?;
         msg.set_class_name("shape-prop-empty");
         msg.set_text_content(Some("Multiple shapes selected"));
         let _ = body.append_child(&msg);
-        return;
+        return Some(());
     }
 
-    let eid = selected[0];
-    let shape_type = match canvas.dataset.get_element(eid) {
-        Some(shape) => shape.get_shape_type(),
-        None => return,
+    let (eid, shape_props) = {
+        let avb = av.borrow();
+        let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+        let eid = selected[0];
+        let shape = canvas.dataset.get_element(eid)?;
+        let mut props: Vec<(String, Property, PropertyValue)> = shape
+            .get_properties()
+            .iter()
+            .map(|(key, prop)| (prop.to_string(), *key, prop.clone()))
+            .collect();
+        props.sort_by(|a, b| a.1.order().cmp(&b.1.order()).then_with(|| a.0.cmp(&b.0)));
+        (eid, props)
     };
 
-    match shape_type {
-        ShapeType::Disc | ShapeType::ConstrCircle { .. } => {
-            let (center, _edge, radius) = match canvas.dataset.get_element(eid) {
-                Some(shape) => {
-                    let center = shape.get_vertices().val(0).curr();
-                    let edge = shape.get_vertices().val(1).curr();
-                    let radius = (edge - center).hypot();
-                    (center, edge, radius)
-                }
-                None => return,
-            };
+    let _ = add_property_section(&document, &body, "Shape");
+    for (label, prop, prop_val) in shape_props {
+        use PropertyValue::*;
 
-            let Some(cx_input) =
-                add_shape_property_input(&avb.document, &body, "Center X", center.x)
-            else {
-                return;
-            };
-            let Some(cy_input) =
-                add_shape_property_input(&avb.document, &body, "Center Y", center.y)
-            else {
-                return;
-            };
-            let Some(r_input) =
-                add_shape_property_input(&avb.document, &body, "Radius", radius.max(2.0))
-            else {
-                return;
-            };
+        match prop_val {
+            Center { value, .. }
+            | BottomLeft { value, .. }
+            | TopLeft { value, .. }
+            | TopRight { value, .. }
+            | BottomRight { value, .. }
+            | Pt1 { value, .. }
+            | Pt2 { value, .. }
+            | Apex { value, .. } => {
+                let (x_input, y_input) = add_property_two_number_inputs(
+                    &document,
+                    &body,
+                    &label,
+                    Some(value.x),
+                    Some(value.y),
+                    1.0,
+                    0,
+                )?;
 
-            let av_cx = av.clone();
-            let cx_input_clone = cx_input.clone();
-            let on_cx = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
-                let Ok(value) = cx_input_clone.value().parse::<f64>() else {
-                    return;
-                };
-                let Ok(mut avb) = av_cx.try_borrow_mut() else {
-                    return;
-                };
-                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                {
+                let av_x = av.clone();
+                let x_input_clone = x_input.clone();
+                let on_x = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                    let Ok(x) = x_input_clone.value().parse::<f64>() else {
+                        return;
+                    };
+                    let Ok(mut avb) = av_x.try_borrow_mut() else {
+                        return;
+                    };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                    let user_ui = canvas.get_user_ui().clone();
                     let Some(shape) = canvas.dataset.get_element_mut(eid) else {
                         return;
                     };
-                    let center = shape.get_vertices().val(0).curr();
-                    let edge = shape.get_vertices().val(1).curr();
-                    let radius = (edge - center).hypot();
-                    let dir = if radius > 1e-6 {
-                        (edge - center) / radius
-                    } else {
-                        Vec2::new(1.0, 0.0)
+                    let current = match shape.get_properties().get(&prop) {
+                        Some(PropertyValue::Center { value, .. })
+                        | Some(PropertyValue::BottomLeft { value, .. })
+                        | Some(PropertyValue::TopLeft { value, .. })
+                        | Some(PropertyValue::TopRight { value, .. })
+                        | Some(PropertyValue::BottomRight { value, .. })
+                        | Some(PropertyValue::Pt1 { value, .. })
+                        | Some(PropertyValue::Pt2 { value, .. })
+                        | Some(PropertyValue::Apex { value, .. }) => *value,
+                        _ => Vec2::ZERO,
                     };
-                    let new_center = Vec2::new(value, center.y);
-                    let new_edge = new_center + dir * radius;
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), new_center);
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), new_edge);
-                    shape.set_bezpath();
-                }
-                canvas.dataset.mark_final_polygon_dirty();
-                avb.refresh_toolpath_cache();
-                avb.refresh_gcode_cache();
-                drop(avb);
-                render_draw_view(av_cx.clone());
-            });
-            let _ =
-                cx_input.add_event_listener_with_callback("change", on_cx.as_ref().unchecked_ref());
-            on_cx.forget();
+                    let new_value = Vec2::new(x, current.y);
+                    match shape.get_properties_mut().get_mut(&prop) {
+                        Some(PropertyValue::Center { value, .. })
+                        | Some(PropertyValue::BottomLeft { value, .. })
+                        | Some(PropertyValue::TopLeft { value, .. })
+                        | Some(PropertyValue::TopRight { value, .. })
+                        | Some(PropertyValue::BottomRight { value, .. })
+                        | Some(PropertyValue::Pt1 { value, .. })
+                        | Some(PropertyValue::Pt2 { value, .. })
+                        | Some(PropertyValue::Apex { value, .. }) => *value = new_value,
+                        _ => {}
+                    }
 
-            let av_cy = av.clone();
-            let cy_input_clone = cy_input.clone();
-            let on_cy = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
-                let Ok(value) = cy_input_clone.value().parse::<f64>() else {
-                    return;
-                };
-                let Ok(mut avb) = av_cy.try_borrow_mut() else {
-                    return;
-                };
-                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                {
+                    let g = shape.move_vertex_by_props(&prop, user_ui);
+                    log!("Moved vertex by props: {:?}", g);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    let ordered = canvas.dataset.ordered_shapes();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_x.clone());
+                    let _ = update_shape_properties_panel(&av_x, &ordered, true);
+                });
+                let _ = x_input
+                    .add_event_listener_with_callback("change", on_x.as_ref().unchecked_ref());
+                on_x.forget();
+
+                let av_y = av.clone();
+                let y_input_clone = y_input.clone();
+                let on_y = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                    let Ok(y) = y_input_clone.value().parse::<f64>() else {
+                        return;
+                    };
+                    let Ok(mut avb) = av_y.try_borrow_mut() else {
+                        return;
+                    };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                    let user_ui = canvas.get_user_ui().clone();
                     let Some(shape) = canvas.dataset.get_element_mut(eid) else {
                         return;
                     };
-                    let center = shape.get_vertices().val(0).curr();
-                    let edge = shape.get_vertices().val(1).curr();
-                    let radius = (edge - center).hypot();
-                    let dir = if radius > 1e-6 {
-                        (edge - center) / radius
-                    } else {
-                        Vec2::new(1.0, 0.0)
+                    let current = match shape.get_properties().get(&prop) {
+                        Some(PropertyValue::Center { value, .. })
+                        | Some(PropertyValue::BottomLeft { value, .. })
+                        | Some(PropertyValue::TopLeft { value, .. })
+                        | Some(PropertyValue::TopRight { value, .. })
+                        | Some(PropertyValue::BottomRight { value, .. })
+                        | Some(PropertyValue::Pt1 { value, .. })
+                        | Some(PropertyValue::Pt2 { value, .. })
+                        | Some(PropertyValue::Apex { value, .. }) => *value,
+                        _ => Vec2::ZERO,
                     };
-                    let new_center = Vec2::new(center.x, value);
-                    let new_edge = new_center + dir * radius;
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), new_center);
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), new_edge);
-                    shape.set_bezpath();
-                }
-                canvas.dataset.mark_final_polygon_dirty();
-                avb.refresh_toolpath_cache();
-                avb.refresh_gcode_cache();
-                drop(avb);
-                render_draw_view(av_cy.clone());
-            });
-            let _ =
-                cy_input.add_event_listener_with_callback("change", on_cy.as_ref().unchecked_ref());
-            on_cy.forget();
+                    let new_value = Vec2::new(current.x, y);
+                    match shape.get_properties_mut().get_mut(&prop) {
+                        Some(PropertyValue::Center { value, .. })
+                        | Some(PropertyValue::BottomLeft { value, .. })
+                        | Some(PropertyValue::TopLeft { value, .. })
+                        | Some(PropertyValue::TopRight { value, .. })
+                        | Some(PropertyValue::BottomRight { value, .. })
+                        | Some(PropertyValue::Pt1 { value, .. })
+                        | Some(PropertyValue::Pt2 { value, .. })
+                        | Some(PropertyValue::Apex { value, .. }) => *value = new_value,
+                        _ => {}
+                    }
+                    shape.move_vertex_by_props(&prop, user_ui);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    let ordered = canvas.dataset.ordered_shapes();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_y.clone());
+                    let _ = update_shape_properties_panel(&av_y, &ordered, true);
+                });
+                let _ = y_input
+                    .add_event_listener_with_callback("change", on_y.as_ref().unchecked_ref());
+                on_y.forget();
+            }
+            Radius { value, .. } => {
+                let input = add_property_number_input(
+                    &document,
+                    &body,
+                    &label,
+                    Some(value.curr()),
+                    value.step(),
+                )?;
 
-            let av_r = av.clone();
-            let r_input_clone = r_input.clone();
-            let on_r = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
-                let Ok(value) = r_input_clone.value().parse::<f64>() else {
-                    return;
-                };
-                let Ok(mut avb) = av_r.try_borrow_mut() else {
-                    return;
-                };
-                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                {
+                let min = value.min();
+                let max = value.max();
+                input.set_min(&format!("{min:.3}"));
+                input.set_max(&format!("{max:.3}"));
+
+                let av_in = av.clone();
+                let input_clone = input.clone();
+                let on_change = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                    let Ok(value) = input_clone.value().parse::<f64>() else {
+                        return;
+                    };
+                    let Ok(mut avb) = av_in.try_borrow_mut() else {
+                        return;
+                    };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
                     let Some(shape) = canvas.dataset.get_element_mut(eid) else {
                         return;
                     };
-                    let center = shape.get_vertices().val(0).curr();
-                    let edge = shape.get_vertices().val(1).curr();
-                    let radius = (edge - center).hypot();
-                    let dir = if radius > 1e-6 {
-                        (edge - center) / radius
-                    } else {
-                        Vec2::new(1.0, 0.0)
+                    let value = value.clamp(min, max);
+                    if let Some(PropertyValue::Radius { value: v, .. }) =
+                        shape.get_properties_mut().get_mut(&prop)
+                    {
+                        v.set_curr(value);
+                    }
+                    input_clone.set_value(&format!("{value:.3}"));
+                    let _ = shape.update_from_property(&prop);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_in.clone());
+                });
+                let _ = input
+                    .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+                on_change.forget();
+            }
+            Angle { value } => {
+                let input = add_property_number_input(
+                    &document,
+                    &body,
+                    &label,
+                    Some(value.curr()),
+                    value.step(),
+                )?;
+
+                let av_in = av.clone();
+                let input_clone = input.clone();
+                let on_change = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                    let Ok(value) = input_clone.value().parse::<f64>() else {
+                        return;
                     };
-                    let new_radius = value.max(0.0);
-                    let new_edge = center + dir * new_radius;
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), new_edge);
-                    shape.set_bezpath();
-                }
-                canvas.dataset.mark_final_polygon_dirty();
-                avb.refresh_toolpath_cache();
-                avb.refresh_gcode_cache();
-                drop(avb);
-                render_draw_view(av_r.clone());
-            });
-            let _ =
-                r_input.add_event_listener_with_callback("change", on_r.as_ref().unchecked_ref());
-            on_r.forget();
-        }
-        ShapeType::Square | ShapeType::Voronoi => {
-            let (min, max) = match canvas.dataset.get_element(eid) {
-                Some(shape) => {
-                    let min = shape.get_vertices().val(0).curr();
-                    let max = shape.get_vertices().val(2).curr();
-                    (min, max)
-                }
-                None => return,
-            };
-
-            let Some(min_x_input) = add_shape_property_input(&avb.document, &body, "Min X", min.x)
-            else {
-                return;
-            };
-            let Some(min_y_input) = add_shape_property_input(&avb.document, &body, "Min Y", min.y)
-            else {
-                return;
-            };
-            let Some(max_x_input) = add_shape_property_input(&avb.document, &body, "Max X", max.x)
-            else {
-                return;
-            };
-            let Some(max_y_input) = add_shape_property_input(&avb.document, &body, "Max Y", max.y)
-            else {
-                return;
-            };
-
-            let av_min_x = av.clone();
-            let min_x_clone = min_x_input.clone();
-            let on_min_x = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
-                let Ok(value) = min_x_clone.value().parse::<f64>() else {
-                    return;
-                };
-                let Ok(mut avb) = av_min_x.try_borrow_mut() else {
-                    return;
-                };
-                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                {
+                    let Ok(mut avb) = av_in.try_borrow_mut() else {
+                        return;
+                    };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
                     let Some(shape) = canvas.dataset.get_element_mut(eid) else {
                         return;
                     };
-                    let min = shape.get_vertices().val(0).curr();
-                    let max = shape.get_vertices().val(2).curr();
-                    let min_x = value.min(max.x);
-                    let max_x = value.max(max.x);
-                    let min_y = min.y.min(max.y);
-                    let max_y = min.y.max(max.y);
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), Vec2::new(min_x, min_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), Vec2::new(min_x, max_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(2), Vec2::new(max_x, max_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(3), Vec2::new(max_x, min_y));
-                    shape.set_bezpath();
-                }
-                canvas.dataset.mark_final_polygon_dirty();
-                avb.refresh_toolpath_cache();
-                avb.refresh_gcode_cache();
-                drop(avb);
-                render_draw_view(av_min_x.clone());
-            });
-            let _ = min_x_input
-                .add_event_listener_with_callback("change", on_min_x.as_ref().unchecked_ref());
-            on_min_x.forget();
+                    if let Some(PropertyValue::Angle { value: v }) =
+                        shape.get_properties_mut().get_mut(&prop)
+                    {
+                        v.set_curr(value);
+                    }
+                    let _ = shape.update_from_property(&prop);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_in.clone());
+                });
+                let _ = input
+                    .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+                on_change.forget();
+            }
+            Scale { value } => {
+                let input = add_property_number_input(
+                    &document,
+                    &body,
+                    &label,
+                    Some(value.curr()),
+                    value.step(),
+                )?;
 
-            let av_min_y = av.clone();
-            let min_y_clone = min_y_input.clone();
-            let on_min_y = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
-                let Ok(value) = min_y_clone.value().parse::<f64>() else {
-                    return;
-                };
-                let Ok(mut avb) = av_min_y.try_borrow_mut() else {
-                    return;
-                };
-                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                {
+                let min = value.min();
+                let max = value.max();
+                input.set_min(&format!("{min:.3}"));
+                input.set_max(&format!("{max:.3}"));
+
+                let av_in = av.clone();
+                let input_clone = input.clone();
+                let on_change = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                    let Ok(value) = input_clone.value().parse::<f64>() else {
+                        return;
+                    };
+                    let Ok(mut avb) = av_in.try_borrow_mut() else {
+                        return;
+                    };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
                     let Some(shape) = canvas.dataset.get_element_mut(eid) else {
                         return;
                     };
-                    let min = shape.get_vertices().val(0).curr();
-                    let max = shape.get_vertices().val(2).curr();
-                    let min_x = min.x.min(max.x);
-                    let max_x = min.x.max(max.x);
-                    let min_y = value.min(max.y);
-                    let max_y = value.max(max.y);
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), Vec2::new(min_x, min_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), Vec2::new(min_x, max_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(2), Vec2::new(max_x, max_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(3), Vec2::new(max_x, min_y));
-                    shape.set_bezpath();
-                }
-                canvas.dataset.mark_final_polygon_dirty();
-                avb.refresh_toolpath_cache();
-                avb.refresh_gcode_cache();
-                drop(avb);
-                render_draw_view(av_min_y.clone());
-            });
-            let _ = min_y_input
-                .add_event_listener_with_callback("change", on_min_y.as_ref().unchecked_ref());
-            on_min_y.forget();
+                    let value = value.clamp(min, max);
+                    if let Some(Scale { value: v, .. }) = shape.get_properties_mut().get_mut(&prop)
+                    {
+                        v.set_curr(value);
+                    }
+                    input_clone.set_value(&format!("{value:.3}"));
+                    let _ = shape.update_from_property(&prop);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_in.clone());
+                });
+                let _ = input
+                    .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+                on_change.forget();
+            }
+            Thickness { value } => {
+                let input = add_property_number_input(
+                    &document,
+                    &body,
+                    &label,
+                    Some(value.curr()),
+                    value.step(),
+                )?;
 
-            let av_max_x = av.clone();
-            let max_x_clone = max_x_input.clone();
-            let on_max_x = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
-                let Ok(value) = max_x_clone.value().parse::<f64>() else {
-                    return;
-                };
-                let Ok(mut avb) = av_max_x.try_borrow_mut() else {
-                    return;
-                };
-                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                {
+                let min = value.min();
+                let max = value.max();
+                input.set_min(&format!("{min:.3}"));
+                input.set_max(&format!("{max:.3}"));
+
+                let av_in = av.clone();
+                let input_clone = input.clone();
+                let on_change = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                    let Ok(value) = input_clone.value().parse::<f64>() else {
+                        return;
+                    };
+                    let Ok(mut avb) = av_in.try_borrow_mut() else {
+                        return;
+                    };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
                     let Some(shape) = canvas.dataset.get_element_mut(eid) else {
                         return;
                     };
-                    let min = shape.get_vertices().val(0).curr();
-                    let max = shape.get_vertices().val(2).curr();
-                    let min_x = min.x.min(value);
-                    let max_x = min.x.max(value);
-                    let min_y = min.y.min(max.y);
-                    let max_y = min.y.max(max.y);
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), Vec2::new(min_x, min_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), Vec2::new(min_x, max_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(2), Vec2::new(max_x, max_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(3), Vec2::new(max_x, min_y));
-                    shape.set_bezpath();
-                }
-                canvas.dataset.mark_final_polygon_dirty();
-                avb.refresh_toolpath_cache();
-                avb.refresh_gcode_cache();
-                drop(avb);
-                render_draw_view(av_max_x.clone());
-            });
-            let _ = max_x_input
-                .add_event_listener_with_callback("change", on_max_x.as_ref().unchecked_ref());
-            on_max_x.forget();
+                    let value = value.clamp(min, max);
+                    if let Some(Thickness { value: v, .. }) =
+                        shape.get_properties_mut().get_mut(&prop)
+                    {
+                        v.set_curr(value);
+                    }
+                    input_clone.set_value(&format!("{value:.3}"));
+                    let _ = shape.update_from_property(&prop);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_in.clone());
+                });
+                let _ = input
+                    .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+                on_change.forget();
+            }
+            PropertyValue::Seeds { value } => {
+                let input = add_property_number_input(
+                    &document,
+                    &body,
+                    &label,
+                    Some(value.curr() as f64),
+                    value.step() as f64,
+                )?;
+                input.set_step("1");
+                input.set_value(&format!("{}", value.curr()));
+                let _ = input.set_attribute("inputmode", "numeric");
 
-            let av_max_y = av.clone();
-            let max_y_clone = max_y_input.clone();
-            let on_max_y = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
-                let Ok(value) = max_y_clone.value().parse::<f64>() else {
-                    return;
-                };
-                let Ok(mut avb) = av_max_y.try_borrow_mut() else {
-                    return;
-                };
-                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                {
+                let min = value.min();
+                let max = value.max();
+                input.set_min(&format!("{min}"));
+                input.set_max(&format!("{max}"));
+
+                let av_in = av.clone();
+                let input_clone = input.clone();
+                let on_change = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                    let Ok(value) = input_clone.value().parse::<f64>() else {
+                        return;
+                    };
+                    let Ok(mut avb) = av_in.try_borrow_mut() else {
+                        return;
+                    };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
                     let Some(shape) = canvas.dataset.get_element_mut(eid) else {
                         return;
                     };
-                    let min = shape.get_vertices().val(0).curr();
-                    let max = shape.get_vertices().val(2).curr();
-                    let min_x = min.x.min(max.x);
-                    let max_x = min.x.max(max.x);
-                    let min_y = min.y.min(value);
-                    let max_y = min.y.max(value);
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(0), Vec2::new(min_x, min_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(1), Vec2::new(min_x, max_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(2), Vec2::new(max_x, max_y));
-                    set_vertex_pos(shape.get_vertices_mut().val_mut(3), Vec2::new(max_x, min_y));
-                    shape.set_bezpath();
-                }
-                canvas.dataset.mark_final_polygon_dirty();
-                avb.refresh_toolpath_cache();
-                avb.refresh_gcode_cache();
-                drop(avb);
-                render_draw_view(av_max_y.clone());
-            });
-            let _ = max_y_input
-                .add_event_listener_with_callback("change", on_max_y.as_ref().unchecked_ref());
-            on_max_y.forget();
-        }
-        _ => {
-            let Ok(msg) = avb.document.create_element("div") else {
-                return;
-            };
-            msg.set_class_name("shape-prop-empty");
-            msg.set_text_content(Some("No editable properties"));
-            let _ = body.append_child(&msg);
+                    let value = value.round() as usize;
+                    let value = value.clamp(min as usize, max as usize);
+                    if let Some(PropertyValue::Seeds { value: v, .. }) =
+                        shape.get_properties_mut().get_mut(&prop)
+                    {
+                        v.set_curr(value as u64);
+                    }
+                    input_clone.set_value(&format!("{value}"));
+                    let _ = shape.update_from_property(&prop);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_in.clone());
+                });
+                let _ = input
+                    .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+                on_change.forget();
+            }
+            Magnets { value } => {
+                let input = add_property_number_input(
+                    &document,
+                    &body,
+                    &label,
+                    Some(value.curr() as f64),
+                    value.step() as f64,
+                )?;
+                input.set_step("1");
+                input.set_value(&format!("{}", value.curr()));
+                let _ = input.set_attribute("inputmode", "numeric");
+
+                let min = value.min();
+                let max = value.max();
+                input.set_min(&format!("{min}"));
+                input.set_max(&format!("{max}"));
+
+                let av_in = av.clone();
+                let input_clone = input.clone();
+                let on_change = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                    let Ok(value) = input_clone.value().parse::<f64>() else {
+                        return;
+                    };
+                    let Ok(mut avb) = av_in.try_borrow_mut() else {
+                        return;
+                    };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                        return;
+                    };
+                    let value = value.round() as usize;
+                    let value = value.clamp(min, max);
+                    if let Some(PropertyValue::Magnets { value: v, .. }) =
+                        shape.get_properties_mut().get_mut(&prop)
+                    {
+                        v.set_curr(value);
+                    }
+                    input_clone.set_value(&format!("{value}"));
+                    let _ = shape.update_from_property(&prop);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_in.clone());
+                });
+                let _ = input
+                    .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+                on_change.forget();
+            }
+            Text { value } => {
+                let input = add_property_text_input(&document, &body, &label, value.as_str())?;
+
+                let av_in = av.clone();
+                let input_clone = input.clone();
+                let on_change = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                    let value = input_clone.value();
+                    let Ok(mut avb) = av_in.try_borrow_mut() else {
+                        return;
+                    };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                        return;
+                    };
+                    if let Some(PropertyValue::Text { value: v }) =
+                        shape.get_properties_mut().get_mut(&prop)
+                    {
+                        *v = value.clone();
+                    }
+                    let _ = shape.update_from_property(&prop);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_in.clone());
+                });
+                let _ = input
+                    .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+                on_change.forget();
+            }
+            PropertyValue::Font { value } => {
+                let _ = add_property_value(&document, &body, &label, &value.as_str());
+            }
         }
     }
+    Some(())
 }
 
 pub(crate) fn update_shapes_panel(av: RefAV) {
@@ -1348,7 +1506,7 @@ pub(crate) fn update_shapes_panel(av: RefAV) {
         let _ = avb.shapes_panel.style().set_property("display", "none");
         list.set_inner_html("");
         drop(avb);
-        update_shape_properties_panel(&av, &[]);
+        update_shape_properties_panel(&av, &[], false);
         return;
     }
     let _ = avb.shapes_panel.style().set_property("display", "flex");
@@ -1419,7 +1577,7 @@ pub(crate) fn update_shapes_panel(av: RefAV) {
     }
 
     drop(avb);
-    update_shape_properties_panel(&av, &ordered);
+    update_shape_properties_panel(&av, &ordered, false);
 }
 
 fn reorder_shapes_by_index(av: RefAV, from_idx: usize, to_idx: usize) {

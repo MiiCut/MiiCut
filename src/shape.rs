@@ -1,5 +1,7 @@
 use crate::math::{get_magnets_vertices, length_unit_to_mm};
-use crate::types::{ValueProperty, ValuePropertyKind};
+use crate::type_scalar::Scalar;
+use crate::type_vertex::Vertex;
+use crate::types::{Properties, Property, PropertyValue};
 use crate::voronoi::{inset_rings, round_rings, voronoi_cells};
 use crate::{
     dom::document,
@@ -8,7 +10,7 @@ use crate::{
         bez_path_to_geo_polygon, bezpath_from_apices, distance_to_segment,
         geo_multipolygon_to_bez_paths, rotate_vector, snap_angle, snap_val, snap_vertex, EPSILON,
     },
-    types::{EUId, SegBundle, VUId, Value, VecRing},
+    types::{EUId, SegBundle, VUId, VecRing},
 };
 use geo::algorithm::contains::Contains;
 use geo::algorithm::orient::Orient;
@@ -16,7 +18,6 @@ use geo::algorithm::translate::Translate;
 use geo::{orient::Direction, Coord, LineString, MultiPolygon, Point, Polygon};
 use js_sys::Math;
 use kurbo::{flatten, Arc, BezPath, Circle, PathEl, Shape, Vec2};
-use std::collections::HashMap;
 use std::{collections::HashSet, hash::Hash};
 use std::{
     f64::consts::PI,
@@ -33,13 +34,13 @@ pub enum TextFont {
     Urbanist,
 }
 impl TextFont {
-    fn data(&self) -> &'static [u8] {
+    pub fn data(&self) -> &'static [u8] {
         match self {
             TextFont::Stencilia => include_bytes!("../assets/stencilia/Stencilia-A.ttf"),
             TextFont::Urbanist => include_bytes!("../assets/urbanist/Urbanist-Variable.ttf"),
         }
     }
-    fn _as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             TextFont::Stencilia => "Stencilia-A",
             TextFont::Urbanist => "Urbanist",
@@ -119,120 +120,6 @@ impl SvgData {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PropertyRepresentation {
-    Normal,
-    Position,
-    RadiusAngle,
-    ScalarFloat,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ShapePropertyKind {
-    Center,
-    Radius,
-    Angle,
-    Scale,
-    Pt1,
-    Pt2,
-    Thickness,
-    Text,
-    Font,
-    Seeds,
-    Magnets,
-    Apex { idx: usize },
-}
-impl ShapePropertyKind {
-    pub fn as_str(&self) -> String {
-        use ShapePropertyKind::*;
-        match self {
-            Center { .. } => "center".to_string(),
-            Angle { .. } => "angle".to_string(),
-            Radius { .. } => "radius".to_string(),
-            Scale { .. } => "scale".to_string(),
-            Pt1 { .. } => "pt1".to_string(),
-            Pt2 { .. } => "pt2".to_string(),
-            Thickness { .. } => "thickness".to_string(),
-            Text { .. } => "text".to_string(),
-            Font { .. } => "font".to_string(),
-            Seeds { .. } => "seeds".to_string(),
-            Magnets { .. } => "magnets".to_string(),
-            Apex { idx } => format!("apex {}", idx),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum ShapeProperty {
-    Center {
-        idx: usize, // index of the vertex in the shape's vertex list
-    },
-
-    Radius {
-        idx: usize, // index of the vertex in the shape's vertex list
-    },
-    Angle {
-        value: f64,
-        min: f64,
-        max: f64,
-    },
-    Scale {
-        value: f64,
-        min: f64,
-        max: f64,
-    },
-    Pt1 {
-        idx: usize, // index of the vertex in the shape's vertex list
-    },
-    Pt2 {
-        idx: usize, // index of the vertex in the shape's vertex list
-    },
-    Thickness {
-        value: f64,
-        min: f64,
-        max: f64,
-    },
-    Text {
-        value: String,
-    },
-    Font {
-        value: TextFont,
-    },
-    Seeds {
-        value: usize,
-        min: usize,
-        max: usize,
-    },
-    Magnets {
-        value: usize,
-        min: usize,
-        max: usize,
-    },
-    Apex {
-        idx: usize, // index of the vertex in the shape's vertex list
-    },
-}
-impl ShapeProperty {
-    pub fn representation(&self) -> PropertyRepresentation {
-        use PropertyRepresentation::*;
-        use ShapeProperty::*;
-        match self {
-            Center { .. } => Position,
-            Radius { .. } => RadiusAngle,
-            Angle { .. } => ScalarFloat,
-            Scale { .. } => ScalarFloat,
-            Pt1 { .. } => Position,
-            Pt2 { .. } => Position,
-            Thickness { .. } => ScalarFloat,
-            Text { .. } => Normal,
-            Font { .. } => Normal,
-            Seeds { .. } => ScalarFloat,
-            Magnets { .. } => ScalarFloat,
-            Apex { .. } => Position,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShapeType {
     Arrow,
     Disc,
@@ -307,7 +194,7 @@ pub struct GeneralShape {
     order: i32,
     vertices: VecRing<VUId>,
     operation: Operation,
-    properties: HashMap<ShapePropertyKind, ShapeProperty>,
+    properties: Properties,
 
     // Data for specific shapes
     text_shape_data: Option<TextData>,
@@ -321,7 +208,7 @@ pub struct GeneralShape {
 }
 impl Clone for GeneralShape {
     fn clone(&self) -> Self {
-        let new_vertices: Vec<(VUId, Value)> = self
+        let new_vertices: Vec<(VUId, Vertex)> = self
             .vertices
             .iter()
             .map(|(_, value)| (VUId::new(), value.clone()))
@@ -345,7 +232,16 @@ impl Clone for GeneralShape {
 impl GeneralShape {
     const TOLERANCE: f64 = 0.01;
     const GRAB_RADIUS: f64 = 5.0;
-    const MAGNETS: usize = 6;
+    const MIN_MAGNETS: usize = 6;
+    const DEFAULT_MAGNETS: usize = 6;
+    const MIN_RADIUS: f64 = 2.0;
+    const DEFAULT_SEEDS: usize = 40;
+    const MIN_SEEDS: usize = 10;
+    const MAX_SEEDS: usize = 100;
+    const DEFAULT_SCALE: f64 = 1.0;
+    const MIN_SCALE: f64 = 0.01;
+    const MAX_SCALE: f64 = 1000.0;
+    const SCALE_STEP: f64 = 0.1;
 
     pub fn op_next(&mut self) {
         self.operation.next();
@@ -357,30 +253,45 @@ impl GeneralShape {
         self.operation.difference();
     }
 
-    fn bb(v1: Vec2, v2: Vec2) -> Vec<Value> {
+    fn bb(v1: Vec2, v2: Vec2) -> Vec<Vertex> {
         let min_x = v1.x.min(v2.x);
         let max_x = v1.x.max(v2.x);
         let min_y = v1.y.min(v2.y);
         let max_y = v1.y.max(v2.y);
-        let tl = Value::new_from_coords(min_x, max_y);
-        let tr = Value::new_from_coords(max_x, max_y);
-        let br = Value::new_from_coords(max_x, min_y);
-        let bl = Value::new_from_coords(min_x, min_y);
-        vec![bl, tl, tr, br]
+        let bl = Vertex::new_from_coords(min_x, max_y);
+        let tr = Vertex::new_from_coords(max_x, max_y);
+        let br = Vertex::new_from_coords(max_x, min_y);
+        let tl = Vertex::new_from_coords(min_x, min_y);
+        vec![tl, bl, tr, br]
     }
+
     pub fn new_shape_disc(v1: Vec2, v2: Vec2, order: i32) -> Option<Self> {
         if v1 == v2 {
             return None;
         }
-        let vs = vec![Value::new(v1), Value::new(v2)];
+        let vs = vec![Vertex::new(v1), Vertex::new(v2)];
 
-        use ShapeProperty::*;
-        let key_center = Center { idx: 0 };
-        let key_radius = Radius { idx: 1 };
-        let properties: HashMap<ShapePropertyKind, ShapeProperty> = HashMap::from([
-            (ShapePropertyKind::Center, key_center.clone()),
-            (ShapePropertyKind::Radius, key_radius.clone()),
-        ]);
+        let mut properties = Properties::new();
+        use PropertyValue::*;
+        properties.add(Property::Center, Center { idx: 0, value: v1 });
+        properties.add(
+            Property::Radius,
+            Radius {
+                idx: 1,
+                value: Scalar::new((v2 - v1).hypot(), Self::MIN_RADIUS, f64::INFINITY, 1.0),
+            },
+        );
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(
+                    Self::DEFAULT_SCALE,
+                    Self::MIN_SCALE,
+                    Self::MAX_SCALE,
+                    Self::SCALE_STEP,
+                ),
+            },
+        );
 
         GeneralShape::new(
             ShapeType::Disc,
@@ -400,17 +311,64 @@ impl GeneralShape {
         }
         let vs = GeneralShape::bb(v1, v2);
 
-        use ShapeProperty::*;
-        let key_pt1 = Pt1 { idx: 0 };
-        let key_pt2 = Pt2 { idx: 2 };
-        let properties: HashMap<ShapePropertyKind, ShapeProperty> = HashMap::from([
-            (ShapePropertyKind::Pt1, key_pt1.clone()),
-            (ShapePropertyKind::Pt2, key_pt2.clone()),
-        ]);
+        use PropertyValue::*;
+        let mut properties = Properties::new();
+        properties.add(
+            Property::BottomLeft,
+            BottomLeft {
+                idx: 0,
+                value: vs[0].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopLeft,
+            TopLeft {
+                idx: 1,
+                value: vs[1].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopRight,
+            TopRight {
+                idx: 2,
+                value: vs[2].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::BottomRight,
+            BottomRight {
+                idx: 3,
+                value: vs[3].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(
+                    Self::DEFAULT_SCALE,
+                    Self::MIN_SCALE,
+                    Self::MAX_SCALE,
+                    Self::SCALE_STEP,
+                ),
+            },
+        );
+
+        let values: Vec<Vertex> = vs
+            .into_iter()
+            .map(|v| {
+                let mut vertex = v;
+                vertex.enable_radius();
+                vertex
+            })
+            .collect();
 
         GeneralShape::new(
             ShapeType::Square,
-            vs,
+            values,
             properties,
             order,
             None,
@@ -426,22 +384,30 @@ impl GeneralShape {
         }
         let m = (v1 + v2) * 0.5;
         let dir = (v2 - v1).normalize();
-        let side = Value::new(m - Vec2::new(dir.y, -dir.x) * 20.);
-        let vs = vec![Value::new(v1), Value::new(v2), side];
+        let side = Vertex::new(m - Vec2::new(dir.y, -dir.x) * 20.);
+        let vs = vec![Vertex::new(v1), Vertex::new(v2), side];
 
-        use ShapeProperty::*;
-        let key_pt1 = Pt1 { idx: 0 };
-        let key_pt2 = Pt2 { idx: 1 };
-        let key_thickness = Thickness {
-            value: 20.0,
-            min: 0.1,
-            max: 100.0,
-        };
-        let properties: HashMap<ShapePropertyKind, ShapeProperty> = HashMap::from([
-            (ShapePropertyKind::Pt1, key_pt1.clone()),
-            (ShapePropertyKind::Pt2, key_pt2.clone()),
-            (ShapePropertyKind::Thickness, key_thickness.clone()),
-        ]);
+        use PropertyValue::*;
+        let mut properties = Properties::new();
+        properties.add(Property::Pt1, Pt1 { idx: 0, value: v1 });
+        properties.add(Property::Pt2, Pt2 { idx: 1, value: v2 });
+        properties.add(
+            Property::Thickness,
+            Thickness {
+                value: Scalar::new(20.0, GeneralShape::MIN_RADIUS, f64::INFINITY, 1.0),
+            },
+        );
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(
+                    Self::DEFAULT_SCALE,
+                    Self::MIN_SCALE,
+                    Self::MAX_SCALE,
+                    Self::SCALE_STEP,
+                ),
+            },
+        );
 
         GeneralShape::new(
             ShapeType::Oblong,
@@ -465,27 +431,64 @@ impl GeneralShape {
         let vs = GeneralShape::bb(v1, v2);
         let (poly, scale) = text_to_multipolygon(DEFAULT_TEXT, &DEFAULT_FONT, v1, v2);
 
-        use ShapeProperty::*;
-        let key_pt1 = Pt1 { idx: 0 };
-        let key_pt2 = Pt2 { idx: 2 };
-        let key_text = Text {
-            value: DEFAULT_TEXT.to_string(),
-        };
-        let key_font = Font {
-            value: DEFAULT_FONT,
-        };
-        let key_scale = Scale {
-            value: scale as f64,
-            min: 0.1,
-            max: 10.0,
-        };
-        let properties: HashMap<ShapePropertyKind, ShapeProperty> = HashMap::from([
-            (ShapePropertyKind::Pt1, key_pt1.clone()),
-            (ShapePropertyKind::Pt2, key_pt2.clone()),
-            (ShapePropertyKind::Text, key_text.clone()),
-            (ShapePropertyKind::Font, key_font.clone()),
-            (ShapePropertyKind::Scale, key_scale.clone()),
-        ]);
+        use PropertyValue::*;
+        let mut properties = Properties::new();
+        properties.add(
+            Property::BottomLeft,
+            BottomLeft {
+                idx: 0,
+                value: vs[0].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopLeft,
+            TopLeft {
+                idx: 1,
+                value: vs[1].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopRight,
+            TopRight {
+                idx: 2,
+                value: vs[2].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::BottomRight,
+            BottomRight {
+                idx: 3,
+                value: vs[3].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::Text,
+            Text {
+                value: DEFAULT_TEXT.to_string(),
+            },
+        );
+        properties.add(
+            Property::Font,
+            Font {
+                value: DEFAULT_FONT,
+            },
+        );
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(
+                    Self::DEFAULT_SCALE,
+                    Self::MIN_SCALE,
+                    Self::MAX_SCALE,
+                    Self::SCALE_STEP,
+                ),
+            },
+        );
+        let _ = scale;
 
         GeneralShape::new(
             ShapeType::Text,
@@ -503,12 +506,38 @@ impl GeneralShape {
         if vs.len() < 3 {
             return None;
         }
-        let properties: HashMap<ShapePropertyKind, ShapeProperty> = vs
-            .iter()
-            .enumerate()
-            .map(|(idx, _)| (ShapePropertyKind::Apex { idx }, ShapeProperty::Apex { idx }))
+        use PropertyValue::*;
+        let mut properties = Properties::new();
+        vs.iter().enumerate().for_each(|(idx, v)| {
+            properties.add(
+                Property::Apex { idx },
+                Apex {
+                    idx,
+                    value: v.clone(),
+                    radius: None,
+                },
+            )
+        });
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(
+                    Self::DEFAULT_SCALE,
+                    Self::MIN_SCALE,
+                    Self::MAX_SCALE,
+                    Self::SCALE_STEP,
+                ),
+            },
+        );
+        let values: Vec<Vertex> = vs
+            .into_iter()
+            .map(|v| {
+                let mut vertex = Vertex::new(v);
+                vertex.enable_radius();
+                vertex
+            })
             .collect();
-        let values: Vec<Value> = vs.into_iter().map(|v| Value::new(v)).collect();
+
         GeneralShape::new(
             ShapeType::Poly,
             values,
@@ -522,28 +551,70 @@ impl GeneralShape {
         )
     }
     pub fn new_shape_voronoi(v1: Vec2, v2: Vec2, order: i32) -> Option<Self> {
-        const SEEDS: usize = 40;
         if v1 == v2 {
             return None;
         }
-        let rings = build_voronoi_rings(v1, v2, SEEDS);
+        let rings = build_voronoi_rings(v1, v2, GeneralShape::DEFAULT_SEEDS);
         let voronoi_svg = voronoi_rings_to_svg_data(rings);
 
         let vs = GeneralShape::bb(v1, v2);
 
-        use ShapeProperty::*;
-        let key_pt1 = Pt1 { idx: 0 };
-        let key_pt2 = Pt2 { idx: 2 };
-        let key_seeds = Seeds {
-            value: SEEDS,
-            min: 5,
-            max: 100,
-        };
-        let properties: HashMap<ShapePropertyKind, ShapeProperty> = HashMap::from([
-            (ShapePropertyKind::Pt1, key_pt1.clone()),
-            (ShapePropertyKind::Pt2, key_pt2.clone()),
-            (ShapePropertyKind::Seeds, key_seeds.clone()),
-        ]);
+        use PropertyValue::*;
+        let mut properties = Properties::new();
+        properties.add(
+            Property::BottomLeft,
+            BottomLeft {
+                idx: 0,
+                value: vs[0].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopLeft,
+            TopLeft {
+                idx: 1,
+                value: vs[1].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopRight,
+            TopRight {
+                idx: 2,
+                value: vs[2].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::BottomRight,
+            BottomRight {
+                idx: 3,
+                value: vs[3].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::Seeds,
+            Seeds {
+                value: Scalar::new(
+                    GeneralShape::DEFAULT_SEEDS as u64,
+                    GeneralShape::MIN_SEEDS as u64,
+                    GeneralShape::MAX_SEEDS as u64,
+                    1,
+                ),
+            },
+        );
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(
+                    Self::DEFAULT_SCALE,
+                    Self::MIN_SCALE,
+                    Self::MAX_SCALE,
+                    Self::SCALE_STEP,
+                ),
+            },
+        );
 
         GeneralShape::new(
             ShapeType::Voronoi,
@@ -562,6 +633,10 @@ impl GeneralShape {
         let mut bbox_min = Vec2::new(f64::INFINITY, f64::INFINITY);
         let mut bbox_max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
         let mut rings = Vec::new();
+        let fill_rule = parsed
+            .first()
+            .map(|shape| shape._fill_rule)
+            .unwrap_or(SvgFillRule::NonZero);
         for shape in parsed {
             bbox_min.x = bbox_min.x.min(shape.bbox_min.x);
             bbox_min.y = bbox_min.y.min(shape.bbox_min.y);
@@ -576,16 +651,54 @@ impl GeneralShape {
         {
             return None;
         }
-        let svg = SvgData::new(rings, SvgFillRule::NonZero);
+        let svg = SvgData::new(rings, fill_rule);
         let vs = GeneralShape::bb(bbox_max, bbox_min);
 
-        use ShapeProperty::*;
-        let key_pt1 = Pt1 { idx: 0 };
-        let key_pt2 = Pt2 { idx: 2 };
-        let properties: HashMap<ShapePropertyKind, ShapeProperty> = HashMap::from([
-            (ShapePropertyKind::Pt1, key_pt1.clone()),
-            (ShapePropertyKind::Pt2, key_pt2.clone()),
-        ]);
+        use PropertyValue::*;
+        let mut properties = Properties::new();
+        properties.add(
+            Property::BottomLeft,
+            BottomLeft {
+                idx: 0,
+                value: vs[0].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopLeft,
+            TopLeft {
+                idx: 1,
+                value: vs[1].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopRight,
+            TopRight {
+                idx: 2,
+                value: vs[2].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::BottomRight,
+            BottomRight {
+                idx: 3,
+                value: vs[3].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(
+                    Self::DEFAULT_SCALE,
+                    Self::MIN_SCALE,
+                    Self::MAX_SCALE,
+                    Self::SCALE_STEP,
+                ),
+            },
+        );
 
         GeneralShape::new(
             ShapeType::Svg,
@@ -610,6 +723,10 @@ impl GeneralShape {
         let mut rings = Vec::new();
         let mut svg_min = Vec2::new(f64::INFINITY, f64::INFINITY);
         let mut svg_max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let fill_rule = parsed
+            .first()
+            .map(|shape| shape._fill_rule)
+            .unwrap_or(SvgFillRule::NonZero);
         for shape in parsed {
             svg_min.x = svg_min.x.min(shape.bbox_min.x);
             svg_min.y = svg_min.y.min(shape.bbox_min.y);
@@ -629,25 +746,66 @@ impl GeneralShape {
         let target_max = Vec2::new(v1.x.max(v2.x), v1.y.max(v2.y));
         let target_size = target_max - target_min;
         let svg_size = svg_max - svg_min;
-        let (fit_min, fit_max) = if svg_size.x > target_size.x || svg_size.y > target_size.y {
-            (target_min, target_max)
+        let center = (target_min + target_max) * 0.5;
+        let fit_size = if svg_size.x > target_size.x || svg_size.y > target_size.y {
+            let scale = (target_size.x / svg_size.x).min(target_size.y / svg_size.y);
+            svg_size * scale
         } else {
-            let center = (target_min + target_max) * 0.5;
-            let half = svg_size * 0.5;
-            (center - half, center + half)
+            svg_size
         };
-        let svg = SvgData::new(rings, SvgFillRule::NonZero);
+        let half = fit_size * 0.5;
+        let fit_min = center - half;
+        let fit_max = center + half;
+        let svg = SvgData::new(rings, fill_rule);
         let tl = Vec2::new(fit_min.x, fit_max.y);
         let br = Vec2::new(fit_max.x, fit_min.y);
         let vs = GeneralShape::bb(tl, br);
 
-        use ShapeProperty::*;
-        let key_pt1 = Pt1 { idx: 0 };
-        let key_pt2 = Pt2 { idx: 2 };
-        let properties: HashMap<ShapePropertyKind, ShapeProperty> = HashMap::from([
-            (ShapePropertyKind::Pt1, key_pt1.clone()),
-            (ShapePropertyKind::Pt2, key_pt2.clone()),
-        ]);
+        use PropertyValue::*;
+        let mut properties = Properties::new();
+        properties.add(
+            Property::BottomLeft,
+            BottomLeft {
+                idx: 0,
+                value: vs[0].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopLeft,
+            TopLeft {
+                idx: 1,
+                value: vs[1].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopRight,
+            TopRight {
+                idx: 2,
+                value: vs[2].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::BottomRight,
+            BottomRight {
+                idx: 3,
+                value: vs[3].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(
+                    Self::DEFAULT_SCALE,
+                    Self::MIN_SCALE,
+                    Self::MAX_SCALE,
+                    Self::SCALE_STEP,
+                ),
+            },
+        );
 
         GeneralShape::new(
             ShapeType::Svg,
@@ -665,15 +823,23 @@ impl GeneralShape {
         if v1 == v2 {
             return None;
         }
-        let vs = vec![Value::new(v1), Value::new(v2)];
+        let vs = vec![Vertex::new(v1), Vertex::new(v2)];
 
-        use ShapeProperty::*;
-        let key_pt1 = Pt1 { idx: 0 };
-        let key_pt2 = Pt2 { idx: 1 };
-        let properties: HashMap<ShapePropertyKind, ShapeProperty> = HashMap::from([
-            (ShapePropertyKind::Pt1, key_pt1.clone()),
-            (ShapePropertyKind::Pt2, key_pt2.clone()),
-        ]);
+        use PropertyValue::*;
+        let mut properties = Properties::new();
+        properties.add(Property::Pt1, Pt1 { idx: 0, value: v1 });
+        properties.add(Property::Pt2, Pt2 { idx: 1, value: v2 });
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(
+                    Self::DEFAULT_SCALE,
+                    Self::MIN_SCALE,
+                    Self::MAX_SCALE,
+                    Self::SCALE_STEP,
+                ),
+            },
+        );
 
         GeneralShape::new(
             ShapeType::ConstrLine,
@@ -691,24 +857,34 @@ impl GeneralShape {
         if v1 == v2 {
             return None;
         }
-        use ShapeProperty::*;
-        let key_center = Center { idx: 0 };
-        let key_radius = Radius { idx: 1 };
-        let key_magnets = Magnets {
-            value: GeneralShape::MAGNETS,
-            min: 3,
-            max: 20,
-        };
-        let properties: HashMap<ShapePropertyKind, ShapeProperty> = HashMap::from([
-            (ShapePropertyKind::Center, key_center.clone()),
-            (ShapePropertyKind::Radius, key_radius.clone()),
-            (ShapePropertyKind::Magnets, key_magnets.clone()),
-        ]);
 
-        let vs_magnets = get_magnets_vertices(v1, v2, GeneralShape::MAGNETS);
+        let mut properties = Properties::new();
+        use PropertyValue::*;
+        properties.add(Property::Center, Center { idx: 0, value: v1 });
+        properties.add(
+            Property::Radius,
+            Radius {
+                idx: 1,
+                value: Scalar::new((v2 - v1).hypot(), Self::MIN_RADIUS, f64::INFINITY, 1.0),
+            },
+        );
+        properties.add(
+            Property::Magnets,
+            Magnets {
+                value: Scalar::new(GeneralShape::DEFAULT_MAGNETS, 3, 20, 1),
+            },
+        );
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(1.0, 0.01, 1000.0, 0.1),
+            },
+        );
+
+        let vs_magnets = get_magnets_vertices(v1, v2, GeneralShape::DEFAULT_MAGNETS);
         let mut vs = vec![v1, v2];
         vs.extend(vs_magnets);
-        let vs: Vec<Value> = vs.into_iter().map(|v| Value::new(v)).collect();
+        let vs: Vec<Vertex> = vs.into_iter().map(|v| Vertex::new(v)).collect();
 
         GeneralShape::new(
             ShapeType::ConstrCircle,
@@ -725,8 +901,8 @@ impl GeneralShape {
 
     pub fn new(
         shape_type: ShapeType,
-        vs: Vec<Value>,
-        properties: HashMap<ShapePropertyKind, ShapeProperty>,
+        vs: Vec<Vertex>,
+        properties: Properties,
         order: i32,
         text_shape: Option<TextData>,
         svg_shape: Option<SvgData>,
@@ -734,7 +910,7 @@ impl GeneralShape {
         operation: Operation,
         shape_name: Option<String>,
     ) -> Option<Self> {
-        let vs: Vec<Value> = vs.iter().cloned().collect();
+        let vs: Vec<Vertex> = vs.iter().cloned().collect();
         if vs.is_empty() {
             return None;
         }
@@ -747,9 +923,6 @@ impl GeneralShape {
             .map(|v| (VUId::new(), v.clone()))
             .collect::<Vec<_>>()[..];
 
-        for (vid, _) in vertices.iter() {
-            log!("Vertex ID: {}", vid);
-        }
         let mut shape = GeneralShape {
             shape_type,
             vertices: VecRing::from_slice(vertices).unwrap(),
@@ -771,7 +944,7 @@ impl GeneralShape {
         Some(shape)
     }
 
-    pub fn get_vertex(&self, value_uid: &VUId) -> Option<&Value> {
+    pub fn get_vertex(&self, value_uid: &VUId) -> Option<&Vertex> {
         self.vertices.iter().find_map(
             |(uid, value)| {
                 if uid == value_uid {
@@ -782,7 +955,7 @@ impl GeneralShape {
             },
         )
     }
-    pub fn get_vertex_mut(&mut self, value_uid: &VUId) -> Option<&mut Value> {
+    pub fn get_vertex_mut(&mut self, value_uid: &VUId) -> Option<&mut Vertex> {
         self.vertices.iter_mut().find_map(
             |(uid, value)| {
                 if uid == value_uid {
@@ -823,7 +996,7 @@ impl GeneralShape {
         }
         return None;
     }
-    pub fn move_vertex(&mut self, value_uid: VUId, user_ui: &UserUI) -> bool {
+    fn move_vertex(&mut self, value_uid: VUId, user_ui: &UserUI) -> bool {
         let snap = user_ui.snap;
         let mut delta = user_ui.pointer.curr() - user_ui.pointer.saved();
         if !user_ui.magnetized {
@@ -839,6 +1012,7 @@ impl GeneralShape {
                         return false;
                     }
                 }
+
                 // The first vertex is the center
                 // The second vertex is the radius
                 if self.vertices.key(0) == &value_uid {
@@ -869,6 +1043,11 @@ impl GeneralShape {
                         true
                     }
                 } else if self.vertices.key(1) == &value_uid {
+                    let try_curr = self.vertices.val(1).saved() + delta;
+                    if (try_curr - self.vertices.val(0).curr()).hypot() < 2.0 {
+                        log!("Radius too small");
+                        return false;
+                    }
                     self.vertices.val_mut(1).add(delta);
                     if let Some(seg) =
                         SegBundle::new(self.vertices.val(0).saved(), self.vertices.val(1).curr())
@@ -902,6 +1081,7 @@ impl GeneralShape {
                 if self.vertices.len() != 3 {
                     return false;
                 }
+                log!("Moving oblong vertex {:?}", value_uid);
                 let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                     Some(i) => i,
                     None => return false,
@@ -944,6 +1124,7 @@ impl GeneralShape {
                                 .val_mut(0)
                                 .set_saved(snap_vertex(tmp.saved(), snap));
                             self.vertices.val_mut(0).add(delta);
+                            let tmp = self.vertices.val(0).clone();
                             self.vertices
                                 .val_mut(0)
                                 .set_curr(snap_vertex(tmp.curr(), snap));
@@ -968,6 +1149,7 @@ impl GeneralShape {
                                 .val_mut(1)
                                 .set_saved(snap_vertex(tmp.saved(), snap));
                             self.vertices.val_mut(1).add(delta);
+                            let tmp = self.vertices.val(1).clone();
                             self.vertices
                                 .val_mut(1)
                                 .set_curr(snap_vertex(tmp.curr(), snap));
@@ -1069,11 +1251,144 @@ impl GeneralShape {
             }
         }
     }
+    pub fn move_vertex_by_mouse(&mut self, value_uid: VUId, user_ui: &UserUI) -> Option<()> {
+        if self.move_vertex(value_uid, user_ui) {
+            self.update_properties();
+        }
+        None
+    }
+
+    pub fn move_vertex_by_props(&mut self, prop: &Property, mut user_ui: UserUI) -> Option<()> {
+        let prop_val = self.properties.get(prop)?.clone();
+        use PropertyValue::*;
+        match prop_val {
+            Center { idx, value, .. }
+            | BottomLeft { idx, value, .. }
+            | TopLeft { idx, value, .. }
+            | TopRight { idx, value, .. }
+            | BottomRight { idx, value, .. }
+            | Pt1 { idx, value, .. }
+            | Pt2 { idx, value, .. }
+            | Apex { idx, value, .. } => {
+                let vertex_uid = *self.vertices.key(idx as i64);
+                let current = self.vertices.val(idx as i64).curr();
+                self.save_vertices_positions();
+                user_ui.magnetized = true;
+                user_ui.pointer.set_saved(current);
+                user_ui.pointer.set_curr(value);
+                log!("Moved vertex {:?} to {:?}", vertex_uid, value);
+                if self.move_vertex(vertex_uid, &user_ui) {
+                    self.update_properties();
+                }
+                Some(())
+            }
+            _ => return None,
+        }
+    }
     pub fn move_shape(&mut self, delta: Vec2) {
         for (_, value) in self.vertices.iter_mut() {
             value.add(delta);
         }
+        self.update_properties();
         self.set_bezpath();
+    }
+
+    pub fn update_from_property(&mut self, prop: &Property) -> Option<()> {
+        let prop_val = self.properties.get(prop)?.clone();
+        use PropertyValue::*;
+        match prop_val {
+            Radius { idx, value } => {
+                let center = self
+                    .properties
+                    .get(&Property::Center)
+                    .and_then(PropertyValue::as_vec2)
+                    .unwrap_or_else(|| self.vertices.val(0).curr());
+                let current = self.vertices.val(idx as i64).curr();
+                let mut dir = current - center;
+                if dir.hypot() < EPSILON {
+                    dir = Vec2::new(1.0, 0.0);
+                } else {
+                    dir = dir.normalize();
+                }
+                let new_pos = center + dir * value.curr();
+                let vertex = self.vertices.val_mut(idx as i64);
+                vertex.set_curr(new_pos);
+                vertex.set_saved(new_pos);
+                if matches!(self.shape_type, ShapeType::ConstrCircle) {
+                    let count = self
+                        .properties
+                        .get(&Property::Magnets)
+                        .map(|value| match value {
+                            PropertyValue::Magnets { value } => value.curr() as usize,
+                            _ => 0,
+                        })
+                        .unwrap_or(0);
+                    if count > 0 {
+                        if self.vertices.len() != 2 + count {
+                            self.set_magnets_number(count);
+                        } else {
+                            let v0 = self.vertices.val(0).curr();
+                            let v1 = self.vertices.val(1).curr();
+                            let magnets = get_magnets_vertices(v0, v1, count);
+                            for (i, pos) in magnets.iter().enumerate() {
+                                let idx = 2 + i as i64;
+                                let vertex = self.vertices.val_mut(idx);
+                                vertex.set_curr(*pos);
+                                vertex.set_saved(*pos);
+                            }
+                        }
+                    }
+                }
+            }
+            Thickness { value } => {
+                if matches!(self.shape_type, ShapeType::Oblong) && self.vertices.len() >= 3 {
+                    let e1 = self.vertices.val(0).curr();
+                    let e2 = self.vertices.val(1).curr();
+                    let m = (e1 + e2) * 0.5;
+                    let mut dir = e2 - e1;
+                    if dir.hypot() < EPSILON {
+                        dir = Vec2::new(1.0, 0.0);
+                    } else {
+                        dir = dir.normalize();
+                    }
+                    let perp = Vec2::new(-dir.y, dir.x);
+                    let side_pos = m + perp * value.curr();
+                    let side = self.vertices.val_mut(2);
+                    side.set_curr(side_pos);
+                    side.set_saved(side_pos);
+                }
+            }
+            Magnets { value } => {
+                if matches!(self.shape_type, ShapeType::ConstrCircle) {
+                    self.set_magnets_number(value.curr() as usize);
+                }
+            }
+            Seeds { value } => {
+                if matches!(self.shape_type, ShapeType::Voronoi) {
+                    let mut min = Vec2::new(f64::INFINITY, f64::INFINITY);
+                    let mut max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+                    for (_, vertex) in self.vertices.iter() {
+                        let pos = vertex.curr();
+                        min.x = min.x.min(pos.x);
+                        min.y = min.y.min(pos.y);
+                        max.x = max.x.max(pos.x);
+                        max.y = max.y.max(pos.y);
+                    }
+                    if min.x.is_finite()
+                        && min.y.is_finite()
+                        && max.x.is_finite()
+                        && max.y.is_finite()
+                    {
+                        let rings = build_voronoi_rings(min, max, value.curr() as usize);
+                        self.voronoi_shape_data = Some(voronoi_rings_to_svg_data(rings));
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.update_properties();
+        self.set_bezpath();
+        Some(())
     }
     pub fn save_vertices_positions(&mut self) {
         for (_, value) in self.vertices.iter_mut() {
@@ -1085,26 +1400,98 @@ impl GeneralShape {
         let mut binds = HashSet::new();
 
         for (_, v) in self.vertices.iter() {
-            let vbinds: Vec<(EUId, VUId)> = v
-                .get_properties()
-                .iter()
-                .filter_map(|(k, v)| match (k, v) {
-                    (ValuePropertyKind::Bind { .. }, ValueProperty::Bind { eid, vid }) => {
-                        Some((*eid, *vid))
-                    }
-                    _ => None,
-                })
-                .collect();
-            binds.extend(vbinds.iter().map(|(eid, _)| *eid));
+            binds.extend(v.get_binds().iter().map(|(eid, _)| *eid));
         }
         binds
     }
 
-    pub fn get_properties(&self) -> &HashMap<ShapePropertyKind, ShapeProperty> {
+    pub fn get_properties(&self) -> &Properties {
         &self.properties
     }
-    pub fn get_properties_mut(&mut self) -> &mut HashMap<ShapePropertyKind, ShapeProperty> {
+    pub fn get_properties_mut(&mut self) -> &mut Properties {
         &mut self.properties
+    }
+    pub fn update_properties(&mut self) {
+        use PropertyValue::*;
+        for (_, prop_val) in self.properties.iter_mut() {
+            match prop_val {
+                Center { idx, value } => {
+                    let vertex = self.vertices.val_mut(*idx as i64);
+                    *value = vertex.curr();
+                }
+                Radius { idx, value } => {
+                    let vertex = self.vertices.val_mut(*idx as i64);
+                    *value = Scalar::new(
+                        (vertex.curr() - self.vertices.val(0).curr()).hypot(),
+                        Self::MIN_RADIUS,
+                        f64::INFINITY,
+                        1.0,
+                    );
+                }
+                BottomLeft { idx, value, .. } => {
+                    let vertex = self.vertices.val_mut(*idx as i64);
+                    *value = vertex.curr();
+                }
+                TopLeft { idx, value, .. } => {
+                    let vertex = self.vertices.val_mut(*idx as i64);
+                    *value = vertex.curr();
+                }
+                TopRight { idx, value, .. } => {
+                    let vertex = self.vertices.val_mut(*idx as i64);
+                    *value = vertex.curr();
+                }
+                BottomRight { idx, value, .. } => {
+                    let vertex = self.vertices.val_mut(*idx as i64);
+                    *value = vertex.curr();
+                }
+                Pt1 { idx, value } => {
+                    let vertex = self.vertices.val_mut(*idx as i64);
+                    *value = vertex.curr();
+                }
+                Pt2 { idx, value } => {
+                    let vertex = self.vertices.val_mut(*idx as i64);
+                    *value = vertex.curr();
+                }
+                Apex { idx, value, .. } => {
+                    let vertex = self.vertices.val_mut(*idx as i64);
+                    *value = vertex.curr();
+                }
+                Thickness { value } => {
+                    if matches!(self.shape_type, ShapeType::Oblong) && self.vertices.len() >= 3 {
+                        let e1 = self.vertices.val(0).curr();
+                        let e2 = self.vertices.val(1).curr();
+                        let side = self.vertices.val(2).curr();
+                        let m = (e1 + e2) * 0.5;
+                        let thickness = (side - m).hypot();
+                        *value =
+                            Scalar::new(thickness, Self::MIN_RADIUS, f64::INFINITY, value.step());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if matches!(self.shape_type, ShapeType::ConstrCircle) {
+            let Some(PropertyValue::Magnets { value, .. }) =
+                self.properties.get(&Property::Magnets)
+            else {
+                return;
+            };
+            let count = value.curr() as usize;
+            if self.vertices.len() != 2 + count {
+                self.set_magnets_number(count);
+                return;
+            }
+            let v0 = self.vertices.val(0).curr();
+            let v1 = self.vertices.val(1).curr();
+            let magnets = get_magnets_vertices(v0, v1, count);
+            for (i, pos) in magnets.iter().enumerate() {
+                let idx = 2 + i as i64;
+                let vertex = self.vertices.val_mut(idx);
+                vertex.set_curr(*pos);
+                vertex.set_saved(*pos);
+            }
+        }
     }
 
     pub fn contains(&self, pos: Vec2) -> bool {
@@ -1132,7 +1519,8 @@ impl GeneralShape {
                 return false;
             }
             let distance = (pos - center.curr()).hypot();
-            return (distance - radius).abs() <= Self::GRAB_RADIUS;
+            let tolerance = Self::GRAB_RADIUS * 2.0;
+            return (distance - radius).abs() <= tolerance;
         }
         if matches!(
             self.shape_type,
@@ -1180,15 +1568,14 @@ impl GeneralShape {
     }
 
     pub fn get_text(&self) -> Option<String> {
-        if let Some(ShapeProperty::Text { value }) = self.properties.get(&ShapePropertyKind::Text) {
+        if let Some(PropertyValue::Text { value }) = self.properties.get(&Property::Text) {
             return Some(value.clone());
         }
         None
     }
     pub fn set_text(&mut self, text: String) {
-        use ShapeProperty::*;
-
-        let Some(Text { value: texte }) = self.properties.get_mut(&ShapePropertyKind::Text) else {
+        let Some(PropertyValue::Text { value: texte }) = self.properties.get_mut(&Property::Text)
+        else {
             return;
         };
         *texte = text.clone();
@@ -1212,6 +1599,7 @@ impl GeneralShape {
             .as_ref()
             .and_then(|data| data.cached_paths.as_ref())
     }
+
     pub fn get_text_paths(&self) -> Option<&Vec<BezPath>> {
         self.text_shape_data
             .as_ref()
@@ -1219,10 +1607,9 @@ impl GeneralShape {
     }
 
     pub fn get_magnets_number(&self) -> Option<usize> {
-        if let Some(ShapeProperty::Magnets { value, .. }) =
-            self.properties.get(&ShapePropertyKind::Magnets)
+        if let Some(PropertyValue::Magnets { value, .. }) = self.properties.get(&Property::Magnets)
         {
-            return Some(*value);
+            return Some(value.curr() as usize);
         }
         None
     }
@@ -1230,11 +1617,11 @@ impl GeneralShape {
         if !matches!(self.shape_type, ShapeType::ConstrCircle) {
             return;
         }
-        let count = count.max(3);
-        if let Some(ShapeProperty::Magnets { value, .. }) =
-            self.properties.get_mut(&ShapePropertyKind::Magnets)
+        let count = count.max(GeneralShape::MIN_MAGNETS);
+        if let Some(PropertyValue::Magnets { value, .. }) =
+            self.properties.get_mut(&Property::Magnets)
         {
-            *value = count;
+            value.set_curr(count);
 
             // Update the pool of vertices
             let mut vs = vec![self.vertices.val(0).curr(), self.vertices.val(1).curr()];
@@ -1242,7 +1629,7 @@ impl GeneralShape {
             vs.extend(vs_magnets);
             let vertices = &vs
                 .iter()
-                .map(|v| (VUId::new(), Value::new(*v)))
+                .map(|v| (VUId::new(), Vertex::new(*v)))
                 .collect::<Vec<_>>()[..];
             self.vertices = VecRing::from_slice(&vertices).unwrap();
 
@@ -1399,36 +1786,33 @@ impl GeneralShape {
         self.polygon = MultiPolygon::new(vec![poly]);
     }
 
-    fn update_text_polygon(&mut self) {
-        let Some(text) = self.get_text() else {
-            self.polygon = MultiPolygon::new(vec![]);
-            return;
-        };
-        let (p1, p2, font) = match (
-            self.properties.get(&ShapePropertyKind::Pt1),
-            self.properties.get(&ShapePropertyKind::Pt2),
-            self.properties.get(&ShapePropertyKind::Font),
-        ) {
-            (
-                Some(ShapeProperty::Pt1 { idx: p1 }),
-                Some(ShapeProperty::Pt2 { idx: p2 }),
-                Some(ShapeProperty::Font { value: font }),
-            ) => (*p1, *p2, font.clone()),
-            _ => {
-                self.polygon = MultiPolygon::new(vec![]);
-                return;
-            }
-        };
-        let Some(text_data) = self.text_shape_data.as_mut() else {
-            self.polygon = MultiPolygon::new(vec![]);
-            return;
-        };
-        let v1 = self.vertices.val(p1 as i64).curr();
-        let v2 = self.vertices.val(p2 as i64).curr();
+    fn update_text_polygon(&mut self) -> Option<()> {
+        self.polygon = MultiPolygon::new(vec![]);
+
+        let mut min = Vec2::new(f64::INFINITY, f64::INFINITY);
+        let mut max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for (_, value) in self.vertices.iter() {
+            let curr = value.curr();
+            min.x = min.x.min(curr.x);
+            min.y = min.y.min(curr.y);
+            max.x = max.x.max(curr.x);
+            max.y = max.y.max(curr.y);
+        }
+        if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
+            return None;
+        }
+        let v1 = min;
+        let v2 = max;
+
+        let text = self.get_text()?;
+        let text_data = self.text_shape_data.as_mut()?;
+        let font = self.properties.get(&Property::Font)?.as_font()?;
+
         let (poly, _scale) = text_to_multipolygon(&text, &font, v1, v2);
         self.polygon = poly.clone();
         text_data.polygon = Some(poly.clone());
         text_data.cached_paths = Some(geo_multipolygon_to_bez_paths(&poly));
+        Some(())
     }
 
     fn update_svg_polygon(&mut self) {
@@ -1576,6 +1960,7 @@ fn parse_svg(svg_data: String, combine_paths: bool) -> Option<(Vec<ParsedSvgShap
     let mut width: Option<(f64, String)> = None;
     let mut height: Option<(f64, String)> = None;
     let parser = SvgParser::new(svg_data.as_str());
+    let mut svg_fill_rule = SvgFillRule::NonZero;
     for event in parser {
         match event {
             SvgEvent::Tag(tag, _, attributes) => {
@@ -1589,13 +1974,13 @@ fn parse_svg(svg_data: String, combine_paths: bool) -> Option<(Vec<ParsedSvgShap
                     if let Some(val) = attributes.get("height") {
                         height = parse_svg_length(val.as_ref());
                     }
+                    svg_fill_rule = fill_rule_from_attrs(&attributes, svg_fill_rule);
                 }
                 if tag == "path" {
                     if let Some(d) = attributes.get("d") {
                         if let Ok(path) = BezPath::from_svg(d.as_ref()) {
                             if !path.is_empty() {
-                                let fill_rule =
-                                    fill_rule_from_attrs(&attributes, SvgFillRule::NonZero);
+                                let fill_rule = fill_rule_from_attrs(&attributes, svg_fill_rule);
                                 paths.push((path, fill_rule));
                             }
                         }
@@ -1625,12 +2010,7 @@ fn parse_svg(svg_data: String, combine_paths: bool) -> Option<(Vec<ParsedSvgShap
         if rings.is_empty() {
             continue;
         }
-        let mut normalized_rings: Vec<Vec<Vec2>> = rings.into_iter().map(normalize_ring).collect();
-        if fill_rule == SvgFillRule::EvenOdd {
-            for ring in normalized_rings.iter_mut().skip(1) {
-                ring.reverse();
-            }
-        }
+        let normalized_rings: Vec<Vec<Vec2>> = rings.into_iter().map(normalize_ring).collect();
 
         if combine_paths {
             all_rings.extend(normalized_rings);
@@ -1647,7 +2027,7 @@ fn parse_svg(svg_data: String, combine_paths: bool) -> Option<(Vec<ParsedSvgShap
         if let Some((bbox_min, bbox_max)) = rings_bbox(&all_rings) {
             shape_rings.push(ParsedSvgShape {
                 rings: all_rings,
-                _fill_rule: SvgFillRule::NonZero,
+                _fill_rule: svg_fill_rule,
                 bbox_min,
                 bbox_max,
             });
@@ -1841,9 +2221,10 @@ fn build_voronoi_rings(p1: Vec2, p2: Vec2, seeds: usize) -> Vec<Vec<Vec2>> {
     let seed_max = center + half;
     let seed_size = seed_max - seed_min;
 
-    let guard_pad = size.x.max(size.y);
-    let guard_min = min - Vec2::new(guard_pad, guard_pad);
-    let guard_max = max + Vec2::new(guard_pad, guard_pad);
+    let guard_pad_x = size.x;
+    let guard_pad_y = size.y;
+    let guard_min = min - Vec2::new(guard_pad_x, guard_pad_y);
+    let guard_max = max + Vec2::new(guard_pad_x, guard_pad_y);
     let guard_steps = 8usize;
     let mut guard_points = Vec::new();
     for i in 0..=guard_steps {

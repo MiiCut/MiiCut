@@ -1,12 +1,11 @@
-use std::collections::HashMap;
-
 use crate::app::RefAV;
 use crate::canvas::CanvasKind;
 use crate::render::center_paths_canvas;
 use crate::shape::{GeneralShape, Operation, ShapeType, SvgData, SvgFillRule};
 use crate::shapes::DataSet;
 use crate::status::update_status_bar;
-use crate::types::{EUId, Value};
+use crate::type_vertex::Vertex;
+use crate::types::{EUId, Properties};
 use js_sys::{Array, Date, JSON};
 use kurbo::{BezPath, PathEl, Shape, Size, Vec2};
 use wasm_bindgen::closure::Closure;
@@ -398,8 +397,8 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
     canvas.dataset.shapes.clear();
     canvas.dataset.shapes_selected.clear();
     canvas.dataset.shapes_highlighted.clear();
-    canvas.dataset.vertices_selected.clear();
-    canvas.dataset.vertices_highlighted.clear();
+    canvas.dataset.vertex_selected = None;
+    canvas.dataset.vertex_highlighted = None;
     canvas.dataset.shapes_selector = crate::shapes::ShapeSelector::new();
 
     let mut fallback_order: i32 = 0;
@@ -446,7 +445,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
                 Some(value) => value,
                 None => continue,
             };
-            vertices.push(Value::new(Vec2::new(x, y)));
+            vertices.push(Vertex::new(Vec2::new(x, y)));
         }
 
         let svg_data = if matches!(icon, ShapeType::Svg | ShapeType::Voronoi) {
@@ -491,7 +490,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         let Some(mut elem) = GeneralShape::new(
             icon,
             vertices,
-            HashMap::new(),
+            Properties::new(),
             0,
             None,
             svg_data,

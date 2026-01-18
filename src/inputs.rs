@@ -1,7 +1,4 @@
-use crate::{
-    math::*,
-    types::{Snap, Value},
-};
+use crate::{math::*, type_vertex::Vertex, types::Snap};
 use kurbo::Vec2;
 use strum_macros::{Display, EnumString};
 use web_sys::MouseEvent;
@@ -13,7 +10,7 @@ pub enum UserAction {
 }
 #[derive(Clone, Debug)]
 pub struct UserUI {
-    pub pointer: Value,
+    pub pointer: Vertex,
     pub keys_states: KeysStates,
 
     pub snap: Snap,
@@ -35,7 +32,7 @@ pub struct UserUI {
 impl UserUI {
     pub fn new() -> Self {
         Self {
-            pointer: Value::new(Vec2::ZERO),
+            pointer: Vertex::new(Vec2::ZERO),
             keys_states: KeysStates::default(),
             snap: Snap::new(),
             active: false,

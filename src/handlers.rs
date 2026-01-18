@@ -10,7 +10,10 @@ use crate::shape::{GeneralShape, ShapeType};
 use crate::shapes::{toolpath_to_plasma_gcode, Toolpath};
 
 use wasm_bindgen::JsCast;
-use web_sys::{Event, HtmlElement, KeyboardEvent, MouseEvent, WheelEvent, Window};
+use web_sys::{
+    Event, HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent, MouseEvent,
+    WheelEvent,
+};
 
 pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
     use ShapeType::*;
@@ -33,7 +36,7 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                     if !is_draw_view {
                         return Ok(());
                     }
-                    if avb.set_move_vertices_selected() || avb.set_move_elements() {
+                    if avb.set_move_vertices_selected().is_some() || avb.set_move_elements() {
                         do_render = true;
                     }
                 } else {
@@ -42,50 +45,12 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                     do_render = true;
                 }
             }
-            UserAction::ClickDown(button, clicks) => {
+            UserAction::ClickDown(button, _) => {
                 if button == MouseButton::Left {
                     if !is_draw_view {
                         return Ok(());
                     }
-                    if clicks >= 2 {
-                        let pos = avb.canvases[CanvasKind::Draw.idx()]
-                            .get_user_ui()
-                            .pointer
-                            .curr();
 
-                        if let Some((eid, current_count)) = avb.canvases[CanvasKind::Draw.idx()]
-                            .dataset
-                            .find_constr_circle_at(pos)
-                        {
-                            if let Some(new_count) =
-                                prompt_constr_circle_vertices(&avb.window, current_count)
-                            {
-                                if let Some(elem) = avb.canvases[CanvasKind::Draw.idx()]
-                                    .dataset
-                                    .get_element_mut(eid)
-                                {
-                                    elem.set_magnets_number(new_count);
-                                    do_render = true;
-                                }
-                            }
-                            avb.canvases[CanvasKind::Draw.idx()]
-                                .get_user_ui_mut()
-                                .cancel_drag();
-                            drop(avb);
-                            if do_render {
-                                render_active_view(av.clone());
-                            }
-                            return Ok(());
-                        }
-                        if avb.edit_text_at(pos) {
-                            do_render = true;
-                            drop(avb);
-                            if do_render {
-                                render_active_view(av.clone());
-                            }
-                            return Ok(());
-                        }
-                    }
                     let canvas = avb.get_active_canvas_mut();
                     canvas.dataset.save_elements_positions();
                     if avb.set_element_select_vertex() {
@@ -471,9 +436,40 @@ pub(crate) fn on_window_resize(av: RefAV, _event: Event) {
 
 pub(crate) fn on_window_click(_pa: RefAV, _event: Event) {}
 
+fn is_typing_in_input(event: &KeyboardEvent, document: &web_sys::Document) -> bool {
+    if let Some(target) = event.target() {
+        if target.dyn_ref::<HtmlInputElement>().is_some() {
+            return true;
+        }
+        if target.dyn_ref::<HtmlTextAreaElement>().is_some() {
+            return true;
+        }
+        if let Some(target) = target.dyn_ref::<HtmlElement>() {
+            if target.is_content_editable() {
+                return true;
+            }
+        }
+    }
+    if let Some(active) = document.active_element() {
+        if active.dyn_ref::<HtmlInputElement>().is_some() {
+            return true;
+        }
+        if active.dyn_ref::<HtmlTextAreaElement>().is_some() {
+            return true;
+        }
+        if let Ok(active) = active.dyn_into::<HtmlElement>() {
+            if active.is_content_editable() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub(crate) fn on_window_keydown(av: RefAV, event: Event) {
     if let Ok(kb_event) = event.dyn_into::<KeyboardEvent>() {
         let key = kb_event.key();
+        let document = av.borrow().document.clone();
         let ctrl_cmd = kb_event.ctrl_key() || kb_event.meta_key();
         let shift = kb_event.shift_key();
         let alt = kb_event.alt_key();
@@ -498,6 +494,9 @@ pub(crate) fn on_window_keydown(av: RefAV, event: Event) {
                 do_render = true;
             }
             "Delete" | "Backspace" => {
+                if is_typing_in_input(&kb_event, &document) {
+                    return;
+                }
                 if let Ok(mut avb) = av.try_borrow_mut() {
                     avb.del_back_pressed();
                 }
@@ -748,21 +747,6 @@ fn render_active_view(av: RefAV) {
         Tabs::Toolpath => render_toolpath_view(av),
         Tabs::Machine => render_machine_view(av),
     }
-}
-
-fn prompt_constr_circle_vertices(window: &Window, current: usize) -> Option<usize> {
-    let default_value = format!("{current}");
-    let input = window
-        .prompt_with_message_and_default("Nombre de sommets du cercle (>=3) :", &default_value)
-        .ok()??;
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let Ok(value) = trimmed.parse::<usize>() else {
-        return None;
-    };
-    Some(value.max(3))
 }
 
 fn icon_tooltip(icon: ShapeType) -> &'static str {

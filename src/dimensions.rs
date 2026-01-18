@@ -1,6 +1,6 @@
 use crate::{
     canvas::{CanvasText, CanvasTextConfig, Colors, Pattern, TextAlign, TextPos},
-    prefab::{get_dimension_colors, get_text_colors},
+    prefab::{dim_arrow_path, dim_path, get_dimension_colors, get_text_colors},
     types::SegBundle,
 };
 use kurbo::{BezPath, Rect, Vec2};
@@ -16,6 +16,7 @@ const EPSILON_DEG: f64 = 1.;
 pub fn dim_hv(
     bdl: SegBundle,
     cinfo: (Rect, f64, Vec2),
+    arrow: bool,
 ) -> (BezPath, Pattern, Colors, Vec<CanvasText>) {
     let color = get_dimension_colors();
     let dim_offset = 15. / cinfo.1;
@@ -86,10 +87,11 @@ pub fn dim_hv(
         (false, false) => (),
     }
 
-    let mut path = BezPath::new();
-    path.move_to(bdl.s.to_point());
-    path.line_to(bdl.e.to_point());
-
+    let path = if arrow {
+        dim_arrow_path(&bdl, cinfo.1)
+    } else {
+        dim_path(&bdl, cinfo.1)
+    };
     (path, Pattern::Dim, color, texts)
 }
 

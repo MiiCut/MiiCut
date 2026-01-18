@@ -2536,7 +2536,7 @@ pub fn fillet_at_apex(a: Vec2, b: Vec2, c: Vec2, r: f64) -> Option<(Vec2, Vec2, 
 
 #[derive(Copy, Debug, Clone)]
 pub enum ApexType {
-    Vertex { a: Vec2 },
+    TypeVertex { a: Vec2 },
     Arc { s: Vec2, c: Vec2, e: Vec2 }, // c = arc center
 }
 
@@ -2596,7 +2596,7 @@ fn add_circular_arc(path: &mut BezPath, center: Vec2, from: Vec2, to: Vec2) {
 pub fn bezpath_from_apices(apices: &[ApexType]) -> BezPath {
     let start_of = |apex: &ApexType| -> Vec2 {
         match *apex {
-            ApexType::Vertex { a } => a,
+            ApexType::TypeVertex { a } => a,
             ApexType::Arc { s, .. } => s,
         }
     };
@@ -2613,7 +2613,7 @@ pub fn bezpath_from_apices(apices: &[ApexType]) -> BezPath {
         let next_entry = start_of(&apices[(i + 1) % n]);
 
         match *this {
-            ApexType::Vertex { a } => {
+            ApexType::TypeVertex { a } => {
                 // We should be at 'a'. If not (only possible at i==0 when previous was arc),
                 // first line to 'a'.
                 if curr != a {

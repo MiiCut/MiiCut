@@ -18,6 +18,8 @@ pub mod render;
 pub mod shape;
 pub mod shapes;
 pub mod status;
+pub mod type_scalar;
+pub mod type_vertex;
 pub mod types;
 pub mod undoredo;
 pub mod voronoi;

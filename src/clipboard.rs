@@ -1,9 +1,9 @@
-use crate::{shape::GeneralShape, types::Value};
+use crate::{shape::GeneralShape, type_vertex::Vertex};
 
 #[derive(Clone, Debug)]
 pub struct Clipboard {
-    item_copy: Option<(GeneralShape, Value)>,
-    item_paste: Option<(GeneralShape, Value)>,
+    item_copy: Option<(GeneralShape, Vertex)>,
+    item_paste: Option<(GeneralShape, Vertex)>,
 }
 impl Clipboard {
     pub fn new() -> Self {
@@ -13,29 +13,29 @@ impl Clipboard {
         }
     }
 
-    pub fn copy(&mut self, nodes: GeneralShape, pointer_copy: Value) {
+    pub fn copy(&mut self, nodes: GeneralShape, pointer_copy: Vertex) {
         self.item_copy = Some((nodes, pointer_copy));
         self.item_paste = None;
     }
 
-    pub fn paste(&mut self, pointer: Value) {
+    pub fn paste(&mut self, pointer: Vertex) {
         if let Some(item_copy) = &self.item_copy {
             self.item_paste = Some((item_copy.0.clone(), pointer));
         }
     }
 
-    pub fn make_paste(&self, pointer: &Value) -> Option<GeneralShape> {
+    pub fn make_paste(&self, pointer: &Vertex) -> Option<GeneralShape> {
         let (shape, copy_pointer) = self.item_copy.as_ref()?;
         let delta = pointer.curr() - copy_pointer.curr();
         let mut pasted = shape.clone();
         pasted.move_shape(delta);
         for (_, value) in pasted.get_vertices_mut().iter_mut() {
-            value.property_remove_all_binds();
+            value.clear_binds();
         }
         Some(pasted)
     }
 
-    pub fn move_paste(&mut self, pointer_paste: &mut Value) {
+    pub fn move_paste(&mut self, pointer_paste: &mut Vertex) {
         if let Some(item_paste) = self.item_paste.as_mut() {
             item_paste.1 = pointer_paste.clone();
         }
