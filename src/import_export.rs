@@ -84,6 +84,29 @@ pub(crate) fn build_svg_from_dataset(dataset: &DataSet) -> Option<String> {
 }
 
 pub(crate) fn build_json_from_dataset(dataset: &DataSet, meta: &ExportInfo) -> Option<String> {
+    fn collect_export_shapes<'a>(
+        dataset: &'a DataSet,
+        out: &mut Vec<(EUId, &'a GeneralShape)>,
+        ids: &[EUId],
+    ) {
+        for eid in ids {
+            let shape = dataset
+                .shapes
+                .get(eid)
+                .or_else(|| dataset.grouped_shapes.get(eid));
+            let Some(shape) = shape else {
+                continue;
+            };
+            if shape.is_group() {
+                if let Some(children) = shape.get_group_children() {
+                    collect_export_shapes(dataset, out, children);
+                }
+                continue;
+            }
+            out.push((*eid, shape));
+        }
+    }
+
     let mut out = String::new();
     out.push_str("{\n");
     out.push_str("  \"version\": 1,\n");
@@ -107,8 +130,12 @@ pub(crate) fn build_json_from_dataset(dataset: &DataSet, meta: &ExportInfo) -> O
     out.push_str("  },\n");
     out.push_str("  \"shapes\": [\n");
 
+    let mut export_shapes = Vec::new();
+    let root_ids: Vec<EUId> = dataset.shapes.keys().copied().collect();
+    collect_export_shapes(dataset, &mut export_shapes, &root_ids);
+
     let mut first = true;
-    for (eid, elem) in &dataset.shapes {
+    for (eid, elem) in export_shapes {
         if !first {
             out.push_str(",\n");
         }
@@ -234,6 +261,7 @@ pub(crate) fn name_to_icon(name: &str) -> Option<ShapeType> {
         "text" => Some(ShapeType::Text),
         "svg" => Some(ShapeType::Svg),
         "voronoi" => Some(ShapeType::Voronoi),
+        "group" => Some(ShapeType::Group),
         "constr_line" => Some(ShapeType::ConstrLine),
         "constr_circle" => Some(ShapeType::ConstrCircle),
         _ => None,
@@ -341,6 +369,7 @@ pub(crate) fn icon_to_name(icon: ShapeType) -> &'static str {
         ShapeType::Text => "text",
         ShapeType::Svg => "svg",
         ShapeType::Voronoi => "voronoi",
+        ShapeType::Group => "group",
         ShapeType::ConstrLine => "constr_line",
         ShapeType::ConstrCircle { .. } => "constr_circle",
         _ => "unknown",
@@ -494,6 +523,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             0,
             None,
             svg_data,
+            None,
             None,
             operation,
             name,

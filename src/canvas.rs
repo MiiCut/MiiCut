@@ -487,6 +487,17 @@ impl Canvas {
     }
     pub fn move_vertices_selected(&mut self) -> Option<()> {
         let (eid, vid) = self.dataset.vertex_selected?;
+        let is_group = self
+            .dataset
+            .get_element(eid)
+            .map(GeneralShape::is_group)
+            .unwrap_or(false);
+        if is_group {
+            if self.dataset.scale_group_by_vertex(eid, vid, &self.user_ui) {
+                return Some(());
+            }
+            return None;
+        }
         self.dataset
             .get_element_mut(eid)?
             .move_vertex_by_mouse(vid, &self.user_ui)?;
@@ -905,7 +916,7 @@ impl Canvas {
                     }
                 }
             }
-            ShapeType::Square | ShapeType::Text | ShapeType::Svg | ShapeType::Voronoi => {
+            ShapeType::Square | ShapeType::Text | ShapeType::Svg | ShapeType::Voronoi | ShapeType::Group => {
                 let points: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 let rotation = e.get_rotation();
                 for (idx, (v1, v2)) in points
@@ -1108,67 +1119,120 @@ impl Canvas {
     pub fn draw_paths_sets(&mut self) {
         self.draw_paths_sets_with_svg_bbox(false);
     }
-    pub fn draw_paths_sets_with_svg_bbox(&mut self, svg_bbox_only: bool) {
-        for (eid, e) in self.dataset.shapes.iter() {
-            let is_selected = self.dataset.shapes_selected.contains(eid);
-            let is_highlighted = self.dataset.shapes_highlighted.contains(eid);
-            let is_voronoi = e.get_shape_type() == ShapeType::Voronoi;
-            let is_construction = matches!(
-                e.get_shape_type(),
-                ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
-            );
-            let stroke_color = if !is_selected && !is_highlighted {
-                Color::Gray20
-            } else {
-                get_stroke_color(is_selected, is_highlighted)
-            };
-            let fill_color = if is_construction {
-                Color::Transparent
-            } else if svg_bbox_only && e.get_shape_type() == ShapeType::Svg {
-                if is_selected || is_highlighted {
-                    get_fill_color(is_selected, is_highlighted)
-                } else {
-                    Color::Transparent
-                }
-            } else {
+    fn draw_shape_paths_with_state(
+        &mut self,
+        shape: &GeneralShape,
+        is_selected: bool,
+        is_highlighted: bool,
+        svg_bbox_only: bool,
+    ) {
+        let is_voronoi = shape.get_shape_type() == ShapeType::Voronoi;
+        let is_construction = matches!(
+            shape.get_shape_type(),
+            ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+        );
+        let stroke_color = if !is_selected && !is_highlighted {
+            Color::Gray20
+        } else {
+            get_stroke_color(is_selected, is_highlighted)
+        };
+        let fill_color = if is_construction {
+            Color::Transparent
+        } else if svg_bbox_only && shape.get_shape_type() == ShapeType::Svg {
+            if is_selected || is_highlighted {
                 get_fill_color(is_selected, is_highlighted)
-            };
-            let pattern = if is_construction {
-                Pattern::Helper
             } else {
-                Pattern::Point
+                Color::Transparent
+            }
+        } else {
+            get_fill_color(is_selected, is_highlighted)
+        };
+        let pattern = if is_construction {
+            Pattern::Helper
+        } else {
+            Pattern::Point
+        };
+        if shape.get_shape_type() == ShapeType::Text {
+            if let Some(paths) = shape.get_text_paths() {
+                self.draw_svg_paths(
+                    paths,
+                    pattern,
+                    fill_color,
+                    stroke_color,
+                    SvgFillRule::NonZero,
+                );
+            } else {
+                let path = shape.get_bezpath();
+                self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
+            }
+            return;
+        }
+        if matches!(shape.get_shape_type(), ShapeType::Svg | ShapeType::Voronoi) {
+            if svg_bbox_only && !is_voronoi {
+                let path = shape.get_bezpath();
+                self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
+                return;
+            }
+            if let (Some(paths), Some(svg)) = (shape.get_svg_paths(), shape.get_svg()) {
+                self.draw_svg_paths(paths, pattern, fill_color, stroke_color, svg.fill_rule);
+            } else {
+                let path = shape.get_bezpath();
+                self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
+            }
+            return;
+        }
+        let path = shape.get_bezpath();
+        self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
+    }
+    fn draw_group_paths(
+        &mut self,
+        group: &GeneralShape,
+        is_selected: bool,
+        is_highlighted: bool,
+        svg_bbox_only: bool,
+    ) {
+        let child_ids = group.get_group_children().unwrap_or_default().to_vec();
+        for child_id in child_ids {
+            let Some(child) = self.dataset.grouped_shapes.get(&child_id).cloned() else {
+                continue;
             };
-            if e.get_shape_type() == ShapeType::Text {
-                if let Some(paths) = e.get_text_paths() {
-                    self.draw_svg_paths(
-                        paths,
-                        pattern,
-                        fill_color,
-                        stroke_color,
-                        SvgFillRule::NonZero,
-                    );
-                } else {
-                    let path = e.get_bezpath();
-                    self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
-                }
+            if child.is_group() {
+                self.draw_group_paths(&child, is_selected, is_highlighted, svg_bbox_only);
+            } else {
+                self.draw_shape_paths_with_state(
+                    &child,
+                    is_selected,
+                    is_highlighted,
+                    svg_bbox_only,
+                );
+            }
+        }
+        if is_selected || is_highlighted {
+            let stroke_color = get_stroke_color(is_selected, is_highlighted);
+            self.draw_path(
+                group.get_bezpath(),
+                Pattern::Point,
+                Color::Transparent,
+                stroke_color,
+                vec![],
+            );
+        }
+    }
+    pub fn draw_paths_sets_with_svg_bbox(&mut self, svg_bbox_only: bool) {
+        let selected = self.dataset.shapes_selected.clone();
+        let highlighted = self.dataset.shapes_highlighted.clone();
+        let shape_ids: Vec<EUId> = self.dataset.shapes.keys().copied().collect();
+        for eid in shape_ids {
+            let Some(shape) = self.dataset.shapes.get(&eid).cloned() else {
+                continue;
+            };
+            let is_selected = selected.contains(&eid);
+            let is_highlighted = highlighted.contains(&eid);
+            if shape.is_group() {
+                self.draw_group_paths(&shape, is_selected, is_highlighted, svg_bbox_only);
                 continue;
             }
-            if matches!(e.get_shape_type(), ShapeType::Svg | ShapeType::Voronoi) {
-                if svg_bbox_only && !is_voronoi {
-                    let path = e.get_bezpath();
-                    self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
-                    continue;
-                }
-                if let (Some(paths), Some(svg)) = (e.get_svg_paths(), e.get_svg()) {
-                    self.draw_svg_paths(paths, pattern, fill_color, stroke_color, svg.fill_rule);
-                } else {
-                    let path = e.get_bezpath();
-                    self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
-                }
-                continue;
-            }
-            let path = e.get_bezpath();
-            self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
+            self.draw_shape_paths_with_state(&shape, is_selected, is_highlighted, svg_bbox_only);
         }
     }
 }
