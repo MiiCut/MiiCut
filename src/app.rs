@@ -1001,6 +1001,137 @@ fn add_property_section(document: &Document, body: &HtmlElement, label: &str) ->
     Some(())
 }
 
+fn add_help_section(document: &Document, body: &HtmlElement, label: &str) -> Option<()> {
+    let section = document.create_element("div").ok()?;
+    section.set_class_name("help-section");
+    section.set_text_content(Some(label));
+    let _ = body.append_child(&section);
+    Some(())
+}
+
+fn add_help_row(document: &Document, body: &HtmlElement, key: &str, text: &str) -> Option<()> {
+    let row = document.create_element("div").ok()?;
+    row.set_class_name("help-row");
+
+    let key_el = document.create_element("span").ok()?;
+    key_el.set_class_name("help-key");
+    key_el.set_text_content(Some(key));
+    let _ = row.append_child(&key_el);
+
+    let text_el = document.create_element("span").ok()?;
+    text_el.set_class_name("help-text");
+    text_el.set_text_content(Some(text));
+    let _ = row.append_child(&text_el);
+
+    let _ = body.append_child(&row);
+    Some(())
+}
+
+fn update_help_panel(av: &RefAV) -> Option<()> {
+    let document = av.borrow().document.clone();
+    let Some(body) = document.get_element_by_id("shape-help-body") else {
+        return None;
+    };
+    let body = body.dyn_into::<HtmlElement>().ok()?;
+
+    if !matches!(av.borrow().active_view, Tabs::Draw) {
+        body.set_inner_html("");
+        return Some(());
+    }
+
+    body.set_inner_html("");
+    let _ = add_help_section(&document, &body, "Raccourcis");
+    let _ = add_help_row(&document, &body, "Esc", "annuler l'action en cours");
+    let _ = add_help_row(&document, &body, "Option/Alt", "preview");
+    let _ = add_help_row(
+        &document,
+        &body,
+        "Suppr/Backspace",
+        "supprimer la selection",
+    );
+    let _ = add_help_row(&document, &body, "Ctrl+C/V", "copier / coller");
+    let _ = add_help_row(&document, &body, "Ctrl+S", "sauvegarder");
+    let _ = add_help_row(
+        &document,
+        &body,
+        "↑ / ↓",
+        "ordre du shape ou rayon du vertex",
+    );
+
+    Some(())
+}
+
+fn update_context_help(av: &RefAV) -> Option<()> {
+    let document = av.borrow().document.clone();
+    let Some(el) = document.get_element_by_id("context-help") else {
+        return None;
+    };
+    let el = el.dyn_into::<HtmlElement>().ok()?;
+
+    if !matches!(av.borrow().active_view, Tabs::Draw) {
+        el.set_inner_html("");
+        let _ = el.style().set_property("display", "none");
+        return Some(());
+    }
+
+    let (title_label, lines): (String, Vec<String>) = {
+        let avb = av.borrow();
+        let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+        let mut lines = Vec::new();
+        let mut title = String::new();
+
+        if let Some((shape_type, _)) = avb.element_on_creation.as_ref() {
+            if matches!(shape_type, ShapeType::Poly) {
+                title = "Forme: Polygone".to_string();
+                lines.push("Polygone: Espace pour terminer.".to_string());
+            } else {
+                title = "Forme".to_string();
+                lines.push("Creation: cliquez pour placer le second point.".to_string());
+            }
+        } else if matches!(avb.icon_selected, ShapeType::Poly) {
+            title = "Forme: Polygone".to_string();
+            lines.push(
+                "Polygone: cliquez pour ajouter des points, Espace pour terminer.".to_string(),
+            );
+        } else if matches!(avb.icon_selected, ShapeType::Arrow) {
+            if canvas.dataset.vertex_selected.is_some() {
+                title = "Vertex".to_string();
+                lines.push("Vertex: ↑ / ↓ pour changer le rayon.".to_string());
+                lines.push("Vertex: espace pour changer le type d'apex.".to_string());
+            } else if canvas.dataset.shapes_selected.len() == 1 {
+                title = "Forme".to_string();
+                lines.push("Forme: Espace pour basculer Union/Diff.".to_string());
+                lines.push("Forme: ↑ / ↓ pour changer l'ordre.".to_string());
+            }
+        }
+
+        if title.is_empty() && !lines.is_empty() {
+            title = "Aide".to_string();
+        }
+        (title, lines)
+    };
+
+    if lines.is_empty() {
+        el.set_inner_html("");
+        let _ = el.style().set_property("display", "none");
+        return Some(());
+    }
+
+    el.set_inner_html("");
+    let title = document.create_element("div").ok()?;
+    title.set_class_name("context-help-title");
+    title.set_text_content(Some(&title_label));
+    let _ = el.append_child(&title);
+    for line in lines {
+        let row = document.create_element("div").ok()?;
+        row.set_class_name("context-help-line");
+        row.set_text_content(Some(&line));
+        let _ = el.append_child(&row);
+    }
+    let _ = el.style().set_property("display", "block");
+    Some(())
+}
+
 fn update_shape_properties_panel(av: &RefAV, ordered: &[EUId], allow_focus: bool) -> Option<()> {
     let document = av.borrow().document.clone();
     let Some(body) = document.get_element_by_id("shape-properties-body") else {
@@ -1507,6 +1638,8 @@ pub(crate) fn update_shapes_panel(av: RefAV) {
         list.set_inner_html("");
         drop(avb);
         update_shape_properties_panel(&av, &[], false);
+        update_help_panel(&av);
+        update_context_help(&av);
         return;
     }
     let _ = avb.shapes_panel.style().set_property("display", "flex");
@@ -1578,6 +1711,8 @@ pub(crate) fn update_shapes_panel(av: RefAV) {
 
     drop(avb);
     update_shape_properties_panel(&av, &ordered, false);
+    update_help_panel(&av);
+    update_context_help(&av);
 }
 
 fn reorder_shapes_by_index(av: RefAV, from_idx: usize, to_idx: usize) {

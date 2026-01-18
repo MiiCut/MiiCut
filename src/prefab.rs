@@ -3,6 +3,8 @@ use kurbo::{BezPath, Circle, PathEl, Shape, Vec2};
 use crate::canvas::{Color, Colors};
 use crate::types::SegBundle;
 
+pub const VERTEX_RADIUS: f64 = 5.0;
+
 pub fn centroid_path(pos: Vec2, _scale: f64, size: f64) -> BezPath {
     use PathEl::*;
     let v: Vec<PathEl> = vec![
@@ -27,8 +29,7 @@ pub fn helper_point_path(pos: Vec2, size: f64) -> BezPath {
 }
 pub fn point_path(pos: Vec2, scale: f64) -> BezPath {
     let tol = 0.01;
-    let size = 5.;
-    Circle::new(pos.to_point(), size / scale).to_path(tol)
+    Circle::new(pos.to_point(), VERTEX_RADIUS / scale).to_path(tol)
 }
 pub fn line_path(pos1: Vec2, pos2: Vec2) -> BezPath {
     BezPath::from_vec(vec![

@@ -1003,6 +1003,7 @@ impl Canvas {
     }
 
     pub fn draw_vs(&mut self, e: &GeneralShape) {
+        let scale = self.get_scale();
         for (vid, vertex) in e.get_vertices().iter() {
             let pos = e.vertex_display_pos(vertex.curr());
             let vid_sel = self
@@ -1018,7 +1019,7 @@ impl Canvas {
 
             let colors = get_vertices_colors(vid_sel, vid_high);
             if vid_sel {
-                let ring = point_path(pos, 0.45);
+                let ring = point_path(pos, scale * 0.45);
                 self.draw_path(
                     &ring,
                     Pattern::Composed(false),
@@ -1027,7 +1028,7 @@ impl Canvas {
                     vec![],
                 );
             } else if vid_high {
-                let ring = point_path(pos, 0.45);
+                let ring = point_path(pos, scale * 0.45);
                 self.draw_path(
                     &ring,
                     Pattern::Composed(false),
@@ -1037,7 +1038,7 @@ impl Canvas {
                 );
             }
             self.draw_path(
-                &point_path(pos, 1.),
+                &point_path(pos, scale),
                 Pattern::Point,
                 colors.fill_color,
                 colors.stroke_color,

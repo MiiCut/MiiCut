@@ -1,5 +1,5 @@
 use crate::app::RefAV;
-use crate::canvas::{CanvasKind, Color};
+use crate::canvas::{Canvas, CanvasKind, Color};
 use crate::dom::{get_element_height, get_element_width, Tabs};
 use crate::inputs::{ButtonLevel, MouseButton, SystemMouse, UserAction};
 use crate::math::MyError;
@@ -360,7 +360,7 @@ pub(crate) fn on_toolpath_mouse_wheel(av: RefAV, event: Event) {
     }
 }
 
-fn zoom_canvas_at(canvas: &mut crate::canvas::Canvas, world_pos: kurbo::Vec2, factor: f64) {
+fn zoom_canvas_at(canvas: &mut Canvas, world_pos: kurbo::Vec2, factor: f64) {
     let scale = canvas.get_scale();
     let view_size = canvas.get_canvas_size();
     let max_world_w = 3500.0;

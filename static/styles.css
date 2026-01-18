@@ -234,6 +234,13 @@ html {
   min-height: 160px;
   max-height: 45%;
 }
+.shapes-help {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #d3d3d3;
+  min-height: 120px;
+  max-height: 35%;
+}
 .shapes-properties-body {
   flex: 1;
   overflow-y: auto;
@@ -242,6 +249,36 @@ html {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.shapes-help-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.help-section {
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+}
+.help-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: #222;
+}
+.help-key {
+  min-width: 64px;
+  font-weight: 600;
+  color: #444;
+}
+.help-text {
+  flex: 1;
+  color: #222;
 }
 .shape-prop-row {
   display: flex;
@@ -273,6 +310,31 @@ html {
 .shape-prop-empty {
   font-size: 12px;
   color: #666;
+}
+.context-help {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  max-width: 260px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #222;
+  background-color: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+  z-index: 5;
+  display: none;
+}
+.context-help-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #333;
+}
+.context-help-line {
+  line-height: 1.2;
+  color: #222;
 }
 .shape-row {
   display: flex;
