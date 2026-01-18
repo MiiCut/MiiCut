@@ -1040,22 +1040,22 @@ fn update_help_panel(av: &RefAV) -> Option<()> {
     }
 
     body.set_inner_html("");
-    let _ = add_help_section(&document, &body, "Raccourcis");
-    let _ = add_help_row(&document, &body, "Esc", "annuler l'action en cours");
+    let _ = add_help_section(&document, &body, "Shortcuts");
+    let _ = add_help_row(&document, &body, "Esc", "cancel current action");
     let _ = add_help_row(&document, &body, "Option/Alt", "preview");
     let _ = add_help_row(
         &document,
         &body,
         "Suppr/Backspace",
-        "supprimer la selection",
+        "delete selection",
     );
-    let _ = add_help_row(&document, &body, "Ctrl+C/V", "copier / coller");
-    let _ = add_help_row(&document, &body, "Ctrl+S", "sauvegarder");
+    let _ = add_help_row(&document, &body, "Ctrl+C/V", "copy / paste");
+    let _ = add_help_row(&document, &body, "Ctrl+S", "save");
     let _ = add_help_row(
         &document,
         &body,
         "↑ / ↓",
-        "ordre du shape ou rayon du vertex",
+        "shape order or vertex radius",
     );
 
     Some(())
@@ -1082,26 +1082,26 @@ fn update_context_help(av: &RefAV) -> Option<()> {
 
         if let Some((shape_type, _)) = avb.element_on_creation.as_ref() {
             if matches!(shape_type, ShapeType::Poly) {
-                title = "Forme: Polygone".to_string();
-                lines.push("Polygone: Espace pour terminer.".to_string());
+                title = "Shape: Polygon".to_string();
+                lines.push("Polygon: press Space to finish.".to_string());
             } else {
-                title = "Forme".to_string();
-                lines.push("Creation: cliquez pour placer le second point.".to_string());
+                title = "Shape".to_string();
+                lines.push("Creation: click to place the second point.".to_string());
             }
         } else if matches!(avb.icon_selected, ShapeType::Poly) {
-            title = "Forme: Polygone".to_string();
+            title = "Shape: Polygon".to_string();
             lines.push(
-                "Polygone: cliquez pour ajouter des points, Espace pour terminer.".to_string(),
+                "Polygon: click to add points, press Space to finish.".to_string(),
             );
         } else if matches!(avb.icon_selected, ShapeType::Arrow) {
             if canvas.dataset.vertex_selected.is_some() {
                 title = "Vertex".to_string();
-                lines.push("Vertex: ↑ / ↓ pour changer le rayon.".to_string());
-                lines.push("Vertex: espace pour changer le type d'apex.".to_string());
+                lines.push("Vertex: ↑ / ↓ to change radius.".to_string());
+                lines.push("Vertex: Space to change apex type.".to_string());
             } else if canvas.dataset.shapes_selected.len() == 1 {
-                title = "Forme".to_string();
-                lines.push("Forme: Espace pour basculer Union/Diff.".to_string());
-                lines.push("Forme: ↑ / ↓ pour changer l'ordre.".to_string());
+                title = "Shape".to_string();
+                lines.push("Shape: Space to toggle Union/Diff.".to_string());
+                lines.push("Shape: ↑ / ↓ to change order.".to_string());
             }
         }
 
