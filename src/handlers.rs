@@ -1,4 +1,4 @@
-use crate::app::RefAV;
+use crate::app::{focus_note_editor, update_notes_view, RefAV};
 use crate::canvas::{Canvas, CanvasKind, Color};
 use crate::dom::{get_element_height, get_element_width, Tabs};
 use crate::inputs::{ButtonLevel, MouseButton, SystemMouse, UserAction};
@@ -9,6 +9,7 @@ use crate::render::{
 use crate::shape::{GeneralShape, ShapeType};
 use crate::shapes::{toolpath_to_plasma_gcode, Toolpath};
 
+use kurbo::Vec2;
 use wasm_bindgen::JsCast;
 use web_sys::{
     Event, HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent, MouseEvent,
@@ -189,10 +190,46 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
 pub(crate) fn on_draw_mouse_move(av: RefAV, event: Event) {
     if let Ok(mouse_event) = event.dyn_into::<MouseEvent>() {
         let sys_mouse = SystemMouse::Move;
-        let action = av.borrow_mut().update_canvas_inputs(mouse_event, sys_mouse);
-        let _ = update(av.clone(), action);
+        let mut note_handled = false;
+        let action = {
+            let Ok(mut avb) = av.try_borrow_mut() else {
+                return;
+            };
+            let action = avb.update_canvas_inputs(mouse_event, sys_mouse);
+            let draft = avb.note_draft.clone();
+            if draft.is_some() && avb.active_view == Tabs::Draw {
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                let draw_pos = canvas.get_user_ui().draw_pos;
+                if let Some(draft) = draft {
+                    let min = Vec2::new(
+                        draft.start.x.min(draw_pos.x),
+                        draft.start.y.min(draw_pos.y),
+                    );
+                    let max = Vec2::new(
+                        draft.start.x.max(draw_pos.x),
+                        draft.start.y.max(draw_pos.y),
+                    );
+                    if let Some(note) = canvas.notes.get_mut(draft.id) {
+                        note.pos = min;
+                        note.size = max - min;
+                    }
+                    note_handled = true;
+                }
+            }
+            action
+        };
+        if note_handled {
+            update_notes_view(av.clone());
+        } else {
+            let _ = update(av.clone(), action);
+        }
     }
-    if av.borrow().active_canvas == CanvasKind::Draw {
+    let Ok(avb) = av.try_borrow() else {
+        return;
+    };
+    let should_render = avb.active_canvas == CanvasKind::Draw;
+    drop(avb);
+    if should_render {
         render_draw_view(av);
     }
 }
@@ -200,10 +237,34 @@ pub(crate) fn on_draw_mouse_move(av: RefAV, event: Event) {
 pub(crate) fn on_draw_mouse_down(av: RefAV, event: Event) {
     if let Ok(mouse_event) = event.dyn_into::<MouseEvent>() {
         let sys_mouse = SystemMouse::Down(mouse_event.detail());
-        let action = av.borrow_mut().update_canvas_inputs(mouse_event, sys_mouse);
-        let _ = update(av.clone(), action);
+        let mut note_started = false;
+        let action = {
+            let Ok(mut avb) = av.try_borrow_mut() else {
+                return;
+            };
+            let button = mouse_event.button();
+            let action = avb.update_canvas_inputs(mouse_event.clone(), sys_mouse);
+            if avb.note_mode && avb.active_view == Tabs::Draw && button == 0 {
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                let start = canvas.get_user_ui().draw_pos;
+                let id = canvas.notes.add(start, Vec2::new(1.0, 1.0), String::new());
+                avb.note_draft = Some(crate::app::NoteDraft { id, start });
+                note_started = true;
+            }
+            action
+        };
+        if note_started {
+            update_notes_view(av.clone());
+        } else {
+            let _ = update(av.clone(), action);
+        }
     }
-    if av.borrow().active_canvas == CanvasKind::Draw {
+    let Ok(avb) = av.try_borrow() else {
+        return;
+    };
+    let should_render = avb.active_canvas == CanvasKind::Draw;
+    drop(avb);
+    if should_render {
         render_draw_view(av);
     }
 }
@@ -211,10 +272,35 @@ pub(crate) fn on_draw_mouse_down(av: RefAV, event: Event) {
 pub(crate) fn on_draw_mouse_up(av: RefAV, event: Event) {
     if let Ok(mouse_event) = event.dyn_into::<MouseEvent>() {
         let sys_mouse = SystemMouse::Up(mouse_event.detail());
-        let action = av.borrow_mut().update_canvas_inputs(mouse_event, sys_mouse);
-        let _ = update(av.clone(), action);
+        let mut note_id = None;
+        let action = {
+            let Ok(mut avb) = av.try_borrow_mut() else {
+                return;
+            };
+            let action = avb.update_canvas_inputs(mouse_event, sys_mouse);
+            if let Some(draft) = avb.note_draft.take() {
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                let min_size = 80.0 / canvas.get_scale().max(0.001);
+                if let Some(note) = canvas.notes.get_mut(draft.id) {
+                    note.size = Vec2::new(note.size.x.max(min_size), note.size.y.max(min_size));
+                }
+                note_id = Some(draft.id);
+            }
+            action
+        };
+        if let Some(id) = note_id {
+            update_notes_view(av.clone());
+            focus_note_editor(av.clone(), id);
+        } else {
+            let _ = update(av.clone(), action);
+        }
     }
-    if av.borrow().active_canvas == CanvasKind::Draw {
+    let Ok(avb) = av.try_borrow() else {
+        return;
+    };
+    let should_render = avb.active_canvas == CanvasKind::Draw;
+    drop(avb);
+    if should_render {
         render_draw_view(av);
     }
 }
@@ -239,7 +325,9 @@ pub(crate) fn on_draw_mouse_wheel(av: RefAV, event: Event) {
 }
 
 pub(crate) fn on_draw_mouse_enter(av: RefAV, _event: Event) {
-    let mut avb = av.borrow_mut();
+    let Ok(mut avb) = av.try_borrow_mut() else {
+        return;
+    };
     avb.canvases[CanvasKind::Draw.idx()].set_pointer_on_canvas(true);
     // avb.update_draw_cursor();
     if avb.element_on_creation.is_some() {
@@ -253,7 +341,9 @@ pub(crate) fn on_draw_mouse_enter(av: RefAV, _event: Event) {
 }
 
 pub(crate) fn on_draw_mouse_leave(av: RefAV, _event: Event) {
-    let mut avb = av.borrow_mut();
+    let Ok(mut avb) = av.try_borrow_mut() else {
+        return;
+    };
     avb.canvases[CanvasKind::Draw.idx()].set_pointer_on_canvas(false);
     avb.element_on_creation = None;
     avb.go_to_arrow_tool();
@@ -697,10 +787,14 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
 pub(crate) fn on_icon_click(av: RefAV, icon: ShapeType) {
     let mut avb = av.borrow_mut();
     avb.icon_selected = icon;
+    avb.note_mode = false;
+    avb.note_draft = None;
+    avb.note_drag = None;
     avb.user_icons
         .iter()
         .for_each(|icon| avb.html_deselect_icons(*icon));
     avb.html_select_icon(icon);
+    avb.html_deselect_note_icon();
     drop(avb);
 }
 
@@ -727,14 +821,23 @@ pub(crate) fn on_icon_mouseover_label(av: RefAV, event: Event, label: &'static s
 pub(crate) fn on_icon_mouseout(av: RefAV, _event: Event) {
     let avb = av.borrow_mut();
     let _ = avb.tooltip.set_attribute("style", "display:none;");
-    if let Some(html_element) = avb.icon_selected.get_html_element() {
-        let selected_color = Color::OnCreation.get();
-        html_element
-            .set_attribute("style", &format!("color:{selected_color}"))
-            .unwrap();
+    if !avb.note_mode {
+        if let Some(html_element) = avb.icon_selected.get_html_element() {
+            let selected_color = Color::OnCreation.get();
+            html_element
+                .set_attribute("style", &format!("color:{selected_color}"))
+                .unwrap();
+        }
+    } else if let Some(html_element) = avb.document.get_element_by_id("icon-note") {
+        if let Ok(html_element) = html_element.dyn_into::<HtmlElement>() {
+            let selected_color = Color::OnCreation.get();
+            html_element
+                .set_attribute("style", &format!("color:{selected_color}"))
+                .unwrap();
+        }
     }
     avb.user_icons.iter().for_each(|icon| {
-        if *icon != avb.icon_selected {
+        if *icon != avb.icon_selected || avb.note_mode {
             if let Some(html_element) = icon.get_html_element() {
                 let text_color = Color::Text.get();
                 html_element

@@ -29,9 +29,6 @@ impl Clipboard {
         let delta = pointer.curr() - copy_pointer.curr();
         let mut pasted = shape.clone();
         pasted.move_shape(delta);
-        for (_, value) in pasted.get_vertices_mut().iter_mut() {
-            value.clear_binds();
-        }
         Some(pasted)
     }
 

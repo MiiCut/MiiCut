@@ -18,7 +18,7 @@ use geo::algorithm::translate::Translate;
 use geo::{orient::Direction, Coord, LineString, MultiPolygon, Point, Polygon};
 use js_sys::Math;
 use kurbo::{flatten, Arc, BezPath, Circle, PathEl, Shape, Vec2};
-use std::{collections::HashSet, hash::Hash};
+use std::hash::Hash;
 use std::{
     f64::consts::PI,
     fmt::{Debug, Display},
@@ -1494,15 +1494,6 @@ impl GeneralShape {
         }
         self.rotation.save();
     }
-    pub fn get_binded_elements(&self) -> HashSet<EUId> {
-        let mut binds = HashSet::new();
-
-        for (_, v) in self.vertices.iter() {
-            binds.extend(v.get_binds().iter().map(|(eid, _)| *eid));
-        }
-        binds
-    }
-
     pub fn get_properties(&self) -> &Properties {
         &self.properties
     }

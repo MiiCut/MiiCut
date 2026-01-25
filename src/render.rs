@@ -1,4 +1,4 @@
-use crate::app::{update_shapes_panel, RefAV};
+use crate::app::{update_notes_view, update_shapes_panel, RefAV};
 use crate::canvas::{Canvas, CanvasKind, Color, Pattern};
 use crate::dimensions::dim_hv;
 use crate::gcode::Seg;
@@ -27,161 +27,160 @@ pub(crate) fn render_draw_view(av: RefAV) {
     update_status_bar(av.clone());
     update_shapes_panel(av.clone());
 
-    let mut avb = av.borrow_mut();
-    let svg_bbox_only = true;
-    let element_on_creation = avb.element_on_creation.clone();
-    let canvas_draw = &mut avb.canvases[CanvasKind::Draw.idx()];
+    {
+        let mut avb = av.borrow_mut();
+        let svg_bbox_only = true;
+        let element_on_creation = avb.element_on_creation.clone();
+        let canvas_draw = &mut avb.canvases[CanvasKind::Draw.idx()];
 
-    canvas_draw.clear();
+        canvas_draw.clear();
 
-    canvas_draw.draw_closed_path(Pattern::Composed(true), Color::Black, Color::Gray20, vec![]);
+        canvas_draw.draw_closed_path(Pattern::Composed(true), Color::Black, Color::Gray20, vec![]);
 
-    if !canvas_draw.get_user_ui().keys_states.alt_pressed {
-        canvas_draw.draw_paths_sets_with_svg_bbox(svg_bbox_only);
+        if !canvas_draw.get_user_ui().keys_states.alt_pressed {
+            canvas_draw.draw_paths_sets_with_svg_bbox(svg_bbox_only);
 
-        canvas_draw.may_be_draw_radiuses();
+            canvas_draw.may_be_draw_radiuses();
 
-        canvas_draw.draw_vertices();
+            canvas_draw.draw_vertices();
+        }
 
-        canvas_draw.draw_bindings();
-    }
-
-    if let Some((cs, mut vs)) = element_on_creation {
-        use crate::shape::ShapeType::*;
-        match cs {
-            Disc => {
-                if vs.len() == 1 {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr());
-                    if let Some(e) = GeneralShape::new_shape_disc(vs[0], vs[1], 0) {
-                        canvas_draw.draw_paths_creation(&e);
-                        canvas_draw.draw_vs(&e);
-                        canvas_draw.draw_dimensions(&e);
+        if let Some((cs, mut vs)) = element_on_creation {
+            use crate::shape::ShapeType::*;
+            match cs {
+                Disc => {
+                    if vs.len() == 1 {
+                        vs.push(canvas_draw.get_user_ui().pointer.curr());
+                        if let Some(e) = GeneralShape::new_shape_disc(vs[0], vs[1], 0) {
+                            canvas_draw.draw_paths_creation(&e);
+                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_dimensions(&e);
+                        }
                     }
                 }
-            }
-            Square => {
-                if vs.len() == 1 {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr());
-                    if let Some(e) = GeneralShape::new_shape_rectangle(vs[0], vs[1], 0) {
-                        canvas_draw.draw_paths_creation(&e);
-                        canvas_draw.draw_vs(&e);
-                        canvas_draw.draw_dimensions(&e);
+                Square => {
+                    if vs.len() == 1 {
+                        vs.push(canvas_draw.get_user_ui().pointer.curr());
+                        if let Some(e) = GeneralShape::new_shape_rectangle(vs[0], vs[1], 0) {
+                            canvas_draw.draw_paths_creation(&e);
+                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_dimensions(&e);
+                        }
                     }
                 }
-            }
-            Oblong => {
-                if vs.len() == 1 {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr());
-                    if let Some(e) = GeneralShape::new_shape_oblong(vs[0], vs[1], 0) {
-                        canvas_draw.draw_paths_creation(&e);
-                        canvas_draw.draw_vs(&e);
-                        canvas_draw.draw_dimensions(&e);
+                Oblong => {
+                    if vs.len() == 1 {
+                        vs.push(canvas_draw.get_user_ui().pointer.curr());
+                        if let Some(e) = GeneralShape::new_shape_oblong(vs[0], vs[1], 0) {
+                            canvas_draw.draw_paths_creation(&e);
+                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_dimensions(&e);
+                        }
                     }
                 }
-            }
-            Voronoi => {
-                if vs.len() == 1 {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr());
-                    let min = Vec2::new(vs[0].x.min(vs[1].x), vs[0].y.min(vs[1].y));
-                    let max = Vec2::new(vs[0].x.max(vs[1].x), vs[0].y.max(vs[1].y));
-                    let mut path = BezPath::new();
-                    path.move_to(Point::new(min.x, min.y));
-                    path.line_to(Point::new(min.x, max.y));
-                    path.line_to(Point::new(max.x, max.y));
-                    path.line_to(Point::new(max.x, min.y));
-                    path.close_path();
-                    let colors = get_vertices_colors(false, false);
-                    canvas_draw.draw_path(
-                        &path,
-                        Pattern::OnCreation,
-                        colors.fill_color,
-                        colors.stroke_color,
-                        vec![],
-                    );
-                }
-            }
-            ConstrLine => {
-                if vs.len() == 1 {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr());
-                    if let Some(e) = GeneralShape::new_shape_constr_line(vs[0], vs[1], 0) {
-                        canvas_draw.draw_paths_creation(&e);
-                        canvas_draw.draw_vs(&e);
-                        canvas_draw.draw_dimensions(&e);
-                    }
-                }
-            }
-            ConstrCircle => {
-                if vs.len() == 1 {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr());
-                    if let Some(e) = GeneralShape::new_shape_constr_circle(vs[0], vs[1], 0) {
-                        canvas_draw.draw_paths_creation(&e);
-                        canvas_draw.draw_vs(&e);
-                        canvas_draw.draw_dimensions(&e);
-                    }
-                }
-            }
-            Text => {
-                if vs.len() == 1 {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr());
-                    if let Some(e) = GeneralShape::new_shape_text(vs[0], vs[1], 0) {
-                        canvas_draw.draw_paths_creation(&e);
-                        canvas_draw.draw_vs(&e);
-                        canvas_draw.draw_dimensions(&e);
-                    }
-                }
-            }
-            Poly => {
-                if vs.len() > 2 {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr());
-                    if let Some(e) = GeneralShape::new_shape_poly(vs, 0) {
-                        canvas_draw.draw_paths_creation(&e);
-                        canvas_draw.draw_vs(&e);
-                        canvas_draw.draw_dimensions(&e);
-                    }
-                } else {
-                    vs.push(canvas_draw.get_user_ui().pointer.curr());
-                    if vs.len() >= 2 {
+                Voronoi => {
+                    if vs.len() == 1 {
+                        vs.push(canvas_draw.get_user_ui().pointer.curr());
+                        let min = Vec2::new(vs[0].x.min(vs[1].x), vs[0].y.min(vs[1].y));
+                        let max = Vec2::new(vs[0].x.max(vs[1].x), vs[0].y.max(vs[1].y));
+                        let mut path = BezPath::new();
+                        path.move_to(Point::new(min.x, min.y));
+                        path.line_to(Point::new(min.x, max.y));
+                        path.line_to(Point::new(max.x, max.y));
+                        path.line_to(Point::new(max.x, min.y));
+                        path.close_path();
                         let colors = get_vertices_colors(false, false);
-                        for (i, v) in vs.iter().enumerate() {
-                            if i < vs.len() - 1 {
+                        canvas_draw.draw_path(
+                            &path,
+                            Pattern::OnCreation,
+                            colors.fill_color,
+                            colors.stroke_color,
+                            vec![],
+                        );
+                    }
+                }
+                ConstrLine => {
+                    if vs.len() == 1 {
+                        vs.push(canvas_draw.get_user_ui().pointer.curr());
+                        if let Some(e) = GeneralShape::new_shape_constr_line(vs[0], vs[1], 0) {
+                            canvas_draw.draw_paths_creation(&e);
+                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_dimensions(&e);
+                        }
+                    }
+                }
+                ConstrCircle => {
+                    if vs.len() == 1 {
+                        vs.push(canvas_draw.get_user_ui().pointer.curr());
+                        if let Some(e) = GeneralShape::new_shape_constr_circle(vs[0], vs[1], 0) {
+                            canvas_draw.draw_paths_creation(&e);
+                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_dimensions(&e);
+                        }
+                    }
+                }
+                Text => {
+                    if vs.len() == 1 {
+                        vs.push(canvas_draw.get_user_ui().pointer.curr());
+                        if let Some(e) = GeneralShape::new_shape_text(vs[0], vs[1], 0) {
+                            canvas_draw.draw_paths_creation(&e);
+                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_dimensions(&e);
+                        }
+                    }
+                }
+                Poly => {
+                    if vs.len() > 2 {
+                        vs.push(canvas_draw.get_user_ui().pointer.curr());
+                        if let Some(e) = GeneralShape::new_shape_poly(vs, 0) {
+                            canvas_draw.draw_paths_creation(&e);
+                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_dimensions(&e);
+                        }
+                    } else {
+                        vs.push(canvas_draw.get_user_ui().pointer.curr());
+                        if vs.len() >= 2 {
+                            let colors = get_vertices_colors(false, false);
+                            for (i, v) in vs.iter().enumerate() {
+                                if i < vs.len() - 1 {
+                                    canvas_draw.draw_path(
+                                        &line_path(vs[i], vs[i + 1]),
+                                        Pattern::OnCreation,
+                                        colors.fill_color,
+                                        colors.stroke_color,
+                                        vec![],
+                                    );
+                                    if let Some(seg) = SegBundle::new(vs[i], vs[i + 1]) {
+                                        let (path, pattern, colors, text) =
+                                            dim_hv(seg, canvas_draw.get_canvas_infos(), false);
+                                        canvas_draw.draw_path(
+                                            &path,
+                                            pattern,
+                                            colors.fill_color,
+                                            colors.stroke_color,
+                                            text,
+                                        );
+                                    }
+                                }
                                 canvas_draw.draw_path(
-                                    &line_path(vs[i], vs[i + 1]),
-                                    Pattern::OnCreation,
+                                    &point_path(*v, 1.),
+                                    Pattern::Point,
                                     colors.fill_color,
                                     colors.stroke_color,
                                     vec![],
                                 );
-                                if let Some(seg) = SegBundle::new(vs[i], vs[i + 1]) {
-                                    let (path, pattern, colors, text) =
-                                        dim_hv(seg, canvas_draw.get_canvas_infos(), false);
-                                    canvas_draw.draw_path(
-                                        &path,
-                                        pattern,
-                                        colors.fill_color,
-                                        colors.stroke_color,
-                                        text,
-                                    );
-                                }
                             }
-                            canvas_draw.draw_path(
-                                &point_path(*v, 1.),
-                                Pattern::Point,
-                                colors.fill_color,
-                                colors.stroke_color,
-                                vec![],
-                            );
                         }
                     }
                 }
+                _ => {}
             }
-            _ => {}
         }
+        canvas_draw.draw_pointer(canvas_draw.get_user_ui().pointer.curr());
+        avb.update_draw_cursor();
     }
 
-    canvas_draw.draw_pointer(canvas_draw.get_user_ui().pointer.curr());
-    avb.update_draw_cursor();
-
-    drop(avb);
+    update_notes_view(av.clone());
     end_render(av.clone());
     update_status_bar(av);
 }

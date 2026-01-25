@@ -20,7 +20,7 @@ use crate::machine::{
     build_machine_view, load_machine_schema, machine_input_id, parse_grbl_setting_line,
     update_machine_value, MachineGroup,
 };
-use crate::math::to_draw;
+use crate::math::{to_canvas, to_draw};
 use crate::prefab::line_path;
 use crate::render::{
     draw_grid_and_rules, draw_reset_origin, render_draw_view, render_gcode_view,
@@ -39,7 +39,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{
     Blob, Document, DragEvent, Element, Event, FileReader, HtmlAnchorElement, HtmlCanvasElement,
-    HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent, Url, Window,
+    HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent, MouseEvent, ResizeObserver,
+    ResizeObserverEntry, Url, Window,
 };
 
 pub(crate) type RefAV = Rc<RefCell<AppVars>>;
@@ -90,6 +91,23 @@ pub(crate) struct AppVars {
     pub(crate) last_http_error: Option<String>,
     pub(crate) cnc: Option<Rc<CncLink>>,
     pub(crate) shapes_drag_from: Option<usize>,
+    pub(crate) note_mode: bool,
+    pub(crate) note_draft: Option<NoteDraft>,
+    pub(crate) note_drag: Option<NoteDrag>,
+    pub(crate) notes_dom: HashMap<usize, HtmlElement>,
+    pub(crate) notes_resize_observers: HashMap<usize, ResizeObserver>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct NoteDraft {
+    pub(crate) id: usize,
+    pub(crate) start: Vec2,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct NoteDrag {
+    pub(crate) id: usize,
+    pub(crate) offset: Vec2,
 }
 
 impl AppVars {
@@ -483,14 +501,9 @@ impl AppVars {
                     canvas_user
                         .dataset
                         .create_vertices_between(eid1, vid1, eid2, vid2);
-                } else {
-                    canvas_user
-                        .dataset
-                        .bind_unbind_vertex_to(eid1, vid1, eid2, vid2);
                 }
                 return;
             }
-
         } else {
             if let ShapeType::Poly = self.icon_selected {
                 let el_on_creation = self.element_on_creation.clone();
@@ -546,10 +559,6 @@ impl AppVars {
                     canvas_user
                         .dataset
                         .create_vertices_between(eid1, vid1, eid2, vid2);
-                } else {
-                    canvas_user
-                        .dataset
-                        .bind_unbind_vertex_to(eid1, vid1, eid2, vid2);
                 }
                 return;
             }
@@ -668,10 +677,39 @@ impl AppVars {
 
     pub(crate) fn go_to_arrow_tool(&mut self) {
         self.icon_selected = ShapeType::Arrow;
+        self.note_mode = false;
+        self.note_draft = None;
+        self.note_drag = None;
         self.user_icons
             .iter()
             .for_each(|icon| self.html_deselect_icons(*icon));
         self.html_select_icon(ShapeType::Arrow);
+        self.html_deselect_note_icon();
+    }
+    pub(crate) fn select_note_tool(&mut self) {
+        self.icon_selected = ShapeType::Arrow;
+        self.note_mode = true;
+        self.element_on_creation = None;
+        self.note_drag = None;
+        self.user_icons
+            .iter()
+            .for_each(|icon| self.html_deselect_icons(*icon));
+        self.html_deselect_note_icon();
+        self.html_select_note_icon();
+    }
+    pub(crate) fn html_select_note_icon(&self) {
+        if let Some(html_element) = self.document.get_element_by_id("icon-note") {
+            if let Ok(html_element) = html_element.dyn_into::<HtmlElement>() {
+                let _ = html_element.set_attribute("class", "icon icon-selected");
+            }
+        }
+    }
+    pub(crate) fn html_deselect_note_icon(&self) {
+        if let Some(html_element) = self.document.get_element_by_id("icon-note") {
+            if let Ok(html_element) = html_element.dyn_into::<HtmlElement>() {
+                let _ = html_element.set_attribute("class", "icon");
+            }
+        }
     }
     pub(crate) fn html_select_icon(&self, icon: ShapeType) {
         if let Some(html_element) = icon.get_html_element() {
@@ -904,6 +942,11 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         last_http_error: None,
         cnc,
         shapes_drag_from: None,
+        note_mode: false,
+        note_draft: None,
+        note_drag: None,
+        notes_dom: HashMap::new(),
+        notes_resize_observers: HashMap::new(),
     }));
 
     if let Some(cnc) = app_vars.borrow().cnc.clone() {
@@ -936,6 +979,7 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
     init_status(app_vars.clone())?;
     init_shapes_panel(app_vars.clone())?;
     init_draw_canvas(app_vars.clone())?;
+    init_note_handlers(app_vars.clone())?;
     init_gcode_canvas(app_vars.clone())?;
     init_toolpath_canvas(app_vars.clone())?;
     init_toolpath_panel(app_vars.clone())?;
@@ -1115,21 +1159,11 @@ fn update_help_panel(av: &RefAV) -> Option<()> {
     let _ = add_help_section(&document, &body, "Shortcuts");
     let _ = add_help_row(&document, &body, "Esc", "cancel current action");
     let _ = add_help_row(&document, &body, "Option/Alt", "preview");
-    let _ = add_help_row(
-        &document,
-        &body,
-        "Suppr/Backspace",
-        "delete selection",
-    );
+    let _ = add_help_row(&document, &body, "Suppr/Backspace", "delete selection");
     let _ = add_help_row(&document, &body, "Enter", "group / ungroup selection");
     let _ = add_help_row(&document, &body, "Ctrl+C/V", "copy / paste");
     let _ = add_help_row(&document, &body, "Ctrl+S", "save");
-    let _ = add_help_row(
-        &document,
-        &body,
-        "↑ / ↓",
-        "shape order or vertex radius",
-    );
+    let _ = add_help_row(&document, &body, "↑ / ↓", "shape order or vertex radius");
 
     Some(())
 }
@@ -1163,9 +1197,7 @@ fn update_context_help(av: &RefAV) -> Option<()> {
             }
         } else if matches!(avb.icon_selected, ShapeType::Poly) {
             title = "Shape: Polygon".to_string();
-            lines.push(
-                "Polygon: click to add points, press Space to finish.".to_string(),
-            );
+            lines.push("Polygon: click to add points, press Space to finish.".to_string());
         } else if matches!(avb.icon_selected, ShapeType::Arrow) {
             if canvas.dataset.vertex_selected.is_some() {
                 title = "Vertex".to_string();
@@ -2299,6 +2331,33 @@ pub(crate) fn init_icons(av: RefAV) -> Result<(), JsValue> {
         )?;
     }
 
+    if let Some(note_icon) = av.borrow().document.get_element_by_id("icon-note") {
+        let av_clone = av.clone();
+        set_callback(
+            av.clone(),
+            "click".into(),
+            &note_icon,
+            Box::new(move |av, _event| {
+                let mut avb = av.borrow_mut();
+                avb.select_note_tool();
+                drop(avb);
+                update_notes_view(av_clone.clone());
+            }),
+        )?;
+        set_callback(
+            av.clone(),
+            "mouseenter".into(),
+            &note_icon,
+            Box::new(move |av, event| on_icon_mouseover_label(av, event, "Note")),
+        )?;
+        set_callback(
+            av.clone(),
+            "mouseleave".into(),
+            &note_icon,
+            Box::new(move |av, event| on_icon_mouseout(av, event)),
+        )?;
+    }
+
     Ok(())
 }
 
@@ -2566,6 +2625,47 @@ pub(crate) fn init_toolpath_panel(av: RefAV) -> Result<(), JsValue> {
 
 pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
     let document = av.borrow().document.clone();
+    let examples = crate::examples_gen::EXAMPLES;
+    let examples_menu = document
+        .get_element_by_id("examples-menu")
+        .and_then(|el| el.dyn_into::<HtmlElement>().ok());
+    if let Some(menu) = examples_menu.as_ref() {
+        let menu_clone = menu.clone();
+        let on_leave = Closure::wrap(Box::new(move |_event: Event| {
+            let _ = menu_clone.class_list().remove_1("dropdown-locked");
+        }) as Box<dyn FnMut(_)>);
+        menu.add_event_listener_with_callback("mouseleave", on_leave.as_ref().unchecked_ref())?;
+        on_leave.forget();
+    }
+    if let Some(container) = document.get_element_by_id("examples-menu-content") {
+        for (idx, (name, data)) in examples.iter().enumerate() {
+            let Ok(link) = document.create_element("a") else {
+                continue;
+            };
+            let Some(link) = link.dyn_into::<HtmlElement>().ok() else {
+                continue;
+            };
+            link.set_text_content(Some(name));
+            link.set_attribute("href", "#").ok();
+            link.set_attribute("data-example-idx", &idx.to_string())
+                .ok();
+            let av_clone = av.clone();
+            let data = data.to_string();
+            let menu = examples_menu.clone();
+            let on_click = Closure::wrap(Box::new(move |event: Event| {
+                event.prevent_default();
+                if let Some(menu) = menu.as_ref() {
+                    let _ = menu.class_list().add_1("dropdown-locked");
+                }
+                load_json_to_dataset(av_clone.clone(), data.clone());
+                update_notes_view(av_clone.clone());
+            }) as Box<dyn FnMut(_)>);
+            link.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
+            on_click.forget();
+            container.append_child(&link).ok();
+        }
+    }
+
     if let Some(save) = document.get_element_by_id("save-option") {
         let av_clone = av.clone();
         let save = save.dyn_into::<HtmlElement>()?;
@@ -2575,7 +2675,7 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
                 let avb = av_clone.borrow();
                 let canvas = &avb.canvases[CanvasKind::Draw.idx()];
                 let meta = make_export_info(&avb.document);
-                let json = build_json_from_dataset(&canvas.dataset, &meta);
+                let json = build_json_from_dataset(&canvas.dataset, &canvas.notes, &meta);
                 let Some(json) = json else {
                     return;
                 };
@@ -2625,6 +2725,7 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
                             let result = reader_clone.result().ok().and_then(|val| val.as_string());
                             if let Some(result) = result {
                                 load_json_to_dataset(av_inner.clone(), result);
+                                update_notes_view(av_inner.clone());
                             }
                         })
                             as Box<dyn FnMut(_)>);
@@ -2759,6 +2860,277 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
         save.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
         on_click.forget();
     }
+
+    Ok(())
+}
+
+pub(crate) fn update_notes_view(av: RefAV) {
+    let Ok(mut avb) = av.try_borrow_mut() else {
+        return;
+    };
+    if avb.active_view != Tabs::Draw {
+        return;
+    }
+    let document = avb.document.clone();
+    let Some(container) = document.get_element_by_id("canvas-container") else {
+        return;
+    };
+    let (scale, offset, notes) = {
+        let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+        let scale = canvas.get_scale();
+        let offset = canvas.get_offset();
+        let notes = canvas.notes.notes.clone();
+        (scale, offset, notes)
+    };
+
+    let note_ids: HashSet<usize> = notes.iter().map(|note| note.id).collect();
+    let remove_ids: Vec<usize> = avb
+        .notes_dom
+        .keys()
+        .filter(|id| !note_ids.contains(id))
+        .copied()
+        .collect();
+    for id in remove_ids {
+        if let Some(observer) = avb.notes_resize_observers.remove(&id) {
+            observer.disconnect();
+        }
+        if let Some(el) = avb.notes_dom.remove(&id) {
+            let _ = container.remove_child(&el);
+        }
+    }
+
+    for note in &notes {
+        let entry = if let Some(entry) = avb.notes_dom.get(&note.id) {
+            entry.clone()
+        } else {
+            let Some(entry) = build_note_element(av.clone(), note.id, &container, &document) else {
+                continue;
+            };
+            avb.notes_dom.insert(note.id, entry.clone());
+            entry
+        };
+        if !avb.notes_resize_observers.contains_key(&note.id) {
+            if let Some(observer) = create_note_resize_observer(av.clone(), note.id, &entry) {
+                avb.notes_resize_observers.insert(note.id, observer);
+            }
+        }
+        let pos_px = to_canvas(note.pos, scale, offset);
+        let size_px = Vec2::new(note.size.x * scale, note.size.y * scale);
+        let style = entry.style();
+        let _ = style.set_property("left", &format!("{:.1}px", pos_px.x));
+        let _ = style.set_property("top", &format!("{:.1}px", pos_px.y));
+        let _ = style.set_property("width", &format!("{:.1}px", size_px.x));
+        let _ = style.set_property("height", &format!("{:.1}px", size_px.y));
+        if let Ok(Some(textarea)) = entry.query_selector("textarea") {
+            if let Ok(textarea) = textarea.dyn_into::<HtmlTextAreaElement>() {
+                if textarea.read_only() {
+                    textarea.set_value(&note.text);
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn focus_note_editor(av: RefAV, note_id: usize) {
+    let Ok(avb) = av.try_borrow_mut() else {
+        return;
+    };
+    let Some(note_el) = avb.notes_dom.get(&note_id) else {
+        return;
+    };
+    let Ok(Some(textarea)) = note_el.query_selector("textarea") else {
+        return;
+    };
+    let Ok(textarea) = textarea.dyn_into::<HtmlTextAreaElement>() else {
+        return;
+    };
+    textarea.set_read_only(false);
+    let _ = textarea.focus();
+}
+
+fn draw_pos_from_event(canvas: &Canvas, event: &MouseEvent) -> Vec2 {
+    let rect = canvas.get_canvas().get_bounding_client_rect();
+    let canvas_pos = Vec2::new(
+        event.client_x() as f64 - rect.left(),
+        event.client_y() as f64 - rect.top(),
+    );
+    to_draw(canvas_pos, canvas.get_scale(), canvas.get_offset())
+}
+
+fn build_note_element(
+    av: RefAV,
+    note_id: usize,
+    container: &Element,
+    document: &Document,
+) -> Option<HtmlElement> {
+    let note_el: HtmlElement = document.create_element("div").ok()?.dyn_into().ok()?;
+    note_el.set_attribute("class", "note-item").ok()?;
+    note_el
+        .set_attribute("data-note-id", &note_id.to_string())
+        .ok()?;
+
+    let header: HtmlElement = document.create_element("div").ok()?.dyn_into().ok()?;
+    header.set_attribute("class", "note-header").ok()?;
+    header.set_attribute("data-role", "note-header").ok()?;
+    header.set_inner_text("Note");
+
+    let textarea: HtmlTextAreaElement =
+        document.create_element("textarea").ok()?.dyn_into().ok()?;
+    textarea.set_attribute("class", "note-text").ok()?;
+    textarea.set_attribute("data-role", "note-text").ok()?;
+    textarea.set_read_only(true);
+
+    note_el.append_child(&header).ok()?;
+    note_el.append_child(&textarea).ok()?;
+    container.append_child(&note_el).ok()?;
+
+    {
+        let av_clone = av.clone();
+        let on_down = Closure::wrap(Box::new(move |event: MouseEvent| {
+            event.prevent_default();
+            event.stop_propagation();
+            let Ok(mut avb) = av_clone.try_borrow_mut() else {
+                return;
+            };
+            let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+            let draw_pos = draw_pos_from_event(canvas, &event);
+            let Some(note) = canvas.notes.notes.iter().find(|note| note.id == note_id) else {
+                return;
+            };
+            let offset = draw_pos - note.pos;
+            avb.note_drag = Some(NoteDrag {
+                id: note_id,
+                offset,
+            });
+        }) as Box<dyn FnMut(_)>);
+        header
+            .add_event_listener_with_callback("mousedown", on_down.as_ref().unchecked_ref())
+            .ok()?;
+        on_down.forget();
+    }
+
+    {
+        let av_clone = av.clone();
+        let on_dbl = Closure::wrap(Box::new(move |event: Event| {
+            event.prevent_default();
+            if let Ok(avb) = av_clone.try_borrow_mut() {
+                if let Some(note_el) = avb.notes_dom.get(&note_id) {
+                    if let Ok(Some(textarea)) = note_el.query_selector("textarea") {
+                        if let Ok(textarea) = textarea.dyn_into::<HtmlTextAreaElement>() {
+                            textarea.set_read_only(false);
+                            let _ = textarea.focus();
+                        }
+                    }
+                }
+            }
+        }) as Box<dyn FnMut(_)>);
+        note_el
+            .add_event_listener_with_callback("dblclick", on_dbl.as_ref().unchecked_ref())
+            .ok()?;
+        on_dbl.forget();
+    }
+
+    {
+        let av_clone = av.clone();
+        let on_blur = Closure::wrap(Box::new(move |_event: Event| {
+            let Ok(mut avb) = av_clone.try_borrow_mut() else {
+                return;
+            };
+            let Some(note_el) = avb.notes_dom.get(&note_id) else {
+                return;
+            };
+            let Ok(Some(textarea)) = note_el.query_selector("textarea") else {
+                return;
+            };
+            let Ok(textarea) = textarea.dyn_into::<HtmlTextAreaElement>() else {
+                return;
+            };
+            textarea.set_read_only(true);
+            if let Some(note) = avb.canvases[CanvasKind::Draw.idx()].notes.get_mut(note_id) {
+                note.text = textarea.value();
+            }
+        }) as Box<dyn FnMut(_)>);
+        textarea
+            .add_event_listener_with_callback("blur", on_blur.as_ref().unchecked_ref())
+            .ok()?;
+        on_blur.forget();
+    }
+
+    Some(note_el)
+}
+
+fn create_note_resize_observer(
+    av: RefAV,
+    note_id: usize,
+    note_el: &HtmlElement,
+) -> Option<ResizeObserver> {
+    let av_clone = av.clone();
+    let on_resize = Closure::wrap(Box::new(move |entries: Array, _observer: ResizeObserver| {
+        let Ok(mut avb) = av_clone.try_borrow_mut() else {
+            return;
+        };
+        let scale = avb.canvases[CanvasKind::Draw.idx()].get_scale();
+        for entry in entries.iter() {
+            let Ok(entry) = entry.dyn_into::<ResizeObserverEntry>() else {
+                continue;
+            };
+            let rect = entry.content_rect();
+            if let Some(note) = avb.canvases[CanvasKind::Draw.idx()].notes.get_mut(note_id) {
+                let size = Vec2::new(rect.width() / scale, rect.height() / scale);
+                note.size = Vec2::new(size.x.max(10.0), size.y.max(10.0));
+            }
+        }
+    }) as Box<dyn FnMut(_, _)>);
+    let observer = ResizeObserver::new(on_resize.as_ref().unchecked_ref()).ok()?;
+    observer.observe(note_el);
+    on_resize.forget();
+    Some(observer)
+}
+
+fn init_note_handlers(av: RefAV) -> Result<(), JsValue> {
+    let window = av.borrow().window.clone();
+    let av_clone = av.clone();
+    let on_move = Closure::<dyn FnMut(MouseEvent)>::new(move |event: MouseEvent| {
+        let Ok(mut avb) = av_clone.try_borrow_mut() else {
+            return;
+        };
+        let Some(drag) = avb.note_drag.clone() else {
+            return;
+        };
+        let (scale, offset, note_el) = {
+            let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+            let scale = canvas.get_scale();
+            let offset = canvas.get_offset();
+            let note_el = avb.notes_dom.get(&drag.id).cloned();
+            (scale, offset, note_el)
+        };
+        let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+        let draw_pos = draw_pos_from_event(canvas, &event);
+        if let Some(note) = canvas.notes.get_mut(drag.id) {
+            note.pos = draw_pos - drag.offset;
+            if let Some(note_el) = note_el {
+                let pos_px = to_canvas(note.pos, scale, offset);
+                let size_px = Vec2::new(note.size.x * scale, note.size.y * scale);
+                let style = note_el.style();
+                let _ = style.set_property("left", &format!("{:.1}px", pos_px.x));
+                let _ = style.set_property("top", &format!("{:.1}px", pos_px.y));
+                let _ = style.set_property("width", &format!("{:.1}px", size_px.x));
+                let _ = style.set_property("height", &format!("{:.1}px", size_px.y));
+            }
+        }
+    });
+    window.add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref())?;
+    on_move.forget();
+
+    let av_clone = av.clone();
+    let on_up = Closure::<dyn FnMut(MouseEvent)>::new(move |_event: MouseEvent| {
+        let Ok(mut avb) = av_clone.try_borrow_mut() else {
+            return;
+        };
+        avb.note_drag = None;
+    });
+    window.add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref())?;
+    on_up.forget();
 
     Ok(())
 }

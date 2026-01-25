@@ -7,7 +7,7 @@ use crate::{
     shape::{GeneralShape, ShapeType, SvgFillRule},
     shapes::DataSet,
     type_vertex::Vertex,
-    types::{EUId, Property, PropertyValue, SegBundle, VUId},
+    types::{EUId, Property, PropertyValue, SegBundle},
     undoredo::UndoRedo,
 };
 use js_sys::Array;
@@ -15,6 +15,49 @@ use kurbo::{BezPath, PathEl, Point, Rect, Size, Vec2};
 use std::mem;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CanvasRenderingContext2d, CanvasWindingRule, HtmlCanvasElement, MouseEvent};
+
+#[derive(Debug, Clone)]
+pub struct Note {
+    pub id: usize,
+    pub pos: Vec2,
+    pub size: Vec2,
+    pub text: String,
+}
+
+#[derive(Debug)]
+pub struct NotesData {
+    pub notes: Vec<Note>,
+    next_id: usize,
+}
+impl NotesData {
+    pub fn new() -> Self {
+        Self {
+            notes: Vec::new(),
+            next_id: 0,
+        }
+    }
+    pub fn clear(&mut self) {
+        self.notes.clear();
+        self.next_id = 0;
+    }
+    pub fn add(&mut self, pos: Vec2, size: Vec2, text: String) -> usize {
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1);
+        self.notes.push(Note { id, pos, size, text });
+        id
+    }
+    pub fn add_with_id(&mut self, id: usize, pos: Vec2, size: Vec2, text: String) {
+        self.next_id = self.next_id.max(id.saturating_add(1));
+        self.notes.push(Note { id, pos, size, text });
+    }
+    pub fn get_mut(&mut self, id: usize) -> Option<&mut Note> {
+        self.notes.iter_mut().find(|note| note.id == id)
+    }
+    pub fn remove(&mut self, id: usize) -> Option<Note> {
+        let idx = self.notes.iter().position(|note| note.id == id)?;
+        Some(self.notes.remove(idx))
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextPos {
@@ -343,6 +386,7 @@ pub struct Canvas {
     pointer_on_canvas: bool,
     //
     pub dataset: DataSet,
+    pub notes: NotesData,
     pub clipboard: Clipboard,
     pub undo_redo: UndoRedo,
 }
@@ -364,6 +408,7 @@ impl Canvas {
             user_ui: UserUI::new(),
             pointer_on_canvas: false,
             dataset: DataSet::new(),
+            notes: NotesData::new(),
             clipboard: Clipboard::new(),
             undo_redo: UndoRedo::new(),
         })
@@ -1066,42 +1111,6 @@ impl Canvas {
             self.draw_dimensions(e);
         }
         // put back
-        self.dataset.shapes = shapes;
-    }
-    pub fn draw_bindings(&mut self) {
-        // move shapes out of self.dataset temporarily
-        let shapes = mem::take(&mut self.dataset.shapes);
-
-        for (_, source_e) in shapes.iter() {
-            for (_, source_v) in source_e.get_vertices().iter() {
-                let source_binds: Vec<(EUId, VUId)> =
-                    source_v.get_binds().iter().cloned().collect();
-                if source_binds.is_empty() {
-                    continue;
-                }
-                for (dest_eid, dest_vid) in source_binds.iter() {
-                    if let Some(dest_e) = shapes.get(dest_eid) {
-                        if let Some(dest_v) = dest_e.get_vertices().val_from_key(*dest_vid) {
-                            let start = source_e.vertex_display_pos(source_v.curr());
-                            let end = dest_e.vertex_display_pos(dest_v.curr());
-                            if let Some(seg) = SegBundle::new(start, end) {
-                                let (path, pattern, colors, text) =
-                                    dim_hv(seg, self.get_canvas_infos(), true);
-                                self.draw_path(
-                                    &path,
-                                    pattern,
-                                    colors.fill_color,
-                                    colors.stroke_color,
-                                    text,
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // put back shapes
         self.dataset.shapes = shapes;
     }
 

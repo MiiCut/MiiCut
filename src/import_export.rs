@@ -1,13 +1,15 @@
 use crate::app::RefAV;
-use crate::canvas::CanvasKind;
+use crate::canvas::{CanvasKind, NotesData};
 use crate::render::center_paths_canvas;
 use crate::shape::{GeneralShape, Operation, ShapeType, SvgData, SvgFillRule};
 use crate::shapes::DataSet;
 use crate::status::update_status_bar;
+use crate::type_scalar::Scalar;
 use crate::type_vertex::Vertex;
-use crate::types::{EUId, Properties};
+use crate::types::{EUId, Properties, Property, PropertyValue};
 use js_sys::{Array, Date, JSON};
 use kurbo::{BezPath, PathEl, Shape, Size, Vec2};
+use std::collections::HashMap;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -83,30 +85,11 @@ pub(crate) fn build_svg_from_dataset(dataset: &DataSet) -> Option<String> {
     Some(svg)
 }
 
-pub(crate) fn build_json_from_dataset(dataset: &DataSet, meta: &ExportInfo) -> Option<String> {
-    fn collect_export_shapes<'a>(
-        dataset: &'a DataSet,
-        out: &mut Vec<(EUId, &'a GeneralShape)>,
-        ids: &[EUId],
-    ) {
-        for eid in ids {
-            let shape = dataset
-                .shapes
-                .get(eid)
-                .or_else(|| dataset.grouped_shapes.get(eid));
-            let Some(shape) = shape else {
-                continue;
-            };
-            if shape.is_group() {
-                if let Some(children) = shape.get_group_children() {
-                    collect_export_shapes(dataset, out, children);
-                }
-                continue;
-            }
-            out.push((*eid, shape));
-        }
-    }
-
+pub(crate) fn build_json_from_dataset(
+    dataset: &DataSet,
+    notes: &NotesData,
+    meta: &ExportInfo,
+) -> Option<String> {
     let mut out = String::new();
     out.push_str("{\n");
     out.push_str("  \"version\": 1,\n");
@@ -131,8 +114,13 @@ pub(crate) fn build_json_from_dataset(dataset: &DataSet, meta: &ExportInfo) -> O
     out.push_str("  \"shapes\": [\n");
 
     let mut export_shapes = Vec::new();
-    let root_ids: Vec<EUId> = dataset.shapes.keys().copied().collect();
-    collect_export_shapes(dataset, &mut export_shapes, &root_ids);
+    export_shapes.extend(dataset.shapes.iter().map(|(eid, shape)| (*eid, shape)));
+    export_shapes.extend(
+        dataset
+            .grouped_shapes
+            .iter()
+            .map(|(eid, shape)| (*eid, shape)),
+    );
 
     let mut first = true;
     for (eid, elem) in export_shapes {
@@ -154,6 +142,18 @@ pub(crate) fn build_json_from_dataset(dataset: &DataSet, meta: &ExportInfo) -> O
             "      \"rotation\": {:.6},\n",
             elem.get_rotation()
         ));
+        if elem.is_group() {
+            if let Some(children) = elem.get_group_children() {
+                out.push_str("      \"children\": [");
+                for (idx, child) in children.iter().enumerate() {
+                    if idx > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&child.to_string());
+                }
+                out.push_str("],\n");
+            }
+        }
         if let Some(count) = elem.get_magnets_number() {
             out.push_str(&format!("      \"constr_vertices\": {count},\n"));
         }
@@ -169,21 +169,10 @@ pub(crate) fn build_json_from_dataset(dataset: &DataSet, meta: &ExportInfo) -> O
                 .get_radius()
                 .map(|val| val.to_string())
                 .unwrap_or("null".to_string());
-            let binds = if v.get_binds().is_empty() {
-                "[]".to_string()
-            } else {
-                let mut binds_str = String::new();
-                binds_str.push('[');
-                for (dest_eid, dest_vid) in v.get_binds().iter() {
-                    let bind = format!("{{\"eid\": {}, \"vid\": {}}}", dest_eid, dest_vid);
-                    binds_str.push_str(&bind);
-                }
-                binds_str.push(']');
-                binds_str
-            };
             out.push_str(&format!(
-                "        {{\"x\": {:.6}, \"y\": {:.6}, \"rounded\": {rounded}, \"binds\": {binds}}}{separator}",
-                v.curr().x, v.curr().y
+                "        {{\"x\": {:.6}, \"y\": {:.6}, \"rounded\": {rounded}}}{separator}",
+                v.curr().x,
+                v.curr().y
             ));
         }
         out.push_str("      ]");
@@ -225,12 +214,34 @@ pub(crate) fn build_json_from_dataset(dataset: &DataSet, meta: &ExportInfo) -> O
         out.push_str("\n    }");
     }
 
-    out.push_str("\n  ]\n}\n");
+    out.push_str("\n  ],\n");
+    out.push_str("  \"notes\": [\n");
+    for (idx, note) in notes.notes.iter().enumerate() {
+        let separator = if idx + 1 == notes.notes.len() {
+            "\n"
+        } else {
+            ",\n"
+        };
+        out.push_str(&format!(
+            "    {{\"id\": {}, \"pos\": [{:.6}, {:.6}], \"size\": [{:.6}, {:.6}], \"text\": \"{}\"}}{separator}",
+            note.id,
+            note.pos.x,
+            note.pos.y,
+            note.size.x,
+            note.size.y,
+            json_escape(&note.text)
+        ));
+    }
+    out.push_str("  ]\n}\n");
     Some(out)
 }
 
 pub(crate) fn get_prop(value: &JsValue, name: &str) -> Option<JsValue> {
-    js_sys::Reflect::get(value, &JsValue::from_str(name)).ok()
+    let prop = js_sys::Reflect::get(value, &JsValue::from_str(name)).ok()?;
+    if prop.is_undefined() || prop.is_null() {
+        return None;
+    }
+    Some(prop)
 }
 
 pub(crate) fn get_string(value: &JsValue, name: &str) -> Option<String> {
@@ -424,12 +435,105 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
     };
     let shapes_array = Array::from(&shapes_value);
     canvas.dataset.shapes.clear();
+    canvas.dataset.grouped_shapes.clear();
     canvas.dataset.shapes_selected.clear();
     canvas.dataset.shapes_highlighted.clear();
     canvas.dataset.vertex_selected = None;
     canvas.dataset.vertex_highlighted = None;
     canvas.dataset.shapes_selector = crate::shapes::ShapeSelector::new();
+    canvas.notes.clear();
 
+    #[derive(Clone)]
+    struct LoadedVertex {
+        pos: Vec2,
+        rounded: Option<u32>,
+    }
+
+    struct LoadedShape {
+        saved_id: Option<usize>,
+        icon: ShapeType,
+        operation: Operation,
+        name: Option<String>,
+        order: i32,
+        rotation: f64,
+        children: Vec<usize>,
+        constr_vertices: Option<usize>,
+        vertices: Vec<LoadedVertex>,
+        svg_data: Option<SvgData>,
+        voronoi_data: Option<SvgData>,
+    }
+
+    fn f64_to_usize(value: f64) -> Option<usize> {
+        if value.is_finite() && value >= 0.0 {
+            Some(value.round() as usize)
+        } else {
+            None
+        }
+    }
+
+    fn build_bb_properties(vertices: &[Vec2]) -> Option<Properties> {
+        if vertices.len() < 4 {
+            return None;
+        }
+        use PropertyValue::*;
+        let mut properties = Properties::new();
+        properties.add(
+            Property::BottomLeft,
+            BottomLeft {
+                idx: 0,
+                value: vertices[0],
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopLeft,
+            TopLeft {
+                idx: 1,
+                value: vertices[1],
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopRight,
+            TopRight {
+                idx: 2,
+                value: vertices[2],
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::BottomRight,
+            BottomRight {
+                idx: 3,
+                value: vertices[3],
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(1.0, 0.01, 1000.0, 0.1),
+            },
+        );
+        Some(properties)
+    }
+
+    fn min_max_from_positions(positions: &[Vec2]) -> Option<(Vec2, Vec2)> {
+        let mut min = Vec2::new(f64::INFINITY, f64::INFINITY);
+        let mut max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for pos in positions {
+            min.x = min.x.min(pos.x);
+            min.y = min.y.min(pos.y);
+            max.x = max.x.max(pos.x);
+            max.y = max.y.max(pos.y);
+        }
+        if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
+            return None;
+        }
+        Some((min, max))
+    }
+
+    let mut loaded_shapes = Vec::new();
     let mut fallback_order: i32 = 0;
     for shape_value in shapes_array.iter() {
         let Some(type_name) = get_string(&shape_value, "type") else {
@@ -458,6 +562,18 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             fallback_order = fallback_order.max(order_val.saturating_add(1));
         }
         let rotation = get_f64(&shape_value, "rotation").unwrap_or(0.0);
+        let saved_id = get_f64(&shape_value, "id").and_then(f64_to_usize);
+        let mut children = Vec::new();
+        if let Some(children_value) = get_prop(&shape_value, "children") {
+            let children_array = Array::from(&children_value);
+            for child_value in children_array.iter() {
+                let Some(child_id) = child_value.as_f64().and_then(f64_to_usize) else {
+                    continue;
+                };
+                children.push(child_id);
+            }
+        }
+        let constr_vertices = get_f64(&shape_value, "constr_vertices").and_then(f64_to_usize);
 
         let vertices_value = get_prop(&shape_value, "vertices");
         let Some(vertices_value) = vertices_value else {
@@ -474,7 +590,14 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
                 Some(value) => value,
                 None => continue,
             };
-            vertices.push(Vertex::new(Vec2::new(x, y)));
+            let rounded = get_prop(&vertex_value, "rounded")
+                .and_then(|val| val.as_f64())
+                .and_then(f64_to_usize)
+                .map(|value| value as u32);
+            vertices.push(LoadedVertex {
+                pos: Vec2::new(x, y),
+                rounded,
+            });
         }
 
         let svg_data = if matches!(icon, ShapeType::Svg | ShapeType::Voronoi) {
@@ -515,28 +638,221 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         } else {
             None
         };
-
-        let Some(mut elem) = GeneralShape::new(
+        let (svg_data, voronoi_data) = if icon == ShapeType::Voronoi {
+            (None, svg_data)
+        } else {
+            (svg_data, None)
+        };
+        loaded_shapes.push(LoadedShape {
+            saved_id,
             icon,
-            vertices,
-            Properties::new(),
-            0,
-            None,
-            svg_data,
-            None,
-            None,
             operation,
             name,
-        ) else {
+            order: order.unwrap_or(0),
+            rotation,
+            children,
+            constr_vertices,
+            vertices,
+            svg_data,
+            voronoi_data,
+        });
+    }
+
+    let mut shapes_with_ids = Vec::new();
+    let mut id_map: HashMap<usize, EUId> = HashMap::new();
+    for shape in loaded_shapes {
+        let new_eid = EUId::new();
+        if let Some(saved_id) = shape.saved_id {
+            id_map.insert(saved_id, new_eid);
+        }
+        shapes_with_ids.push((new_eid, shape));
+    }
+
+    for (new_eid, shape) in shapes_with_ids {
+        let positions: Vec<Vec2> = shape.vertices.iter().map(|vertex| vertex.pos).collect();
+        let elem = match shape.icon {
+            ShapeType::Disc => {
+                let Some(v0) = positions.get(0) else {
+                    continue;
+                };
+                let Some(v1) = positions.get(1) else {
+                    continue;
+                };
+                GeneralShape::new_shape_disc(*v0, *v1, shape.order)
+            }
+            ShapeType::Square => {
+                let Some((min, max)) = min_max_from_positions(&positions) else {
+                    continue;
+                };
+                GeneralShape::new_shape_rectangle(min, max, shape.order)
+            }
+            ShapeType::Oblong => {
+                let Some(v0) = positions.get(0) else {
+                    continue;
+                };
+                let Some(v1) = positions.get(1) else {
+                    continue;
+                };
+                GeneralShape::new_shape_oblong(*v0, *v1, shape.order)
+            }
+            ShapeType::Text => {
+                let Some((min, max)) = min_max_from_positions(&positions) else {
+                    continue;
+                };
+                GeneralShape::new_shape_text(min, max, shape.order)
+            }
+            ShapeType::Poly => GeneralShape::new_shape_poly(positions.clone(), shape.order),
+            ShapeType::ConstrLine => {
+                let Some(v0) = positions.get(0) else {
+                    continue;
+                };
+                let Some(v1) = positions.get(1) else {
+                    continue;
+                };
+                GeneralShape::new_shape_constr_line(*v0, *v1, shape.order)
+            }
+            ShapeType::ConstrCircle => {
+                let Some(v0) = positions.get(0) else {
+                    continue;
+                };
+                let Some(v1) = positions.get(1) else {
+                    continue;
+                };
+                let Some(mut elem) = GeneralShape::new_shape_constr_circle(*v0, *v1, shape.order)
+                else {
+                    continue;
+                };
+                let count = shape
+                    .constr_vertices
+                    .or_else(|| positions.len().checked_sub(2));
+                if let Some(count) = count {
+                    elem.set_magnets_number(count);
+                }
+                Some(elem)
+            }
+            ShapeType::Svg => {
+                let Some(properties) = build_bb_properties(&positions) else {
+                    continue;
+                };
+                let vertices: Vec<Vertex> = positions.iter().copied().map(Vertex::new).collect();
+                GeneralShape::new(
+                    ShapeType::Svg,
+                    vertices,
+                    properties,
+                    shape.order,
+                    None,
+                    shape.svg_data.clone(),
+                    None,
+                    None,
+                    Operation::Union,
+                    None,
+                )
+            }
+            ShapeType::Voronoi => {
+                let Some(mut properties) = build_bb_properties(&positions) else {
+                    continue;
+                };
+                properties.add(
+                    Property::Seeds,
+                    PropertyValue::Seeds {
+                        value: Scalar::new(40_u64, 10_u64, 100_u64, 1_u64),
+                    },
+                );
+                let vertices: Vec<Vertex> = positions.iter().copied().map(Vertex::new).collect();
+                GeneralShape::new(
+                    ShapeType::Voronoi,
+                    vertices,
+                    properties,
+                    shape.order,
+                    None,
+                    None,
+                    shape.voronoi_data.clone(),
+                    None,
+                    Operation::Union,
+                    None,
+                )
+            }
+            ShapeType::Group => {
+                let Some((min, max)) = min_max_from_positions(&positions) else {
+                    continue;
+                };
+                let children: Vec<EUId> = shape
+                    .children
+                    .iter()
+                    .filter_map(|child_id| id_map.get(child_id).copied())
+                    .collect();
+                GeneralShape::new_shape_group(min, max, shape.order, children)
+            }
+            _ => None,
+        };
+
+        let Some(mut elem) = elem else {
             continue;
         };
-        if rotation.abs() > f64::EPSILON {
-            elem.set_rotation(rotation);
-        }
 
-        canvas.dataset.shapes.insert(EUId::new(), elem);
+        let max_vertices = elem.get_vertices().len().min(shape.vertices.len());
+        for idx in 0..max_vertices {
+            let loaded_vertex = &shape.vertices[idx];
+            let vertex = elem.get_vertices_mut().val_mut(idx as i64);
+            vertex.set_curr(loaded_vertex.pos);
+            vertex.set_saved(loaded_vertex.pos);
+            vertex.set_radius_value(loaded_vertex.rounded);
+        }
+        elem.update_properties();
+        elem.set_bezpath();
+
+        match shape.operation {
+            Operation::Union => elem.op_union(),
+            Operation::Difference => elem.op_difference(),
+        }
+        elem.set_name(shape.name.clone());
+        elem.set_order(shape.order);
+        if shape.rotation.abs() > f64::EPSILON {
+            elem.set_rotation(shape.rotation);
+        }
+        canvas.dataset.shapes.insert(new_eid, elem);
+    }
+
+    let group_ids: Vec<EUId> = canvas
+        .dataset
+        .shapes
+        .iter()
+        .filter_map(|(eid, shape)| shape.is_group().then_some(*eid))
+        .collect();
+    for group_id in group_ids {
+        let Some(children) = canvas
+            .dataset
+            .shapes
+            .get(&group_id)
+            .and_then(|shape| shape.get_group_children())
+        else {
+            continue;
+        };
+        let children = children.to_vec();
+        for child_id in children {
+            if let Some(child) = canvas.dataset.shapes.remove(&child_id) {
+                canvas.dataset.grouped_shapes.insert(child_id, child);
+            }
+        }
     }
     canvas.dataset.sync_next_order();
+
+    if let Some(notes_value) = get_prop(&value, "notes") {
+        let notes_array = Array::from(&notes_value);
+        for note_value in notes_array.iter() {
+            let Some(id) = get_f64(&note_value, "id").and_then(f64_to_usize) else {
+                continue;
+            };
+            let Some(pos) = get_vec2_array(&note_value, "pos") else {
+                continue;
+            };
+            let Some(size) = get_vec2_array(&note_value, "size") else {
+                continue;
+            };
+            let text = get_string(&note_value, "text").unwrap_or_default();
+            canvas.notes.add_with_id(id, pos, size, text);
+        }
+    }
 
     canvas.dataset.refresh_svg_cache();
     canvas.dataset.mark_final_polygon_dirty();

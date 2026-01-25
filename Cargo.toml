@@ -7,6 +7,7 @@ license = "MIT"
 description = "All-in-one 2D CAD/CAM web app for cutting workflows with SVG import/export, toolpath and G-code preview."
 homepage = "https://miicut.github.io/MiiCut/"
 repository = "https://github.com/miicut/MiiCut"
+build = "build.rs"
 
 
 [dependencies]
@@ -61,6 +62,9 @@ features = [
     "Event",
     "BinaryType",
     "Response",
+    "ResizeObserver",
+    "ResizeObserverEntry",
+    "DomRectReadOnly",
     "DomTokenList",
     "Url",
     "DragEvent",

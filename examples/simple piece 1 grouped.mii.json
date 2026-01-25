@@ -1,0 +1,154 @@
+{
+  "version": 1,
+  "meta": {
+    "title": "MiiCut",
+    "timestamp": "20260124-083446",
+    "canvas": {
+      "size": [3000.000000, 1500.000000],
+      "scale": 1.000000,
+      "offset": [0.000000, 0.000000]
+    }
+  },
+  "shapes": [
+    {
+      "id": 15,
+      "type": "group",
+      "operation": "union",
+      "order": 0,
+      "rotation": 0.000000,
+      "children": [12, 14],
+      "vertices": [
+        {"x": -350.000000, "y": -263.397460, "rounded": null},
+        {"x": -350.000000, "y": 36.602540, "rounded": null},
+        {"x": 150.000000, "y": 36.602540, "rounded": null},
+        {"x": 150.000000, "y": -263.397460, "rounded": null}
+      ]
+    },
+    {
+      "id": 6,
+      "type": "disc",
+      "operation": "union",
+      "order": 3,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": 110.000000, "y": -10.000000, "rounded": null},
+        {"x": 130.000000, "y": -10.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 10,
+      "type": "group",
+      "operation": "difference",
+      "order": 1,
+      "rotation": 0.000000,
+      "children": [6, 7, 2, 3],
+      "vertices": [
+        {"x": -330.000000, "y": -240.000000, "rounded": null},
+        {"x": -330.000000, "y": 10.000000, "rounded": null},
+        {"x": 130.000000, "y": 10.000000, "rounded": null},
+        {"x": 130.000000, "y": -240.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 5,
+      "type": "oblong",
+      "operation": "union",
+      "order": 5,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": -250.000000, "y": -170.000000, "rounded": null},
+        {"x": 50.000000, "y": -170.000000, "rounded": null},
+        {"x": -100.000000, "y": -150.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 14,
+      "type": "group",
+      "operation": "union",
+      "order": 0,
+      "rotation": 0.000000,
+      "children": [1, 10],
+      "vertices": [
+        {"x": -350.000000, "y": -263.397460, "rounded": null},
+        {"x": -350.000000, "y": 36.602540, "rounded": null},
+        {"x": 150.000000, "y": 36.602540, "rounded": null},
+        {"x": 150.000000, "y": -263.397460, "rounded": null}
+      ]
+    },
+    {
+      "id": 2,
+      "type": "disc",
+      "operation": "union",
+      "order": 4,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": 110.000000, "y": -220.000000, "rounded": null},
+        {"x": 130.000000, "y": -220.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 1,
+      "type": "square",
+      "operation": "union",
+      "order": 0,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": -350.000000, "y": -263.397460, "rounded": 40},
+        {"x": -350.000000, "y": 36.602540, "rounded": 40},
+        {"x": 150.000000, "y": 36.602540, "rounded": 40},
+        {"x": 150.000000, "y": -263.397460, "rounded": 40}
+      ]
+    },
+    {
+      "id": 7,
+      "type": "disc",
+      "operation": "union",
+      "order": 2,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": -310.000000, "y": -10.000000, "rounded": null},
+        {"x": -290.000000, "y": -10.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 12,
+      "type": "group",
+      "operation": "difference",
+      "order": 5,
+      "rotation": 0.000000,
+      "children": [5, 4],
+      "vertices": [
+        {"x": -270.000000, "y": -190.000000, "rounded": null},
+        {"x": -270.000000, "y": -16.698730, "rounded": null},
+        {"x": 70.000000, "y": -16.698730, "rounded": null},
+        {"x": 70.000000, "y": -190.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "disc",
+      "operation": "union",
+      "order": 1,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": -310.000000, "y": -220.000000, "rounded": null},
+        {"x": -290.000000, "y": -220.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 4,
+      "type": "poly",
+      "operation": "union",
+      "order": 8,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": -125.000000, "y": -103.301270, "rounded": 20},
+        {"x": -75.000000, "y": -103.301270, "rounded": 20},
+        {"x": -50.000000, "y": -60.000000, "rounded": 20},
+        {"x": -75.000000, "y": -16.698730, "rounded": 20},
+        {"x": -125.000000, "y": -16.698730, "rounded": 20},
+        {"x": -150.000000, "y": -60.000000, "rounded": 20}
+      ]
+    }
+  ]
+}

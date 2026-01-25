@@ -116,6 +116,46 @@ html {
 .dropdown:hover .dropdown-content {
   display: block;
 }
+.dropdown.dropdown-locked .dropdown-content {
+  display: none;
+}
+
+.note-item {
+  position: absolute;
+  background: linear-gradient(135deg, #fff6a8 0%, #ffe56a 100%);
+  border: 1px solid #d4c15a;
+  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  resize: both;
+  overflow: hidden;
+  min-width: 60px;
+  min-height: 60px;
+  z-index: 500;
+}
+.note-header {
+  height: 20px;
+  background: rgba(0, 0, 0, 0.08);
+  cursor: move;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  user-select: none;
+}
+.note-text {
+  width: 100%;
+  height: calc(100% - 20px);
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: "Urbanist";
+  font-size: 14px;
+  padding: 6px;
+  resize: none;
+}
+.note-text[readonly] {
+  cursor: default;
+  pointer-events: none;
+}
 
 .status-bar {
   position: fixed;
@@ -507,6 +547,9 @@ html {
 }
 #icon-text {
   background-image: url("assets/icon-text.svg");
+}
+#icon-note {
+  background-image: url("assets/icon-note.svg");
 }
 #icon-constr-line {
   background-image: url("assets/icon-construction-line.svg");

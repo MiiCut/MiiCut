@@ -551,7 +551,10 @@ impl DataSet {
         let mut min = Vec2::new(f64::INFINITY, f64::INFINITY);
         let mut max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
         for eid in children {
-            let shape = self.shapes.get(eid).or_else(|| self.grouped_shapes.get(eid))?;
+            let shape = self
+                .shapes
+                .get(eid)
+                .or_else(|| self.grouped_shapes.get(eid))?;
             let bbox = shape.get_bezpath().bounding_box();
             if bbox.is_zero_area() {
                 continue;
@@ -863,19 +866,22 @@ impl DataSet {
 
     pub fn select_elements(&mut self, userui: &UserUI) {
         // Select the nodes whose element contains the position
-        if !userui.keys_states.shift_pressed {
+        fn ordered_candidates(shapes: &HashMap<EUId, GeneralShape>, pos: Vec2) -> Vec<EUId> {
             let mut candidates: Vec<(EUId, f64)> = Vec::new();
-            for (eid, elem) in &self.shapes {
-                if elem.contains(userui.draw_pos) {
+            for (eid, elem) in shapes {
+                if elem.contains(pos) {
                     let bbox = elem.get_bezpath().bounding_box();
                     let area = (bbox.x1 - bbox.x0).abs() * (bbox.y1 - bbox.y0).abs();
                     candidates.push((*eid, area));
                 }
             }
-            if !candidates.is_empty() {
-                candidates
-                    .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-                let ordered: Vec<EUId> = candidates.iter().map(|(eid, _)| *eid).collect();
+            candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            candidates.iter().map(|(eid, _)| *eid).collect()
+        }
+
+        if !userui.keys_states.shift_pressed {
+            let ordered = ordered_candidates(&self.shapes, userui.draw_pos);
+            if !ordered.is_empty() {
                 self.shapes_selector
                     .refresh_selectable_elems_ordered(ordered);
                 if let Some(eid) = self.shapes_selector.next_selection() {
@@ -886,10 +892,18 @@ impl DataSet {
                 self.shapes_selected.clear();
             }
         } else {
-            // Shift pressed, add to selection
-            for (id, node) in &self.shapes {
-                if node.contains(userui.draw_pos) {
-                    self.shapes_selected.insert(*id);
+            // Shift pressed, toggle current candidate and keep existing selection
+            let ordered = ordered_candidates(&self.shapes, userui.draw_pos);
+            if ordered.is_empty() {
+                return;
+            }
+            self.shapes_selector
+                .refresh_selectable_elems_ordered(ordered);
+            if let Some(eid) = self.shapes_selector.next_selection() {
+                if self.shapes_selected.contains(&eid) {
+                    self.shapes_selected.remove(&eid);
+                } else {
+                    self.shapes_selected.insert(eid);
                 }
             }
         }
@@ -972,28 +986,7 @@ impl DataSet {
         let delta = userui.pointer.curr() - userui.pointer.saved();
         let mut moved = false;
         let mut affects_final = false;
-        let mut sel_and_bind = self.shapes_selected.clone();
-
-        if !userui.keys_states.shift_pressed {
-            for eid in &self.shapes_selected {
-                if let Some(_) = self.shapes.get_mut(eid) {
-                    sel_and_bind.extend(self.get_binded_elements(*eid));
-                }
-            }
-            let mut other_binds: HashSet<EUId> = HashSet::new();
-            for eid in self.shapes.keys() {
-                if let Some(s) = self.shapes.get(eid) {
-                    s.get_binded_elements().iter().for_each(|bind_eid| {
-                        if sel_and_bind.contains(bind_eid) {
-                            other_binds.extend(s.get_binded_elements().iter());
-                        }
-                    });
-                }
-            }
-            sel_and_bind.extend(other_binds);
-        }
-        // Move all selected elements and their binded elements
-        for eid in sel_and_bind {
+        for eid in self.shapes_selected.clone() {
             let is_group = self
                 .shapes
                 .get(&eid)
@@ -1025,10 +1018,16 @@ impl DataSet {
 
     fn move_group_any(&mut self, group_id: EUId, delta: Vec2) -> Option<()> {
         let (children, in_shapes) = if let Some(group) = self.shapes.get(&group_id) {
-            (group.get_group_children().unwrap_or_default().to_vec(), true)
+            (
+                group.get_group_children().unwrap_or_default().to_vec(),
+                true,
+            )
         } else {
             let group = self.grouped_shapes.get(&group_id)?;
-            (group.get_group_children().unwrap_or_default().to_vec(), false)
+            (
+                group.get_group_children().unwrap_or_default().to_vec(),
+                false,
+            )
         };
         for child_id in children {
             let is_group = self
@@ -1190,16 +1189,8 @@ impl DataSet {
         let dy0 = drag_saved.y - opposite_pos.y;
         let dx1 = new_pos.x - opposite_pos.x;
         let dy1 = new_pos.y - opposite_pos.y;
-        let sx = if dx0.abs() > EPSILON {
-            dx1 / dx0
-        } else {
-            1.0
-        };
-        let sy = if dy0.abs() > EPSILON {
-            dy1 / dy0
-        } else {
-            1.0
-        };
+        let sx = if dx0.abs() > EPSILON { dx1 / dx0 } else { 1.0 };
+        let sy = if dy0.abs() > EPSILON { dy1 / dy0 } else { 1.0 };
         let scale = if dx1.abs() >= dy1.abs() { sx } else { sy };
         if scale <= 0.0 {
             return false;
@@ -1221,51 +1212,6 @@ impl DataSet {
                 shape.set_bezpath();
             }
         }
-    }
-    pub fn get_binded_elements(&self, eid: EUId) -> HashSet<EUId> {
-        if let Some(element) = self.get_element(eid) {
-            return element.get_binded_elements();
-        }
-        HashSet::new()
-    }
-    pub fn bind_unbind_vertex_to(
-        &mut self,
-        eid_source: EUId,
-        vid_source: VUId,
-        eid_dest: EUId,
-        vid_dest: VUId,
-    ) -> Option<()> {
-        // Ensure vertices belong to different elements
-        if eid_source == eid_dest {
-            log!("Cannot bind/unbind vertices from the same element");
-            return None;
-        }
-
-        let v_source = self
-            .get_element_mut(eid_source)
-            .and_then(|elem| elem.get_vertex_mut(&vid_source))?;
-
-        if v_source.has_bind(eid_dest, vid_dest) {
-            // Unbind
-            log!(
-                "Unbinding vertex {:?} of element {:?} from vertex {:?} of element {:?}",
-                vid_source,
-                eid_source,
-                vid_dest,
-                eid_dest
-            );
-            v_source.remove_bind(eid_dest, vid_dest);
-        } else {
-            log!(
-                "Binding vertex {:?} of element {:?} to vertex {:?} of element {:?}",
-                vid_source,
-                eid_source,
-                vid_dest,
-                eid_dest
-            );
-            v_source.add_bind(eid_dest, vid_dest);
-        }
-        Some(())
     }
 
     fn calc_group_polygon(&self, children: &[EUId]) -> MultiPolygon<f64> {

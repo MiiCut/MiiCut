@@ -1,10 +1,7 @@
 use kurbo::Vec2;
-use std::{collections::HashSet, fmt::Debug};
+use std::fmt::Debug;
 
-use crate::{
-    type_scalar::Scalar,
-    types::{EUId, VUId},
-};
+use crate::type_scalar::Scalar;
 
 pub type ScalarU32 = Scalar<u32>;
 
@@ -16,8 +13,6 @@ pub struct Vertex {
     has_radius: bool,
     radius: Option<ScalarU32>,
     last_radius: Option<ScalarU32>,
-    // List of binded vertices
-    binds: HashSet<(EUId, VUId)>,
 }
 impl Vertex {
     pub fn new(value: Vec2) -> Self {
@@ -27,7 +22,6 @@ impl Vertex {
             has_radius: false,
             radius: None,
             last_radius: None,
-            binds: HashSet::new(),
         }
     }
     pub fn new_from_coords(x: f64, y: f64) -> Self {
@@ -37,7 +31,6 @@ impl Vertex {
             has_radius: false,
             radius: None,
             last_radius: None,
-            binds: HashSet::new(),
         }
     }
     pub fn save(&mut self) {
@@ -63,6 +56,14 @@ impl Vertex {
     }
     pub fn enable_radius(&mut self) {
         self.has_radius = true;
+    }
+    pub fn set_radius_value(&mut self, value: Option<u32>) {
+        if let Some(radius) = value {
+            self.has_radius = true;
+            self.radius = Some(Scalar::new(radius, 10, u32::MAX, 10));
+        } else if self.has_radius {
+            self.radius = None;
+        }
     }
     pub fn curr(&self) -> Vec2 {
         self.curr
@@ -104,20 +105,5 @@ impl Vertex {
                 rad.decr();
             }
         }
-    }
-    pub fn get_binds(&self) -> &HashSet<(EUId, VUId)> {
-        &self.binds
-    }
-    pub fn has_bind(&self, eu_id: EUId, vu_id: VUId) -> bool {
-        self.binds.contains(&(eu_id, vu_id))
-    }
-    pub fn add_bind(&mut self, eu_id: EUId, vu_id: VUId) {
-        self.binds.insert((eu_id, vu_id));
-    }
-    pub fn remove_bind(&mut self, eu_id: EUId, vu_id: VUId) {
-        self.binds.remove(&(eu_id, vu_id));
-    }
-    pub fn clear_binds(&mut self) {
-        self.binds.clear();
     }
 }

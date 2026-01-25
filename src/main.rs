@@ -7,6 +7,7 @@ pub mod clipboard;
 pub mod cnc_link;
 pub mod dimensions;
 pub mod dom;
+pub mod examples_gen;
 pub mod gcode;
 pub mod handlers;
 pub mod import_export;
