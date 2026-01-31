@@ -6,6 +6,12 @@ pub struct UndoRedo {
     redo_stack: Vec<GeneralShape>,
 }
 
+impl Default for UndoRedo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UndoRedo {
     pub fn new() -> Self {
         Self {

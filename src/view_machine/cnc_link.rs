@@ -13,15 +13,17 @@ use web_sys::{BinaryType, CloseEvent, Event, MessageEvent, WebSocket};
 
 fn looks_ascii(buf: &[u8]) -> bool {
     buf.iter()
-        .all(|&b| b == b'\r' || b == b'\n' || (b >= 0x20 && b <= 0x7E))
+        .all(|&b| b == b'\r' || b == b'\n' || (0x20..=0x7E).contains(&b))
 }
+
+type CncCallback = Rc<RefCell<Option<Box<dyn FnMut(String)>>>>;
 
 pub struct CncLink {
     pub base_http: String, // ex "http://192.168.1.36"
     pub ws_url: String,    // ex "ws://192.168.1.36:81/"
     _ws: WebSocket,
-    on_text: Rc<RefCell<Option<Box<dyn FnMut(String)>>>>,
-    on_status: Rc<RefCell<Option<Box<dyn FnMut(String)>>>>,
+    on_text: CncCallback,
+    on_status: CncCallback,
 }
 
 impl CncLink {
@@ -32,8 +34,8 @@ impl CncLink {
 
         let ws = WebSocket::new_with_str_sequence(ws_url, &protocols)?;
         ws.set_binary_type(BinaryType::Arraybuffer);
-        let on_text: Rc<RefCell<Option<Box<dyn FnMut(String)>>>> = Rc::new(RefCell::new(None));
-        let on_status: Rc<RefCell<Option<Box<dyn FnMut(String)>>>> = Rc::new(RefCell::new(None));
+        let on_text: CncCallback = Rc::new(RefCell::new(None));
+        let on_status: CncCallback = Rc::new(RefCell::new(None));
 
         // onopen
         {

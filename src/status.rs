@@ -1,7 +1,8 @@
 use crate::app::RefAV;
 use crate::dom::Tabs;
-use wasm_bindgen::JsCast;
-use web_sys::{Document, HtmlElement, HtmlInputElement, Window};
+use crate::view_draw::app::render_draw_view;
+use wasm_bindgen::{closure::Closure, prelude::*, JsCast};
+use web_sys::{Document, Event, HtmlElement, HtmlInputElement, Window};
 
 pub(crate) fn now_ms(window: &Window) -> f64 {
     window.performance().map(|perf| perf.now()).unwrap_or(0.0)
@@ -85,6 +86,42 @@ pub(crate) fn update_status_bar(av: RefAV) {
         set_checkbox(&avb.document, "snap-angle-5", snap.angle() == 5.0);
         set_checkbox(&avb.document, "snap-angle-10", snap.angle() == 10.0);
     }
+}
+
+pub(crate) fn init_status(av: RefAV) -> Result<(), JsValue> {
+    let document = av.borrow().document.clone();
+    let active_canvas = av.borrow().active_canvas;
+    let setup_checkbox =
+        |id: &str, av: RefAV, is_linear: bool, value: f64| -> Result<(), JsValue> {
+            let el = document.get_element_by_id(id).unwrap();
+            let input: HtmlInputElement = el.dyn_into::<HtmlInputElement>()?;
+            let on_change = Closure::wrap(Box::new(move |_event: Event| {
+                {
+                    let mut avb = av.borrow_mut();
+                    let snap = &mut avb.canvases[active_canvas.idx()].get_user_ui_mut().snap;
+                    if is_linear {
+                        snap.set_linear_value(value);
+                    } else {
+                        snap.set_angle_value(value);
+                    }
+                }
+                update_status_bar(av.clone());
+                render_draw_view(av.clone());
+            }) as Box<dyn FnMut(_)>);
+            input.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref())?;
+            on_change.forget();
+            Ok(())
+        };
+
+    setup_checkbox("snap-linear-1", av.clone(), true, 1.0)?;
+    setup_checkbox("snap-linear-5", av.clone(), true, 5.0)?;
+    setup_checkbox("snap-linear-10", av.clone(), true, 10.0)?;
+    setup_checkbox("snap-angle-1", av.clone(), false, 1.0)?;
+    setup_checkbox("snap-angle-5", av.clone(), false, 5.0)?;
+    setup_checkbox("snap-angle-10", av.clone(), false, 10.0)?;
+
+    update_status_bar(av);
+    Ok(())
 }
 
 pub(crate) fn begin_render(av: RefAV, label: &'static str) {

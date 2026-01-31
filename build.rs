@@ -3,26 +3,33 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let examples_dir = Path::new("examples");
-    println!("cargo:rerun-if-changed={}", examples_dir.display());
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    write_examples(&out_dir, "examples", "EXAMPLES", "examples_gen.rs");
+    write_examples(&out_dir, "tutorial", "TUTORIALS", "tutorial_gen.rs");
+}
 
-    let mut example_files = Vec::new();
-    if let Ok(entries) = fs::read_dir(examples_dir) {
+fn write_examples(out_dir: &Path, folder: &str, const_name: &str, out_name: &str) {
+    let dir = Path::new(folder);
+    println!("cargo:rerun-if-changed={}", dir.display());
+
+    let mut files = Vec::new();
+    if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if is_mii_json(&path) {
                 println!("cargo:rerun-if-changed={}", path.display());
-                example_files.push(path);
+                files.push(path);
             }
         }
     }
-    example_files.sort();
+    files.sort();
 
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let out_file = out_dir.join("examples_gen.rs");
+    let out_file = out_dir.join(out_name);
     let mut output = String::new();
-    output.push_str("pub(crate) static EXAMPLES: &[(&str, &str)] = &[\n");
-    for path in &example_files {
+    output.push_str(&format!(
+        "pub(crate) static {const_name}: &[(&str, &str)] = &[\n"
+    ));
+    for path in &files {
         let name = path
             .file_name()
             .and_then(|n| n.to_str())

@@ -1,14 +1,41 @@
-use crate::math::{fillet_at_apex, ApexType, EPSILON};
+use crate::helpers::math::{fillet_at_apex, ApexType, EPSILON};
 use crate::shape::TextFont;
-use crate::type_scalar::Scalar;
-use crate::type_vertex::{ScalarU32, Vertex};
+use crate::types::scalar::Scalar;
+use crate::types::vertex::{ScalarU32, Vertex};
 use kurbo::Vec2;
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::hash::Hash;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[derive(Debug)]
+pub enum MyError {
+    NoShapeSelected,
+    NoClosedShapeForCShid(EUId),
+    Inconsistent,
+    Impossible,
+    ShapesFull,
+    ShapesEmpty,
+}
+impl fmt::Display for MyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use MyError::*;
+        match self {
+            NoShapeSelected => write!(f, "No shape selected"),
+            NoClosedShapeForCShid(shid) => {
+                write!(f, "No closed shape associated with the shape id {}", shid)
+            }
+            Inconsistent => write!(f, "Inconsistant data structure"),
+            Impossible => write!(f, "Impossible"),
+            ShapesFull => write!(f, "Shapes full"),
+            ShapesEmpty => write!(f, "Shapes empty"),
+        }
+    }
+}
+impl Error for MyError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Property {
@@ -179,6 +206,12 @@ impl PropertyValue {
 pub struct Properties {
     prop: HashMap<Property, PropertyValue>,
 }
+impl Default for Properties {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Properties {
     pub fn new() -> Self {
         Self {
@@ -237,6 +270,12 @@ pub struct Snap {
     linear: SnapValue,
     angle: SnapValue,
 }
+impl Default for Snap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Snap {
     pub fn new() -> Self {
         Self {
@@ -353,6 +392,12 @@ impl SegBundle {
 pub struct Minimum {
     min_bundle: Option<(f64, i64, Vec2)>,
 }
+impl Default for Minimum {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Minimum {
     pub fn new() -> Self {
         Self { min_bundle: None }
@@ -370,40 +415,6 @@ impl Minimum {
     }
     pub fn get_min(&self) -> Option<(f64, i64, Vec2)> {
         self.min_bundle
-    }
-}
-
-static COUNTER_VALUE: AtomicUsize = AtomicUsize::new(0);
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct VUId {
-    id: usize,
-}
-impl Display for VUId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.id)
-    }
-}
-impl VUId {
-    pub fn new() -> Self {
-        let id = COUNTER_VALUE.fetch_add(1, Ordering::SeqCst);
-        VUId { id }
-    }
-}
-
-static COUNTER_NODE: AtomicUsize = AtomicUsize::new(0);
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct EUId {
-    id: usize,
-}
-impl Display for EUId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.id)
-    }
-}
-impl EUId {
-    pub fn new() -> Self {
-        let id = COUNTER_NODE.fetch_add(1, Ordering::SeqCst);
-        EUId { id }
     }
 }
 
@@ -494,8 +505,7 @@ impl<K: PartialEq + Clone + Debug> VecRing<K> {
     pub fn get_idx(&self, key: &K) -> Option<i64> {
         self.vec
             .iter()
-            .position(|(k, _)| k == key)
-            .and_then(|i| Some(i as i64))
+            .position(|(k, _)| k == key).map(|i| i as i64)
     }
     pub fn key(&self, idx: i64) -> &K {
         let len = self.vec.len() as i64;
@@ -518,12 +528,12 @@ impl<K: PartialEq + Clone + Debug> VecRing<K> {
         &mut self.vec[i].1
     }
     pub fn val_from_key(&self, key: K) -> Option<&Vertex> {
-        self.vec.iter().find_map(|(k, v)| (k == &key).then(|| v))
+        self.vec.iter().find_map(|(k, v)| (k == &key).then_some(v))
     }
     pub fn val_mut_from_key(&mut self, key: K) -> Option<&mut Vertex> {
         self.vec
             .iter_mut()
-            .find_map(|(k, v)| (k == &key).then(|| v))
+            .find_map(|(k, v)| (k == &key).then_some(v))
     }
     pub fn push(&mut self, e: (K, Vertex)) {
         self.vec.push(e);
@@ -537,6 +547,9 @@ impl<K: PartialEq + Clone + Debug> VecRing<K> {
     }
     pub fn len(&self) -> usize {
         self.vec.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.vec.is_empty()
     }
     pub fn iter(&self) -> std::slice::Iter<'_, (K, Vertex)> {
         self.vec.iter()
@@ -565,5 +578,51 @@ impl<K: PartialEq + Clone + Debug> VecRing<K> {
             out.push(apex);
         }
         out
+    }
+}
+
+static COUNTER_VALUE: AtomicUsize = AtomicUsize::new(0);
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct VUId {
+    id: usize,
+}
+impl Display for VUId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.id)
+    }
+}
+impl Default for VUId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VUId {
+    pub fn new() -> Self {
+        let id = COUNTER_VALUE.fetch_add(1, Ordering::SeqCst);
+        VUId { id }
+    }
+}
+
+static COUNTER_NODE: AtomicUsize = AtomicUsize::new(0);
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EUId {
+    id: usize,
+}
+impl Display for EUId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.id)
+    }
+}
+impl Default for EUId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EUId {
+    pub fn new() -> Self {
+        let id = COUNTER_NODE.fetch_add(1, Ordering::SeqCst);
+        EUId { id }
     }
 }

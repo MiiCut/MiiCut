@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -22,7 +22,14 @@
 
     <!-- Top Menu -->
     <div id="top-menu" class="top-menu">
-      <div id="menuTitle">&nbsp;MiiCut 0.2.0</div>
+      <div id="menuTitle">&nbsp;MiiCut 0.3.0</div>
+      <div id="view-tabs" class="view-tabs">
+        <span class="view-title">VIEW</span>
+        <button id="tab-draw" class="tab active">Draw</button>
+        <button id="tab-toolpath" class="tab">Toolpath</button>
+        <button id="tab-gcode" class="tab">G-code</button>
+        <button id="tab-machine" class="tab">Machine</button>
+      </div>
       <div id="file-menu" class="dropdown">
         <button class="dropbtn">File</button>
         <div class="dropdown-content">
@@ -37,17 +44,15 @@
           <a href="#" id="export-svg">Export to SVG</a>
         </div>
       </div>
+      <div id="tutorial-menu" class="dropdown">
+        <button class="dropbtn">Tutorial</button>
+        <div id="tutorial-menu-content" class="dropdown-content"></div>
+      </div>
       <div id="examples-menu" class="dropdown">
         <button class="dropbtn">Examples</button>
         <div id="examples-menu-content" class="dropdown-content"></div>
       </div>
-      <div id="view-tabs" class="view-tabs">
-        <span class="view-title">VIEW</span>
-        <button id="tab-draw" class="tab active">Draw</button>
-        <button id="tab-toolpath" class="tab">Toolpath</button>
-        <button id="tab-gcode" class="tab">G-code</button>
-        <button id="tab-machine" class="tab">Machine</button>
-      </div>
+      <button id="clear-option" class="dropbtn clear-btn">Clear</button>
     </div>
 
     <!-- Main container for panels and canvas -->
@@ -101,12 +106,6 @@
             <span>Properties</span>
           </div>
           <div id="shape-properties-body" class="shapes-properties-body"></div>
-        </div>
-        <div class="shapes-help" id="shape-help">
-          <div class="shapes-panel-header shapes-help-header">
-            <span>Help</span>
-          </div>
-          <div id="shape-help-body" class="shapes-help-body"></div>
         </div>
       </div>
 

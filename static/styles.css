@@ -54,15 +54,24 @@ html {
   margin-left: 10px;
 }
 .dropbtn {
-  padding: 5px 20px;
+  padding: 4px 16px;
   cursor: pointer;
   font-family: "Urbanist";
-  font-size: 18px;
+  font-size: 15px;
   color: #f5f4f4;
   text-shadow: 2px 2px 4px rgba(63, 39, 39, 0.5);
   background: none;
   border: none;
   position: relative;
+}
+
+.clear-btn {
+  background-color: #7b3b3b;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+.clear-btn:hover {
+  background-color: #934949;
 }
 
 /* Dropdown container */
@@ -85,8 +94,9 @@ html {
 }
 .dropdown-content a {
   display: block;
-  font-size: 18px;
-  padding: 8px 12px;
+  font-size: 15px;
+  padding: 6px 10px;
+  line-height: 1.2;
   text-decoration: none;
   color: black;
   white-space: nowrap;
@@ -95,9 +105,10 @@ html {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  font-size: 16px;
+  padding: 6px 10px;
+  font-size: 15px;
   color: black;
+  line-height: 1.2;
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
@@ -131,6 +142,10 @@ html {
   min-width: 60px;
   min-height: 60px;
   z-index: 500;
+}
+.note-item.note-selected {
+  box-shadow: 0 0 0 1px rgba(90, 120, 220, 0.9), 2px 2px 8px rgba(0, 0, 0, 0.18);
+  border-color: rgba(90, 120, 220, 0.9);
 }
 .note-header {
   height: 20px;
@@ -549,7 +564,7 @@ html {
   background-image: url("assets/icon-text.svg");
 }
 #icon-note {
-  background-image: url("assets/icon-note.svg");
+  background-image: url("assets/icon-note.svg?v=2");
 }
 #icon-constr-line {
   background-image: url("assets/icon-construction-line.svg");

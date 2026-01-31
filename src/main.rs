@@ -1,28 +1,26 @@
 #[macro_use]
-mod macros;
-
+pub mod helpers;
 pub mod app;
 pub mod canvas;
 pub mod clipboard;
-pub mod cnc_link;
+pub mod commands;
 pub mod dimensions;
 pub mod dom;
 pub mod examples_gen;
-pub mod gcode;
-pub mod handlers;
+pub mod tutorial_gen;
 pub mod import_export;
 pub mod inputs;
 pub mod machine;
-pub mod math;
-pub mod prefab;
-pub mod render;
 pub mod shape;
 pub mod shapes;
 pub mod status;
-pub mod type_scalar;
-pub mod type_vertex;
 pub mod types;
+pub mod ui;
 pub mod undoredo;
+pub mod view_draw;
+pub mod view_gcode;
+pub mod view_machine;
+pub mod view_toolpath;
 pub mod voronoi;
 
 use crate::app::create_app_vars;

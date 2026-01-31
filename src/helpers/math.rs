@@ -3,7 +3,7 @@ macro_rules! log {
         web_sys::console::log_1(&format!( $( $t )* ).into())
     }
 }
-use crate::types::{EUId, SegBundle, Snap};
+use crate::types::others::{SegBundle, Snap};
 use approx::*;
 use geo::algorithm::orient::Orient;
 use geo::orient::Direction;
@@ -14,11 +14,7 @@ use kurbo::{
 };
 
 use std::f64::consts::PI;
-use std::{
-    error::Error,
-    f64::consts::*,
-    fmt::{self},
-};
+use std::f64::consts::*;
 
 pub fn between(pos1: &Vec2, pos2: &Vec2) -> Vec2 {
     let diff = *pos2 - *pos1;
@@ -29,32 +25,6 @@ pub fn between(pos1: &Vec2, pos2: &Vec2) -> Vec2 {
 }
 
 pub const EPSILON: f64 = 1e-6;
-
-#[derive(Debug)]
-pub enum MyError {
-    NoShapeSelected,
-    NoClosedShapeForCShid(EUId),
-    Inconsistent,
-    Impossible,
-    ShapesFull,
-    ShapesEmpty,
-}
-impl fmt::Display for MyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use MyError::*;
-        match self {
-            NoShapeSelected => write!(f, "No shape selected"),
-            NoClosedShapeForCShid(shid) => {
-                write!(f, "No closed shape associated with the shape id {}", shid)
-            }
-            Inconsistent => write!(f, "Inconsistant data structure"),
-            Impossible => write!(f, "Impossible"),
-            ShapesFull => write!(f, "Shapes full"),
-            ShapesEmpty => write!(f, "Shapes empty"),
-        }
-    }
-}
-impl Error for MyError {}
 
 pub fn get_magnets_vertices(center_pt: Vec2, radius_pt: Vec2, count: usize) -> Vec<Vec2> {
     let mut vs = vec![];
@@ -166,7 +136,7 @@ fn _is_between(pt: &Vec2, pt1: &Vec2, pt2: &Vec2) -> bool {
     if dot_product > length2 {
         return false;
     }
-    return true;
+    true
 }
 // pub fn is_Vec2_on_segment(pos1: &Vec2, pos2: &Vec2, pos: &Vec2, precision: f64) -> bool {
 //     let denominator = ((pos2.y - pos1.y).powf(2.) + (pos2.x - pos1.x).powf(2.)).sqrt();
@@ -313,9 +283,8 @@ pub fn symmetric_point(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
     let projection = pt1 + projection_length * direction;
 
     // Calculate symmetric point
-    let symmetric = 2.0 * projection - pos;
 
-    symmetric
+    2.0 * projection - pos
 }
 
 pub fn projection_to_perpendicular(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
@@ -336,9 +305,8 @@ pub fn projection_to_perpendicular(pt1: Vec2, pt2: Vec2, pos: Vec2) -> Vec2 {
 
     // Projection of to_pos onto the perpendicular vector
     let projection_length = to_pos.dot(perpendicular);
-    let projection = midpoint + projection_length * perpendicular;
 
-    projection
+    midpoint + projection_length * perpendicular
 }
 pub fn point_at_distance(pt1: Vec2, pt2: Vec2, distance: f64) -> Vec2 {
     let v1 = pt2 - pt1; // Vector from pt1 to pt2
@@ -354,9 +322,8 @@ pub fn point_at_distance(pt1: Vec2, pt2: Vec2, distance: f64) -> Vec2 {
     let perpendicular = Vec2::new(-v1.y, v1.x).normalize();
 
     // Calculate the target point
-    let result = midpoint + distance * perpendicular;
 
-    result
+    midpoint + distance * perpendicular
 }
 
 pub fn magnet_to_grid(pt: &Vec2) -> Vec2 {
@@ -908,11 +875,9 @@ fn segment_winding_contribution(p1: Vec2, p2: Vec2, point: Vec2) -> i32 {
             // Upward crossing, and the point is to the left of the segment
             return 1;
         }
-    } else {
-        if p2.y <= point.y && is_left(p1, p2, point) < 0.0 {
-            // Downward crossing, and the point is to the right of the segment
-            return -1;
-        }
+    } else if p2.y <= point.y && is_left(p1, p2, point) < 0.0 {
+        // Downward crossing, and the point is to the right of the segment
+        return -1;
     }
     0
 }
@@ -964,9 +929,8 @@ pub fn symmetric_point_to_segment(p1: Vec2, p2: Vec2, q: Vec2) -> Vec2 {
     let projection = midpoint + projection_length * direction;
 
     // Calculate the symmetric point
-    let symmetric = 2.0 * projection - q;
 
-    symmetric
+    2.0 * projection - q
 }
 
 /// Returns `Some((distance, projection point))` if the orthogonal projection of `q`
@@ -994,7 +958,7 @@ pub fn distance_and_projection_to_segment(
     let t = pq.dot(seg) / seg_len_sq;
 
     // If outside [0..1], there's no valid orth projection within the segment
-    if t < 0.0 || t > 1.0 {
+    if !(0.0..=1.0).contains(&t) {
         return None;
     }
 
@@ -1691,7 +1655,7 @@ pub fn segment_intersection(p: Vec2, p2: Vec2, q: Vec2, q2: Vec2) -> Option<Vec2
     let u = q_minus_p.cross(r) / rxs;
 
     // If t and u are between 0 and 1, the segments intersect.
-    if t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0 {
+    if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
         Some(p + r * t)
     } else {
         None
@@ -1730,12 +1694,12 @@ pub fn segment_circle_intersections(p: Vec2, p2: Vec2, center: Vec2, radius: f64
         let t2 = (-b + discriminant_sqrt) / (2.0 * a);
 
         // Only add the intersection if t is within [0, 1] (i.e. on the segment)
-        if t1 >= 0.0 && t1 <= 1.0 {
+        if (0.0..=1.0).contains(&t1) {
             intersections.push(p + d * t1);
         }
         // t2 is different from t1 when discriminant > 0. For a tangent (discriminant == 0),
         // it would be the same, so we avoid a duplicate.
-        if discriminant > 0.0 && t2 >= 0.0 && t2 <= 1.0 {
+        if discriminant > 0.0 && (0.0..=1.0).contains(&t2) {
             intersections.push(p + d * t2);
         }
         intersections
@@ -2175,7 +2139,7 @@ pub fn circle_from_three_points(p1: Vec2, p2: Vec2, p3: Vec2) -> Option<(Vec2, f
     let center = Vec2::new(x_center, y_center);
     // Compute the radius from the center to any of the points.
     let radius = (p1 - center).length();
-    (radius.abs() > EPSILON).then(|| (center, radius))
+    (radius.abs() > EPSILON).then_some((center, radius))
 }
 
 pub fn angle0_90(angle: f64) -> f64 {
@@ -2392,7 +2356,7 @@ pub fn is_point_inside_wedge(p1: Vec2, apex: Vec2, p3: Vec2, point: Vec2) -> boo
 }
 
 pub fn get_sagitta_pt(v0: Vec2, v1: Vec2, sag_rel: f64) -> Option<Vec2> {
-    SegBundle::new(v0, v1).and_then(|sb| Some(sb.m - sb.n * sb.len * sag_rel))
+    SegBundle::new(v0, v1).map(|sb| sb.m - sb.n * sb.len * sag_rel)
 }
 
 pub fn circle_line_intersection(

@@ -1,16 +1,13 @@
-use crate::math::{get_magnets_vertices, length_unit_to_mm};
-use crate::type_scalar::Scalar;
-use crate::type_vertex::Vertex;
-use crate::types::{Properties, Property, PropertyValue};
+use crate::helpers::math::{get_magnets_vertices, length_unit_to_mm};
+use crate::types::scalar::Scalar;
+use crate::types::vertex::Vertex;
+use crate::types::others::{Properties, Property, PropertyValue};
 use crate::voronoi::{inset_rings, round_rings, voronoi_cells};
 use crate::{
     dom::document,
+    helpers::math::*,
     inputs::UserUI,
-    math::{
-        bez_path_to_geo_polygon, bezpath_from_apices, distance_to_segment,
-        geo_multipolygon_to_bez_paths, rotate_vector, snap_angle, snap_val, snap_vertex, EPSILON,
-    },
-    types::{EUId, SegBundle, VUId, VecRing},
+    types::others::{EUId, SegBundle, VUId, VecRing},
 };
 use geo::algorithm::contains::Contains;
 use geo::algorithm::orient::Orient;
@@ -151,7 +148,7 @@ impl ShapeType {
         }
     }
     pub fn get_element(&self) -> Option<Element> {
-        document().get_element_by_id(&self.id())
+        document().get_element_by_id(self.id())
     }
     pub fn get_html_element(&self) -> Option<HtmlElement> {
         if let Some(element) = self.get_element() {
@@ -166,6 +163,12 @@ pub struct ShapeRotation {
     rotation: f64,
     rotation_saved: f64,
 }
+impl Default for ShapeRotation {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShapeRotation {
     pub fn new() -> Self {
         Self {
@@ -217,7 +220,7 @@ impl Clone for GeneralShape {
             .map(|(_, value)| (VUId::new(), value.clone()))
             .collect();
         Self {
-            shape_type: self.shape_type.clone(),
+            shape_type: self.shape_type,
             shape_name: self.shape_name.clone(),
             order: self.order,
             vertices: VecRing::from_slice(&new_vertices[..]).unwrap(),
@@ -537,7 +540,7 @@ impl GeneralShape {
                 Property::Apex { idx },
                 Apex {
                     idx,
-                    value: v.clone(),
+                    value: *v,
                     radius: None,
                 },
             )
@@ -978,7 +981,7 @@ impl GeneralShape {
         let vs_magnets = get_magnets_vertices(v1, v2, GeneralShape::DEFAULT_MAGNETS);
         let mut vs = vec![v1, v2];
         vs.extend(vs_magnets);
-        let vs: Vec<Vertex> = vs.into_iter().map(|v| Vertex::new(v)).collect();
+        let vs: Vec<Vertex> = vs.into_iter().map(Vertex::new).collect();
 
         GeneralShape::new(
             ShapeType::ConstrCircle,
@@ -994,6 +997,7 @@ impl GeneralShape {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         shape_type: ShapeType,
         vs: Vec<Vertex>,
@@ -1006,7 +1010,7 @@ impl GeneralShape {
         operation: Operation,
         shape_name: Option<String>,
     ) -> Option<Self> {
-        let vs: Vec<Vertex> = vs.iter().cloned().collect();
+        let vs: Vec<Vertex> = vs.to_vec();
         if vs.is_empty() {
             return None;
         }
@@ -1071,7 +1075,7 @@ impl GeneralShape {
     }
     pub fn select_vertex(&mut self, draw_pos: Vec2) -> Option<VUId> {
         for (idx, (uid, value)) in self.vertices.iter().enumerate() {
-            if matches!(self.shape_type, ShapeType::ConstrCircle { .. }) && idx >= 2 {
+            if matches!(self.shape_type, ShapeType::ConstrCircle) && idx >= 2 {
                 continue;
             }
             let pos = self.vertex_display_pos(value.curr());
@@ -1079,11 +1083,11 @@ impl GeneralShape {
                 return Some(*uid);
             }
         }
-        return None;
+        None
     }
     pub fn highlight_vertex(&mut self, draw_pos: Vec2) -> Option<VUId> {
         for (idx, (uid, value)) in self.vertices.iter().enumerate() {
-            if matches!(self.shape_type, ShapeType::ConstrCircle { .. }) && idx >= 2 {
+            if matches!(self.shape_type, ShapeType::ConstrCircle) && idx >= 2 {
                 continue;
             }
             let pos = self.vertex_display_pos(value.curr());
@@ -1091,7 +1095,7 @@ impl GeneralShape {
                 return Some(*uid);
             }
         }
-        return None;
+        None
     }
     fn move_vertex(&mut self, value_uid: VUId, user_ui: &UserUI) -> bool {
         let snap = user_ui.snap;
@@ -1345,7 +1349,7 @@ impl GeneralShape {
 
             ShapeType::Arrow => {
                 // Arrow is not a closed shape, so we don't move it
-                return false;
+                false
             }
         }
     }
@@ -1380,7 +1384,7 @@ impl GeneralShape {
                 }
                 Some(())
             }
-            _ => return None,
+            _ => None,
         }
     }
     pub fn move_shape(&mut self, delta: Vec2) {
@@ -1417,7 +1421,7 @@ impl GeneralShape {
                         .properties
                         .get(&Property::Magnets)
                         .map(|value| match value {
-                            PropertyValue::Magnets { value } => value.curr() as usize,
+                            PropertyValue::Magnets { value } => value.curr(),
                             _ => 0,
                         })
                         .unwrap_or(0);
@@ -1458,7 +1462,7 @@ impl GeneralShape {
             }
             Magnets { value } => {
                 if matches!(self.shape_type, ShapeType::ConstrCircle) {
-                    self.set_magnets_number(value.curr() as usize);
+                    self.set_magnets_number(value.curr());
                 }
             }
             Seeds { value } => {
@@ -1566,7 +1570,7 @@ impl GeneralShape {
             else {
                 return;
             };
-            let count = value.curr() as usize;
+            let count = value.curr();
             if self.vertices.len() != 2 + count {
                 self.set_magnets_number(count);
                 return;
@@ -1595,7 +1599,7 @@ impl GeneralShape {
             return distance_to_segment(v0.curr(), v1.curr(), pos, Self::GRAB_RADIUS)
                 <= Self::GRAB_RADIUS;
         }
-        if let ShapeType::ConstrCircle { .. } = self.shape_type {
+        if let ShapeType::ConstrCircle = self.shape_type {
             let mut iter = self.vertices.iter();
             let Some((_, center)) = iter.next() else {
                 return false;
@@ -1613,7 +1617,7 @@ impl GeneralShape {
         }
         if matches!(
             self.shape_type,
-            ShapeType::Text { .. } | ShapeType::Svg { .. } | ShapeType::Voronoi { .. }
+            ShapeType::Text | ShapeType::Svg | ShapeType::Voronoi
         ) {
             if self.rotation.get().abs() > EPSILON {
                 return self.get_bezpath().contains(pos.to_point());
@@ -1709,7 +1713,7 @@ impl GeneralShape {
     pub fn get_magnets_number(&self) -> Option<usize> {
         if let Some(PropertyValue::Magnets { value, .. }) = self.properties.get(&Property::Magnets)
         {
-            return Some(value.curr() as usize);
+            return Some(value.curr());
         }
         None
     }
@@ -1731,7 +1735,7 @@ impl GeneralShape {
                 .iter()
                 .map(|v| (VUId::new(), Vertex::new(*v)))
                 .collect::<Vec<_>>()[..];
-            self.vertices = VecRing::from_slice(&vertices).unwrap();
+            self.vertices = VecRing::from_slice(vertices).unwrap();
 
             self.set_bezpath();
         }
@@ -1741,9 +1745,9 @@ impl GeneralShape {
         if matches!(
             self.shape_type,
             ShapeType::Square
-                | ShapeType::Text { .. }
-                | ShapeType::Svg { .. }
-                | ShapeType::Voronoi { .. }
+                | ShapeType::Text
+                | ShapeType::Svg
+                | ShapeType::Voronoi
         ) && self.rotation.get().abs() > EPSILON
         {
             let center = self.bbox_center();
@@ -1908,7 +1912,7 @@ impl GeneralShape {
         let text_data = self.text_shape_data.as_mut()?;
         let font = self.properties.get(&Property::Font)?.as_font()?;
 
-        let (poly, _scale) = text_to_multipolygon(&text, &font, v1, v2);
+        let (poly, _scale) = text_to_multipolygon(&text, font, v1, v2);
         self.polygon = poly.clone();
         text_data.polygon = Some(poly.clone());
         text_data.cached_paths = Some(geo_multipolygon_to_bez_paths(&poly));
@@ -2062,32 +2066,29 @@ fn parse_svg(svg_data: String, combine_paths: bool) -> Option<(Vec<ParsedSvgShap
     let parser = SvgParser::new(svg_data.as_str());
     let mut svg_fill_rule = SvgFillRule::NonZero;
     for event in parser {
-        match event {
-            SvgEvent::Tag(tag, _, attributes) => {
-                if tag == "svg" {
-                    if let Some(val) = attributes.get("viewBox") {
-                        view_box = parse_view_box(val.as_ref());
-                    }
-                    if let Some(val) = attributes.get("width") {
-                        width = parse_svg_length(val.as_ref());
-                    }
-                    if let Some(val) = attributes.get("height") {
-                        height = parse_svg_length(val.as_ref());
-                    }
-                    svg_fill_rule = fill_rule_from_attrs(&attributes, svg_fill_rule);
+        if let SvgEvent::Tag(tag, _, attributes) = event {
+            if tag == "svg" {
+                if let Some(val) = attributes.get("viewBox") {
+                    view_box = parse_view_box(val.as_ref());
                 }
-                if tag == "path" {
-                    if let Some(d) = attributes.get("d") {
-                        if let Ok(path) = BezPath::from_svg(d.as_ref()) {
-                            if !path.is_empty() {
-                                let fill_rule = fill_rule_from_attrs(&attributes, svg_fill_rule);
-                                paths.push((path, fill_rule));
-                            }
+                if let Some(val) = attributes.get("width") {
+                    width = parse_svg_length(val.as_ref());
+                }
+                if let Some(val) = attributes.get("height") {
+                    height = parse_svg_length(val.as_ref());
+                }
+                svg_fill_rule = fill_rule_from_attrs(&attributes, svg_fill_rule);
+            }
+            if tag == "path" {
+                if let Some(d) = attributes.get("d") {
+                    if let Ok(path) = BezPath::from_svg(d.as_ref()) {
+                        if !path.is_empty() {
+                            let fill_rule = fill_rule_from_attrs(&attributes, svg_fill_rule);
+                            paths.push((path, fill_rule));
                         }
                     }
                 }
             }
-            _ => {}
         }
     }
 
@@ -2351,7 +2352,7 @@ fn build_voronoi_rings(p1: Vec2, p2: Vec2, seeds: usize) -> Vec<Vec<Vec2>> {
     let mut points = Vec::with_capacity(count + guard_points.len());
     let band = 0.001 * size.x.min(size.y);
     let grid_x = (count as f64).sqrt().ceil() as usize;
-    let grid_y = ((count + grid_x - 1) / grid_x).max(1);
+    let grid_y = count.div_ceil(grid_x).max(1);
     let step_x = seed_size.x / grid_x as f64;
     let step_y = seed_size.y / grid_y as f64;
     let cell = step_x.min(step_y);
@@ -2672,11 +2673,10 @@ fn rings_to_multipolygon(rings: Vec<LineString<f64>>) -> MultiPolygon<f64> {
                 continue;
             }
             let poly = Polygon::new(outer.clone(), vec![]);
-            if poly.contains(&Point::new(pt.x, pt.y)) {
-                if container.is_none() || areas[j] < areas[container.unwrap()] {
+            if poly.contains(&Point::new(pt.x, pt.y))
+                && (container.is_none() || areas[j] < areas[container.unwrap()]) {
                     container = Some(j);
                 }
-            }
         }
         if let Some(idx) = container {
             holes.push((idx, ring.clone()));

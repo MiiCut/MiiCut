@@ -1,10 +1,16 @@
-use crate::{shape::GeneralShape, type_vertex::Vertex};
+use crate::{shape::GeneralShape, types::vertex::Vertex};
 
 #[derive(Clone, Debug)]
 pub struct Clipboard {
     item_copy: Option<(GeneralShape, Vertex)>,
     item_paste: Option<(GeneralShape, Vertex)>,
 }
+impl Default for Clipboard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Clipboard {
     pub fn new() -> Self {
         Self {

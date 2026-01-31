@@ -1,8 +1,8 @@
+use crate::helpers::math::*;
 use crate::inputs::UserUI;
-use crate::math::{geo_multipolygon_to_bez_paths, get_magnets_vertices, snap_vertex, EPSILON};
 use crate::shape::{GeneralShape, Operation, ShapeType};
-use crate::type_vertex::Vertex;
-use crate::types::{EUId, Property, PropertyValue, Snap, VUId};
+use crate::types::vertex::Vertex;
+use crate::types::others::{EUId, Property, PropertyValue, Snap, VUId};
 use geo::algorithm::unary_union;
 use geo::{BooleanOps, Coord, LineString, MultiPolygon, Polygon};
 use kurbo::{flatten, stroke, BezPath, Cap, Join, PathEl, Shape, Stroke, StrokeOpts, Vec2};
@@ -306,7 +306,7 @@ fn shift_lead_to_mid(points: &[Vec2]) -> Vec<Vec2> {
     shifted
 }
 
-fn ensure_orientation(points: &mut Vec<Vec2>, want_cw: bool) {
+fn ensure_orientation(points: &mut [Vec2], want_cw: bool) {
     let area = ring_area(points);
     let is_cw = area < 0.0;
     if is_cw != want_cw {
@@ -508,6 +508,12 @@ pub struct DataSet {
     pub final_paths: Vec<BezPath>,
     pub final_polygon_dirty: bool,
 }
+impl Default for DataSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DataSet {
     pub fn new() -> Self {
         DataSet {
@@ -530,7 +536,7 @@ impl DataSet {
     pub fn push_element(&mut self, mut elem: GeneralShape) -> EUId {
         let affects_final = !matches!(
             elem.get_shape_type(),
-            ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+            ShapeType::ConstrLine | ShapeType::ConstrCircle
         );
         elem.set_order(self.next_order);
         self.next_order = self.next_order.saturating_add(1);
@@ -544,7 +550,7 @@ impl DataSet {
     fn is_groupable_shape(shape: &GeneralShape) -> bool {
         !matches!(
             shape.get_shape_type(),
-            ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+            ShapeType::ConstrLine | ShapeType::ConstrCircle
         )
     }
     fn group_bbox_from_children(&self, children: &[EUId]) -> Option<(Vec2, Vec2)> {
@@ -646,7 +652,7 @@ impl DataSet {
             .filter(|(_, shape)| {
                 !matches!(
                     shape.get_shape_type(),
-                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle
                 )
             })
             .map(|(eid, shape)| (shape.get_order(), *eid))
@@ -740,7 +746,7 @@ impl DataSet {
                 }
                 if !matches!(
                     shape.get_shape_type(),
-                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle
                 ) {
                     self.final_polygon_dirty = true;
                 }
@@ -813,25 +819,22 @@ impl DataSet {
                     .insert_one_between(&vid1_sel, &vid2_sel, new_v);
                 elem.set_bezpath();
                 self.final_polygon_dirty = true;
-                return Some(());
+                Some(())
             }
-            _ => return None,
+            _ => None,
         }
     }
     pub fn delete_vertex(&mut self, eid_sel: EUId, vid_sel: VUId) -> bool {
         if let Some(elem) = self.get_element_mut(eid_sel) {
-            match elem.get_shape_type() {
-                ShapeType::Poly => {
-                    if elem.get_vertices().len() < 4 {
-                        return false;
-                    }
-                    if let Some(idx_sel) = elem.get_vertices().get_idx(&vid_sel) {
-                        elem.get_vertices_mut().remove(&idx_sel);
-                        elem.set_bezpath();
-                        self.final_polygon_dirty = true;
-                    }
+            if elem.get_shape_type() == ShapeType::Poly {
+                if elem.get_vertices().len() < 4 {
+                    return false;
                 }
-                _ => {}
+                if let Some(idx_sel) = elem.get_vertices().get_idx(&vid_sel) {
+                    elem.get_vertices_mut().remove(&idx_sel);
+                    elem.set_bezpath();
+                    self.final_polygon_dirty = true;
+                }
             }
         }
         false
@@ -937,7 +940,7 @@ impl DataSet {
                 }
                 if !matches!(
                     shape.get_shape_type(),
-                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle
                 ) {
                     affects_final = true;
                 }
@@ -954,7 +957,7 @@ impl DataSet {
             if let Some(e) = self.shapes.get(&eid) {
                 if !matches!(
                     e.get_shape_type(),
-                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle
                 ) {
                     return true;
                 }
@@ -964,7 +967,7 @@ impl DataSet {
             if let Some(e) = self.shapes.get(eid) {
                 if !matches!(
                     e.get_shape_type(),
-                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle
                 ) {
                     return true;
                 }
@@ -1004,7 +1007,7 @@ impl DataSet {
                 moved = true;
                 if !matches!(
                     e.get_shape_type(),
-                    ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+                    ShapeType::ConstrLine | ShapeType::ConstrCircle
                 ) {
                     affects_final = true;
                 }
@@ -1053,7 +1056,7 @@ impl DataSet {
 
     fn apply_uniform_scale_to_shape(shape: &mut GeneralShape, origin: Vec2, scale: f64) {
         let shape_type = shape.get_shape_type();
-        if matches!(shape_type, ShapeType::Disc | ShapeType::ConstrCircle { .. }) {
+        if matches!(shape_type, ShapeType::Disc | ShapeType::ConstrCircle) {
             if shape.get_vertices().len() < 2 {
                 return;
             }
@@ -1071,7 +1074,7 @@ impl DataSet {
             v0.set_curr(new_center);
             let v1 = shape.get_vertices_mut().val_mut(1);
             v1.set_curr(new_edge);
-            if matches!(shape_type, ShapeType::ConstrCircle { .. }) {
+            if matches!(shape_type, ShapeType::ConstrCircle) {
                 if let Some(PropertyValue::Magnets { value, .. }) =
                     shape.get_properties().get(&Property::Magnets).cloned()
                 {
@@ -1174,7 +1177,7 @@ impl DataSet {
                 3 => 1,
                 _ => return false,
             };
-            let drag_saved = group.get_vertices().val(drag_idx as i64).saved();
+            let drag_saved = group.get_vertices().val(drag_idx).saved();
             let opposite_pos = group.get_vertices().val(opposite_idx as i64).saved();
             (opposite_pos, drag_saved)
         };
@@ -1324,6 +1327,12 @@ pub struct ShapeSelector {
     current_index: usize,        // Current index in the list
 }
 #[allow(dead_code)]
+impl Default for ShapeSelector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShapeSelector {
     pub fn new() -> Self {
         Self {

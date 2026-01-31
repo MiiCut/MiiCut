@@ -1,19 +1,25 @@
-use crate::app::RefAV;
+use crate::app::{load_toolpath_params, save_toolpath_params, RefAV};
 use crate::canvas::{CanvasKind, NotesData};
-use crate::render::center_paths_canvas;
+use crate::helpers::canvas_fit::fit_paths_canvas;
+use crate::helpers::math::to_draw;
 use crate::shape::{GeneralShape, Operation, ShapeType, SvgData, SvgFillRule};
 use crate::shapes::DataSet;
 use crate::status::update_status_bar;
-use crate::type_scalar::Scalar;
-use crate::type_vertex::Vertex;
-use crate::types::{EUId, Properties, Property, PropertyValue};
+use crate::types::scalar::Scalar;
+use crate::types::vertex::Vertex;
+use crate::types::others::{EUId, Properties, Property, PropertyValue};
+use crate::view_draw::app::render_draw_view;
+use crate::view_draw::notes_dom::update_notes_view;
 use js_sys::{Array, Date, JSON};
-use kurbo::{BezPath, PathEl, Shape, Size, Vec2};
+use kurbo::{BezPath, PathEl, Rect, Shape, Size, Vec2};
 use std::collections::HashMap;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
-use web_sys::{Blob, BlobPropertyBag, Document, HtmlAnchorElement, Url};
+use web_sys::{
+    Blob, BlobPropertyBag, Document, Event, FileReader, HtmlAnchorElement, HtmlElement,
+    HtmlInputElement, Url,
+};
 
 pub(crate) fn build_svg_from_dataset(dataset: &DataSet) -> Option<String> {
     let paths = geo_multipolygon_to_bez_paths(&dataset.final_polygon);
@@ -74,7 +80,7 @@ pub(crate) fn build_svg_from_dataset(dataset: &DataSet) -> Option<String> {
                     ));
                 }
                 PathEl::ClosePath => {
-                    data.push_str("Z");
+                    data.push('Z');
                 }
             }
         }
@@ -83,6 +89,281 @@ pub(crate) fn build_svg_from_dataset(dataset: &DataSet) -> Option<String> {
 
     svg.push_str("  </g>\n</svg>\n");
     Some(svg)
+}
+
+pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
+    let document = av.borrow().document.clone();
+    let tutorials = crate::tutorial_gen::TUTORIALS;
+    let examples = crate::examples_gen::EXAMPLES;
+    let tutorial_menu = document
+        .get_element_by_id("tutorial-menu")
+        .and_then(|el| el.dyn_into::<HtmlElement>().ok());
+    let examples_menu = document
+        .get_element_by_id("examples-menu")
+        .and_then(|el| el.dyn_into::<HtmlElement>().ok());
+    let bind_menu = |menu: &Option<HtmlElement>, container_id: &str| -> Result<(), JsValue> {
+        if let Some(menu) = menu.as_ref() {
+            let menu_clone = menu.clone();
+            let on_leave = Closure::wrap(Box::new(move |_event: Event| {
+                let _ = menu_clone.class_list().remove_1("dropdown-locked");
+            }) as Box<dyn FnMut(_)>);
+            menu.add_event_listener_with_callback("mouseleave", on_leave.as_ref().unchecked_ref())?;
+            on_leave.forget();
+        }
+        if let Some(container) = document.get_element_by_id(container_id) {
+            container.set_inner_html("");
+        }
+        Ok(())
+    };
+    bind_menu(&tutorial_menu, "tutorial-menu-content")?;
+    bind_menu(&examples_menu, "examples-menu-content")?;
+
+    let add_examples = |items: &[(&str, &str)],
+                        menu: &Option<HtmlElement>,
+                        container_id: &str|
+     -> Result<(), JsValue> {
+        if let Some(container) = document.get_element_by_id(container_id) {
+            for (idx, (name, data)) in items.iter().enumerate() {
+            let Ok(link) = document.create_element("a") else {
+                continue;
+            };
+            let Some(link) = link.dyn_into::<HtmlElement>().ok() else {
+                continue;
+            };
+            link.set_text_content(Some(name));
+            link.set_attribute("href", "#").ok();
+            link.set_attribute("data-example-idx", &idx.to_string())
+                .ok();
+            let av_clone = av.clone();
+            let data = data.to_string();
+            let menu = menu.clone();
+            let on_click = Closure::wrap(Box::new(move |event: Event| {
+                event.prevent_default();
+                if let Some(menu) = menu.as_ref() {
+                    let _ = menu.class_list().add_1("dropdown-locked");
+                }
+                load_json_to_dataset(av_clone.clone(), data.clone());
+                update_notes_view(av_clone.clone());
+                render_draw_view(av_clone.clone());
+            }) as Box<dyn FnMut(_)>);
+            link.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
+            on_click.forget();
+            container.append_child(&link).ok();
+            }
+        }
+        Ok(())
+    };
+
+    add_examples(tutorials, &tutorial_menu, "tutorial-menu-content")?;
+    add_examples(examples, &examples_menu, "examples-menu-content")?;
+
+    if let Some(clear) = document.get_element_by_id("clear-option") {
+        let av_clone = av.clone();
+        let clear = clear.dyn_into::<HtmlElement>()?;
+        let on_clear = Closure::wrap(Box::new(move |event: Event| {
+            event.prevent_default();
+            clear_draw_view(av_clone.clone());
+            update_notes_view(av_clone.clone());
+            render_draw_view(av_clone.clone());
+        }) as Box<dyn FnMut(_)>);
+        clear.add_event_listener_with_callback("click", on_clear.as_ref().unchecked_ref())?;
+        on_clear.forget();
+    }
+
+    if let Some(save) = document.get_element_by_id("save-option") {
+        let av_clone = av.clone();
+        let save = save.dyn_into::<HtmlElement>()?;
+        let on_save = Closure::wrap(Box::new(move |event: Event| {
+            event.prevent_default();
+            let (document, json, filename) = {
+                let avb = av_clone.borrow();
+                let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+                let meta = make_export_info(&avb.document);
+                let json = build_json_from_dataset(&canvas.dataset, &canvas.notes, &meta);
+                let Some(json) = json else {
+                    return;
+                };
+                let file_base = meta
+                    .title.as_deref()
+                    .filter(|title| !title.trim().is_empty())
+                    .unwrap_or("miicut");
+                let timestamp = timestamp_string();
+                let filename = format!("{file_base}-{timestamp}.mii.json");
+                (avb.document.clone(), json, filename)
+            };
+            trigger_download(&document, &filename, &json, "application/json");
+        }) as Box<dyn FnMut(_)>);
+        save.add_event_listener_with_callback("click", on_save.as_ref().unchecked_ref())?;
+        on_save.forget();
+    }
+
+    if let Some(load) = document.get_element_by_id("load-option") {
+        let av_clone = av.clone();
+        let load = load.dyn_into::<HtmlElement>()?;
+        let on_load = Closure::wrap(Box::new(move || {
+            let document_clone = av_clone.borrow().document.clone();
+            if let Ok(input) = document_clone.create_element("input") {
+                if let Ok(input) = input.dyn_into::<HtmlInputElement>() {
+                    input.set_type("file");
+                    input.set_accept(".mii.json,application/json");
+                    let av_inner = av_clone.clone();
+                    let input_clone = input.clone();
+                    let on_change = Closure::wrap(Box::new(move |_event: Event| {
+                        let files = match input_clone.files() {
+                            Some(files) => files,
+                            None => return,
+                        };
+                        let file = match files.get(0) {
+                            Some(file) => file,
+                            None => return,
+                        };
+                        let reader = match FileReader::new() {
+                            Ok(reader) => reader,
+                            Err(_) => return,
+                        };
+                        let reader_clone = reader.clone();
+                        let av_inner = av_inner.clone();
+                        let on_load = Closure::wrap(Box::new(move |_event: Event| {
+                            let result = reader_clone.result().ok().and_then(|val| val.as_string());
+                            if let Some(result) = result {
+                                load_json_to_dataset(av_inner.clone(), result);
+                                update_notes_view(av_inner.clone());
+                            }
+                        })
+                            as Box<dyn FnMut(_)>);
+                        reader.set_onload(Some(on_load.as_ref().unchecked_ref()));
+                        on_load.forget();
+                        let _ = reader.read_as_text(&file);
+                    }) as Box<dyn FnMut(_)>);
+                    input
+                        .add_event_listener_with_callback(
+                            "change",
+                            on_change.as_ref().unchecked_ref(),
+                        )
+                        .ok();
+                    on_change.forget();
+                    input.click();
+                }
+            }
+        }) as Box<dyn FnMut()>);
+        load.add_event_listener_with_callback("click", on_load.as_ref().unchecked_ref())?;
+        on_load.forget();
+    }
+
+    if let Some(export) = document.get_element_by_id("export-svg") {
+        let av_clone = av.clone();
+        let export = export.dyn_into::<HtmlElement>()?;
+        let on_export = Closure::wrap(Box::new(move |event: Event| {
+            event.prevent_default();
+            let (document, svg, filename) = {
+                let avb = av_clone.borrow();
+                let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+                let Some(svg) = build_svg_from_dataset(&canvas.dataset) else {
+                    return;
+                };
+                let filename = "drawing.svg".to_string();
+                (avb.document.clone(), svg, filename)
+            };
+            trigger_download(&document, &filename, &svg, "image/svg+xml");
+        }) as Box<dyn FnMut(_)>);
+        export.add_event_listener_with_callback("click", on_export.as_ref().unchecked_ref())?;
+        on_export.forget();
+    }
+
+    if let Some(svg_input) = document.get_element_by_id("svg-input") {
+        let svg_input: HtmlInputElement = svg_input.dyn_into().unwrap();
+        let av_clone = av.clone();
+        let document_clone = document.clone();
+        let svg_input_clone = svg_input.clone();
+        let on_svg_select = Closure::wrap(Box::new(move || {
+            let files = match svg_input_clone.files() {
+                Some(files) => files,
+                None => return,
+            };
+            let file = match files.get(0) {
+                Some(file) => file,
+                None => return,
+            };
+            let combine_paths = document_clone
+                .get_element_by_id("import-svg-single")
+                .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+                .map(|el| el.checked())
+                .unwrap_or(false);
+
+            let file_reader = FileReader::new().unwrap();
+            let av_for_load = av_clone.clone();
+            let on_load = Closure::wrap(Box::new(move |event: web_sys::Event| {
+                let target = event.target().unwrap();
+                let file_reader: FileReader = target.dyn_into().unwrap();
+                if let Some(result) = file_reader.result().unwrap().as_string() {
+                    log!("SVG file content loaded!");
+                    let (tl, br) = {
+                        let avb = av_for_load.borrow();
+                        let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+                        let size = canvas.get_canvas_size();
+                        let scale = canvas.get_scale();
+                        let offset = canvas.get_offset();
+                        let tl = to_draw(Vec2::new(0.0, 0.0), scale, offset);
+                        let br = to_draw(Vec2::new(size.width, size.height), scale, offset);
+                        (tl, br)
+                    };
+                    let sh = GeneralShape::new_shape_svg_fit(0, result, combine_paths, tl, br);
+                    if let Some(shape) = sh {
+                        let canvas_user =
+                            &mut av_for_load.borrow_mut().canvases[CanvasKind::Draw.idx()];
+                        canvas_user.dataset.push_element(shape);
+                        canvas_user.dataset.mark_final_polygon_dirty();
+                        canvas_user.dataset.calc_final_polygon();
+                    };
+                }
+            }) as Box<dyn FnMut(_)>);
+
+            file_reader
+                .add_event_listener_with_callback("load", on_load.as_ref().unchecked_ref())
+                .unwrap();
+            on_load.forget();
+            file_reader.read_as_text(&file).unwrap();
+            svg_input_clone.set_value("");
+        }) as Box<dyn FnMut()>);
+        svg_input
+            .add_event_listener_with_callback("change", on_svg_select.as_ref().unchecked_ref())?;
+        on_svg_select.forget();
+    }
+
+    if let Some(import) = document.get_element_by_id("import-svg") {
+        let import = import.dyn_into::<HtmlElement>()?;
+        let svg_input = document
+            .get_element_by_id("svg-input")
+            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok());
+        let on_click = Closure::wrap(Box::new(move |_event: Event| {
+            if let Some(input) = svg_input.as_ref() {
+                input.click();
+            }
+        }) as Box<dyn FnMut(_)>);
+        import.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
+        on_click.forget();
+    }
+
+    if let Some(load) = document.get_element_by_id("machine-load-params") {
+        let av_clone = av.clone();
+        let load = load.dyn_into::<HtmlElement>()?;
+        let on_click = Closure::wrap(Box::new(move |_event: Event| {
+            load_toolpath_params(av_clone.clone());
+        }) as Box<dyn FnMut(_)>);
+        load.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
+        on_click.forget();
+    }
+    if let Some(save) = document.get_element_by_id("machine-save-params") {
+        let av_clone = av.clone();
+        let save = save.dyn_into::<HtmlElement>()?;
+        let on_click = Closure::wrap(Box::new(move |_event: Event| {
+            save_toolpath_params(av_clone.clone());
+        }) as Box<dyn FnMut(_)>);
+        save.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
+        on_click.forget();
+    }
+
+    Ok(())
 }
 
 pub(crate) fn build_json_from_dataset(
@@ -382,7 +663,7 @@ pub(crate) fn icon_to_name(icon: ShapeType) -> &'static str {
         ShapeType::Voronoi => "voronoi",
         ShapeType::Group => "group",
         ShapeType::ConstrLine => "constr_line",
-        ShapeType::ConstrCircle { .. } => "constr_circle",
+        ShapeType::ConstrCircle => "constr_circle",
         _ => "unknown",
     }
 }
@@ -672,7 +953,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         let positions: Vec<Vec2> = shape.vertices.iter().map(|vertex| vertex.pos).collect();
         let elem = match shape.icon {
             ShapeType::Disc => {
-                let Some(v0) = positions.get(0) else {
+                let Some(v0) = positions.first() else {
                     continue;
                 };
                 let Some(v1) = positions.get(1) else {
@@ -687,7 +968,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
                 GeneralShape::new_shape_rectangle(min, max, shape.order)
             }
             ShapeType::Oblong => {
-                let Some(v0) = positions.get(0) else {
+                let Some(v0) = positions.first() else {
                     continue;
                 };
                 let Some(v1) = positions.get(1) else {
@@ -703,7 +984,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             }
             ShapeType::Poly => GeneralShape::new_shape_poly(positions.clone(), shape.order),
             ShapeType::ConstrLine => {
-                let Some(v0) = positions.get(0) else {
+                let Some(v0) = positions.first() else {
                     continue;
                 };
                 let Some(v1) = positions.get(1) else {
@@ -712,7 +993,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
                 GeneralShape::new_shape_constr_line(*v0, *v1, shape.order)
             }
             ShapeType::ConstrCircle => {
-                let Some(v0) = positions.get(0) else {
+                let Some(v0) = positions.first() else {
                     continue;
                 };
                 let Some(v1) = positions.get(1) else {
@@ -858,19 +1139,50 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
     canvas.dataset.mark_final_polygon_dirty();
     canvas.dataset.calc_final_polygon();
     {
-        let mut paths = canvas.dataset.get_final_paths().clone();
+        let mut paths: Vec<BezPath> = canvas
+            .dataset
+            .shapes
+            .values()
+            .chain(canvas.dataset.grouped_shapes.values())
+            .map(|shape| shape.get_bezpath().clone())
+            .collect();
+
         if paths.is_empty() {
-            paths = canvas
-                .dataset
-                .shapes
-                .values()
-                .map(|shape| shape.get_bezpath().clone())
-                .collect();
+            paths = canvas.dataset.get_final_paths().clone();
         }
-        center_paths_canvas(canvas, &paths);
+
+        for note in canvas.notes.notes.iter() {
+            let rect = Rect::new(
+                note.pos.x,
+                note.pos.y,
+                note.pos.x + note.size.x,
+                note.pos.y + note.size.y,
+            );
+            paths.push(rect.to_path(0.01));
+        }
+
+        fit_paths_canvas(canvas, &paths);
     }
     drop(avb);
     update_status_bar(av);
+}
+
+pub(crate) fn clear_draw_view(av: RefAV) {
+    let mut avb = av.borrow_mut();
+    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+    canvas.dataset.shapes.clear();
+    canvas.dataset.grouped_shapes.clear();
+    canvas.dataset.shapes_selected.clear();
+    canvas.dataset.shapes_highlighted.clear();
+    canvas.dataset.vertex_selected = None;
+    canvas.dataset.vertex_highlighted = None;
+    canvas.dataset.shapes_selector = crate::shapes::ShapeSelector::new();
+    canvas.notes.clear();
+    canvas.dataset.refresh_svg_cache();
+    canvas.dataset.mark_final_polygon_dirty();
+    canvas.dataset.calc_final_polygon();
+    avb.note_drag = None;
+    avb.note_selected = None;
 }
 
 fn geo_multipolygon_to_bez_paths(poly: &geo::MultiPolygon<f64>) -> Vec<BezPath> {

@@ -1,7 +1,7 @@
 use crate::{
     canvas::{CanvasText, CanvasTextConfig, Colors, Pattern, TextAlign, TextPos},
-    prefab::{dim_arrow_path, dim_path, get_dimension_colors, get_text_colors},
-    types::SegBundle,
+    helpers::prefab::*,
+    types::others::SegBundle,
 };
 use kurbo::{BezPath, Rect, Vec2};
 use std::{f64::consts::PI, vec};

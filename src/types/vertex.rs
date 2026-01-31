@@ -1,7 +1,7 @@
 use kurbo::Vec2;
 use std::fmt::Debug;
 
-use crate::type_scalar::Scalar;
+use crate::types::scalar::Scalar;
 
 pub type ScalarU32 = Scalar<u32>;
 

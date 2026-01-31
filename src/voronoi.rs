@@ -2,7 +2,7 @@ use kurbo::Vec2;
 use spade::{DelaunayTriangulation, Point2, Triangulation};
 use std::f64::consts::PI;
 
-use crate::math::fillet_at_apex;
+use crate::helpers::math::fillet_at_apex;
 
 pub(crate) fn voronoi_cells(points: &[Vec2], excluded: &[Vec2]) -> Vec<Vec<Vec2>> {
     if points.len() < 3 {
@@ -51,7 +51,7 @@ fn clean_ring(ring: &[Vec2], min_dist: f64) -> Vec<Vec2> {
     for p in ring {
         if out
             .last()
-            .map_or(true, |last| (*p - *last).hypot() >= min_dist)
+            .is_none_or(|last| (*p - *last).hypot() >= min_dist)
         {
             out.push(*p);
         }

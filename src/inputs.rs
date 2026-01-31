@@ -1,4 +1,4 @@
-use crate::{math::*, type_vertex::Vertex, types::Snap};
+use crate::{helpers::math::*, types::vertex::Vertex, types::others::Snap};
 use kurbo::Vec2;
 use strum_macros::{Display, EnumString};
 use web_sys::MouseEvent;
@@ -29,6 +29,12 @@ pub struct UserUI {
     button_level: ButtonLevel,
     moving: bool,
 }
+impl Default for UserUI {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UserUI {
     pub fn new() -> Self {
         Self {
@@ -58,13 +64,13 @@ impl UserUI {
         mouse_event: &MouseEvent,
         sys_mouse: SystemMouse,
     ) -> UserAction {
-        if mouse_event.buttons() == JSMouseState::JSLeft as u16 {
+        if mouse_event.buttons() == JSMouseState::Left as u16 {
             self.mouse_button = MouseButton::Left;
         }
-        if mouse_event.buttons() == JSMouseState::JSMiddle as u16 {
+        if mouse_event.buttons() == JSMouseState::Middle as u16 {
             self.mouse_button = MouseButton::Middle;
         }
-        if mouse_event.buttons() == JSMouseState::JSRight as u16 {
+        if mouse_event.buttons() == JSMouseState::Right as u16 {
             self.mouse_button = MouseButton::Right;
         }
         self.mouse_client = Vec2::new(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
@@ -210,8 +216,8 @@ pub enum MouseState {
 #[derive(Debug, Copy, Clone)]
 #[repr(u16)]
 enum JSMouseState {
-    JSNoButton = 0,
-    JSLeft = 1,
-    JSRight = 2,
-    JSMiddle = 4,
+    NoButton = 0,
+    Left = 1,
+    Right = 2,
+    Middle = 4,
 }

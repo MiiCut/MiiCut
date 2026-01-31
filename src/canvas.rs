@@ -1,13 +1,12 @@
 use crate::{
     clipboard::Clipboard,
     dimensions::{dim_hv, dim_radius},
+    helpers::{math::*, prefab::*},
     inputs::{SystemMouse, UserAction, UserUI},
-    math::*,
-    prefab::*,
     shape::{GeneralShape, ShapeType, SvgFillRule},
     shapes::DataSet,
-    type_vertex::Vertex,
-    types::{EUId, Property, PropertyValue, SegBundle},
+    types::vertex::Vertex,
+    types::others::{EUId, Property, PropertyValue, SegBundle},
     undoredo::UndoRedo,
 };
 use js_sys::Array;
@@ -29,6 +28,12 @@ pub struct NotesData {
     pub notes: Vec<Note>,
     next_id: usize,
 }
+impl Default for NotesData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NotesData {
     pub fn new() -> Self {
         Self {
@@ -43,12 +48,22 @@ impl NotesData {
     pub fn add(&mut self, pos: Vec2, size: Vec2, text: String) -> usize {
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
-        self.notes.push(Note { id, pos, size, text });
+        self.notes.push(Note {
+            id,
+            pos,
+            size,
+            text,
+        });
         id
     }
     pub fn add_with_id(&mut self, id: usize, pos: Vec2, size: Vec2, text: String) {
         self.next_id = self.next_id.max(id.saturating_add(1));
-        self.notes.push(Note { id, pos, size, text });
+        self.notes.push(Note {
+            id,
+            pos,
+            size,
+            text,
+        });
     }
     pub fn get_mut(&mut self, id: usize) -> Option<&mut Note> {
         self.notes.iter_mut().find(|note| note.id == id)
@@ -563,7 +578,7 @@ impl Canvas {
             }
         }
 
-        return Some(());
+        Some(())
     }
 
     // Rendering
@@ -650,8 +665,8 @@ impl Canvas {
         self.ctx.set_line_dash(&stroke_style).unwrap();
         self.ctx.set_line_width(stroke_width);
 
-        self.ctx.set_fill_style_str(&fill_color.get());
-        self.ctx.set_stroke_style_str(&stroke_color.get());
+        self.ctx.set_fill_style_str(fill_color.get());
+        self.ctx.set_stroke_style_str(stroke_color.get());
 
         self.ctx.begin_path();
         for cst in path.iter() {
@@ -701,8 +716,8 @@ impl Canvas {
         self.ctx.set_line_dash(&stroke_style).unwrap();
         self.ctx.set_line_width(stroke_width);
 
-        self.ctx.set_fill_style_str(&fill_color.get());
-        self.ctx.set_stroke_style_str(&stroke_color.get());
+        self.ctx.set_fill_style_str(fill_color.get());
+        self.ctx.set_stroke_style_str(stroke_color.get());
 
         self.ctx.begin_path();
         for path in paths {
@@ -755,11 +770,11 @@ impl Canvas {
         self.ctx.set_line_dash(&stroke_style).unwrap();
         self.ctx.set_line_width(stroke_width);
 
-        self.ctx.set_fill_style_str(&fill_color.get());
-        self.ctx.set_stroke_style_str(&color.get());
+        self.ctx.set_fill_style_str(fill_color.get());
+        self.ctx.set_stroke_style_str(color.get());
 
         self.ctx.begin_path();
-        for (_idx, path) in paths.iter().enumerate() {
+        for path in paths.iter() {
             for cst in path.iter() {
                 match cst {
                     PathEl::MoveTo(pt) => {
@@ -804,8 +819,8 @@ impl Canvas {
         self.ctx.set_line_width(stroke_width);
 
         let color = Color::Red30.get();
-        self.ctx.set_fill_style_str(&color);
-        self.ctx.set_stroke_style_str(&color);
+        self.ctx.set_fill_style_str(color);
+        self.ctx.set_stroke_style_str(color);
 
         self.ctx.begin_path();
         self.ctx.move_to(0., pos_canvas.y);
@@ -836,7 +851,7 @@ impl Canvas {
         self.ctx.set_line_width(stroke_width);
 
         let color = Color::Rules.get();
-        self.ctx.set_stroke_style_str(&color);
+        self.ctx.set_stroke_style_str(color);
 
         let draw_min = to_draw(Vec2::ZERO, drawing_scale, drawing_offset);
         let draw_max = to_draw(
@@ -928,7 +943,7 @@ impl Canvas {
     }
     pub fn draw_dimensions(&mut self, e: &GeneralShape) {
         match e.get_shape_type() {
-            ShapeType::Disc | ShapeType::ConstrCircle { .. } => {
+            ShapeType::Disc | ShapeType::ConstrCircle => {
                 let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 if v.len() >= 2 {
                     if let Some(seg) = SegBundle::new(v[0], v[1]) {
@@ -961,7 +976,11 @@ impl Canvas {
                     }
                 }
             }
-            ShapeType::Square | ShapeType::Text | ShapeType::Svg | ShapeType::Voronoi | ShapeType::Group => {
+            ShapeType::Square
+            | ShapeType::Text
+            | ShapeType::Svg
+            | ShapeType::Voronoi
+            | ShapeType::Group => {
                 let points: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 let rotation = e.get_rotation();
                 for (idx, (v1, v2)) in points
@@ -1118,7 +1137,7 @@ impl Canvas {
         let stroke_color = get_stroke_color(false, false);
         let path = e.get_bezpath();
         self.draw_path(
-            &path,
+            path,
             Pattern::OnCreation,
             Color::Gray95,
             stroke_color,
@@ -1138,7 +1157,7 @@ impl Canvas {
         let is_voronoi = shape.get_shape_type() == ShapeType::Voronoi;
         let is_construction = matches!(
             shape.get_shape_type(),
-            ShapeType::ConstrLine | ShapeType::ConstrCircle { .. }
+            ShapeType::ConstrLine | ShapeType::ConstrCircle
         );
         let stroke_color = if !is_selected && !is_highlighted {
             Color::Gray20
