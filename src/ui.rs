@@ -156,6 +156,10 @@ pub(crate) fn on_window_keydown(av: RefAV, event: Event) {
                 do_render = true;
             }
             " " => {
+                if is_typing_in_input(&kb_event, &document) {
+                    return;
+                }
+                kb_event.prevent_default();
                 let _ = with_av_try_mut(&av, |avb| avb.space_pressed());
                 do_render = true;
             }

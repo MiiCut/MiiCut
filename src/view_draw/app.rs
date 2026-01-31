@@ -258,12 +258,10 @@ pub(crate) fn update_context_help(av: &RefAV) -> Option<()> {
 
     let (title_label, lines) = if lines.is_empty() {
         let lines = vec![
-            "Esc: cancel current action.".to_string(),
             "Option/Alt: preview.".to_string(),
-            "Suppr/Backspace: delete selection.".to_string(),
+            "".to_string(),
             "Enter: group / ungroup selection.".to_string(),
-            "Ctrl+C/V: copy / paste.".to_string(),
-            "Ctrl+S: save.".to_string(),
+            "".to_string(),
             "↑ / ↓: shape order or vertex radius.".to_string(),
         ];
         ("Shortcuts".to_string(), lines)

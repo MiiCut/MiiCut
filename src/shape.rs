@@ -254,7 +254,7 @@ impl GroupShape {
 }
 impl GeneralShape {
     const TOLERANCE: f64 = 0.01;
-    const GRAB_RADIUS: f64 = 5.0;
+    const GRAB_RADIUS: f64 = 3.0;
     const MIN_MAGNETS: usize = 6;
     const DEFAULT_MAGNETS: usize = 6;
     const MIN_RADIUS: f64 = 2.0;

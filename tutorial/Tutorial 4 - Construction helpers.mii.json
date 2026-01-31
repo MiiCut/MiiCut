@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "meta": {
+    "title": "MiiCut",
+    "timestamp": "20260131-134024",
+    "canvas": {
+      "size": [3000.000000, 1500.000000],
+      "scale": 1.000000,
+      "offset": [0.000000, 0.000000]
+    }
+  },
+  "shapes": [
+    {
+      "id": 3,
+      "type": "constr_line",
+      "operation": "union",
+      "order": 35,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": -360.000000, "y": -880.000000, "rounded": null},
+        {"x": -140.000000, "y": -660.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 4,
+      "type": "constr_circle",
+      "operation": "union",
+      "order": 28,
+      "rotation": 0.000000,
+      "constr_vertices": 7,
+      "vertices": [
+        {"x": -750.000000, "y": -800.000000, "rounded": null},
+        {"x": -515.076845, "y": -885.505036, "rounded": null},
+        {"x": -515.076845, "y": -885.505036, "rounded": null},
+        {"x": -536.677280, "y": -669.641199, "rounded": null},
+        {"x": -718.914074, "y": -551.940199, "rounded": null},
+        {"x": -924.559204, "y": -621.033288, "rounded": null},
+        {"x": -998.757694, "y": -824.891961, "rounded": null},
+        {"x": -885.636566, "y": -1010.006481, "rounded": null},
+        {"x": -670.378338, "y": -1036.981836, "rounded": null}
+      ]
+    },
+    {
+      "id": 5,
+      "type": "constr_circle",
+      "operation": "union",
+      "order": 38,
+      "rotation": 0.000000,
+      "constr_vertices": 12,
+      "vertices": [
+        {"x": -140.000000, "y": -660.000000, "rounded": null},
+        {"x": -69.289322, "y": -589.289322, "rounded": null},
+        {"x": -69.289322, "y": -589.289322, "rounded": null},
+        {"x": -114.118096, "y": -563.407418, "rounded": null},
+        {"x": -165.881904, "y": -563.407418, "rounded": null},
+        {"x": -210.710678, "y": -589.289322, "rounded": null},
+        {"x": -236.592582, "y": -634.118096, "rounded": null},
+        {"x": -236.592582, "y": -685.881904, "rounded": null},
+        {"x": -210.710678, "y": -730.710678, "rounded": null},
+        {"x": -165.881904, "y": -756.592582, "rounded": null},
+        {"x": -114.118096, "y": -756.592582, "rounded": null},
+        {"x": -69.289322, "y": -730.710678, "rounded": null},
+        {"x": -43.407418, "y": -685.881904, "rounded": null},
+        {"x": -43.407418, "y": -634.118096, "rounded": null}
+      ]
+    },
+    {
+      "id": 2,
+      "type": "constr_circle",
+      "operation": "union",
+      "order": 37,
+      "rotation": 0.000000,
+      "constr_vertices": 12,
+      "vertices": [
+        {"x": -360.000000, "y": -880.000000, "rounded": null},
+        {"x": -289.289322, "y": -809.289322, "rounded": null},
+        {"x": -289.289322, "y": -809.289322, "rounded": null},
+        {"x": -334.118096, "y": -783.407418, "rounded": null},
+        {"x": -385.881904, "y": -783.407418, "rounded": null},
+        {"x": -430.710678, "y": -809.289322, "rounded": null},
+        {"x": -456.592582, "y": -854.118096, "rounded": null},
+        {"x": -456.592582, "y": -905.881904, "rounded": null},
+        {"x": -430.710678, "y": -950.710678, "rounded": null},
+        {"x": -385.881904, "y": -976.592582, "rounded": null},
+        {"x": -334.118096, "y": -976.592582, "rounded": null},
+        {"x": -289.289322, "y": -950.710678, "rounded": null},
+        {"x": -263.407418, "y": -905.881904, "rounded": null},
+        {"x": -263.407418, "y": -854.118096, "rounded": null}
+      ]
+    },
+    {
+      "id": 1,
+      "type": "poly",
+      "operation": "union",
+      "order": 39,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": -263.407417, "y": -854.118095, "rounded": 100},
+        {"x": -165.881905, "y": -756.592583, "rounded": 100},
+        {"x": -69.289322, "y": -730.710678, "rounded": 40},
+        {"x": -69.289322, "y": -589.289322, "rounded": 40},
+        {"x": -210.710678, "y": -589.289322, "rounded": 40},
+        {"x": -236.592583, "y": -685.881905, "rounded": null},
+        {"x": -334.118095, "y": -783.407417, "rounded": 100},
+        {"x": -430.710678, "y": -809.289322, "rounded": 40},
+        {"x": -430.710678, "y": -950.710678, "rounded": 40},
+        {"x": -289.289322, "y": -950.710678, "rounded": 40}
+      ]
+    },
+    {
+      "id": 0,
+      "type": "poly",
+      "operation": "union",
+      "order": 29,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": -998.757694, "y": -824.891962, "rounded": 50},
+        {"x": -885.636566, "y": -1010.006481, "rounded": 50},
+        {"x": -670.378337, "y": -1036.981837, "rounded": 50},
+        {"x": -515.076845, "y": -885.505036, "rounded": 30},
+        {"x": -536.677280, "y": -669.641199, "rounded": 50},
+        {"x": -718.914074, "y": -551.940198, "rounded": 50},
+        {"x": -924.559205, "y": -621.033288, "rounded": 50}
+      ]
+    },
+    {
+      "id": 7,
+      "type": "poly",
+      "operation": "difference",
+      "order": 41,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": -836.807402, "y": -934.404148, "rounded": 40},
+        {"x": -699.042136, "y": -951.668375, "rounded": 40},
+        {"x": -599.649181, "y": -854.723223, "rounded": 40},
+        {"x": -613.473459, "y": -716.570367, "rounded": 40},
+        {"x": -730.105007, "y": -641.241727, "rounded": 40},
+        {"x": -861.717891, "y": -685.461304, "rounded": 40},
+        {"x": -909.204924, "y": -815.930855, "rounded": 40}
+      ]
+    },
+    {
+      "id": 6,
+      "type": "constr_circle",
+      "operation": "union",
+      "order": 40,
+      "rotation": 0.000000,
+      "constr_vertices": 7,
+      "vertices": [
+        {"x": -750.000000, "y": -800.000000, "rounded": null},
+        {"x": -599.649181, "y": -854.723223, "rounded": null},
+        {"x": -599.649181, "y": -854.723223, "rounded": null},
+        {"x": -613.473459, "y": -716.570367, "rounded": null},
+        {"x": -730.105007, "y": -641.241727, "rounded": null},
+        {"x": -861.717891, "y": -685.461304, "rounded": null},
+        {"x": -909.204924, "y": -815.930855, "rounded": null},
+        {"x": -836.807402, "y": -934.404148, "rounded": null},
+        {"x": -699.042136, "y": -951.668375, "rounded": null}
+      ]
+    }
+  ],
+  "notes": [
+    {"id": 0, "pos": [-552.446492, -1135.501688], "size": [543.972721, 133.852188], "text": "# Tutorial 4 – Construction Helpers\n\n- Select and place construction helpers to assist in creating precise shapes.\n- Construction helpers include special magnetic vertices for accurate alignment."}
+  ]
+}

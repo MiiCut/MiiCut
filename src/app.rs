@@ -3,7 +3,7 @@ use crate::dom::{
     get_element_height, get_element_width, init_gcode_splitter, init_menu, init_status, init_tabs,
     init_toolpath_splitter, init_window, Tabs,
 };
-use crate::import_export::get_prop;
+use crate::import_export::{get_prop, load_json_to_dataset};
 use crate::inputs::{SystemMouse, UserAction};
 use crate::machine::{update_machine_value, MachineGroup};
 use crate::shape::ShapeType;
@@ -14,7 +14,7 @@ use crate::view_draw::app::{
     draw_grid_and_rules, draw_reset_origin, init_draw_canvas, init_icons, init_shapes_panel,
     render_draw_view,
 };
-use crate::view_draw::notes_dom::init_note_handlers;
+use crate::view_draw::notes_dom::{init_note_handlers, update_notes_view};
 use crate::view_gcode::app::init_gcode_canvas;
 use crate::view_gcode::app::Seg;
 use crate::view_machine::cnc_link::CncLink;
@@ -292,6 +292,13 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
 
     draw_reset_origin(av.clone());
     draw_grid_and_rules(av.clone());
+    if let Some((_, data)) = crate::examples_gen::EXAMPLES
+        .iter()
+        .find(|(name, _)| *name == "start")
+    {
+        load_json_to_dataset(av.clone(), (*data).to_string());
+        update_notes_view(av.clone());
+    }
     update_status_bar(av.clone());
     render_draw_view(av.clone());
 

@@ -458,6 +458,10 @@ pub(crate) fn build_json_from_dataset(
         }
         out.push_str("      ]");
 
+        if let Some(text) = elem.get_text() {
+            out.push_str(&format!(",\n      \"text\": \"{}\"", json_escape(&text)));
+        }
+
         if let (Some(svg), Some(svg_key)) = (
             elem.get_svg(),
             match elem.get_shape_type() {
@@ -735,6 +739,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         icon: ShapeType,
         operation: Operation,
         name: Option<String>,
+        text: Option<String>,
         order: i32,
         rotation: f64,
         children: Vec<usize>,
@@ -828,6 +833,9 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             .unwrap_or(Operation::Union);
         let name = get_string(&shape_value, "name")
             .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let text = get_string(&shape_value, "text")
+            .map(|value| value.trim_end().to_string())
             .filter(|value| !value.is_empty());
         let mut order = get_f64(&shape_value, "order").and_then(|val| {
             if val.is_finite() {
@@ -929,6 +937,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             icon,
             operation,
             name,
+            text,
             order: order.unwrap_or(0),
             rotation,
             children,
@@ -1087,6 +1096,9 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             Operation::Difference => elem.op_difference(),
         }
         elem.set_name(shape.name.clone());
+        if let Some(text) = shape.text.clone() {
+            elem.set_text(text);
+        }
         elem.set_order(shape.order);
         if shape.rotation.abs() > f64::EPSILON {
             elem.set_rotation(shape.rotation);

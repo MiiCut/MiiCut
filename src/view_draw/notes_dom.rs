@@ -4,12 +4,23 @@ use crate::dom::Tabs;
 use crate::helpers::math::{to_canvas, to_draw};
 use js_sys::Array;
 use kurbo::Vec2;
+use pulldown_cmark::{html, Options, Parser};
 use std::collections::HashSet;
 use wasm_bindgen::{closure::Closure, prelude::JsValue, JsCast};
 use web_sys::{
     Document, Element, Event, HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent,
     MouseEvent, ResizeObserver, ResizeObserverEntry,
 };
+
+fn render_markdown(input: &str) -> String {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    let parser = Parser::new_ext(input, options);
+    let mut out = String::new();
+    html::push_html(&mut out, parser);
+    out
+}
 
 pub(crate) fn on_window_click(av: RefAV, event: Event) {
     let target = event
@@ -82,13 +93,13 @@ pub(crate) fn update_notes_view(av: RefAV) {
     let Some(container) = document.get_element_by_id("canvas-container") else {
         return;
     };
-    let (scale, offset, notes) = {
-        let canvas = &avb.canvases[CanvasKind::Draw.idx()];
-        let scale = canvas.get_scale();
-        let offset = canvas.get_offset();
-        let notes = canvas.notes.notes.clone();
-        (scale, offset, notes)
-    };
+        let (scale, offset, notes) = {
+            let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+            let scale = canvas.get_scale();
+            let offset = canvas.get_offset();
+            let notes = canvas.notes.notes.clone();
+            (scale, offset, notes)
+        };
 
     let note_ids: HashSet<usize> = notes.iter().map(|note| note.id).collect();
     if let Some(selected) = avb.note_selected {
@@ -141,10 +152,51 @@ pub(crate) fn update_notes_view(av: RefAV) {
         let _ = style.set_property("top", &format!("{:.1}px", pos_px.y));
         let _ = style.set_property("width", &format!("{:.1}px", size_px.x));
         let _ = style.set_property("height", &format!("{:.1}px", size_px.y));
+        if let Ok(Some(header)) = entry.query_selector("[data-role=\"note-header\"]") {
+            if let Ok(header) = header.dyn_into::<HtmlElement>() {
+                let _ = header.style().set_property("height", &format!("{:.1}px", 20.0 * scale));
+                let _ = header
+                    .style()
+                    .set_property("padding", &format!("{:.1}px {:.1}px", 2.0 * scale, 6.0 * scale));
+                let _ = header
+                    .style()
+                    .set_property("font-size", &format!("{:.1}px", 12.0 * scale));
+            }
+        }
+        if let Ok(Some(preview)) = entry.query_selector("[data-role=\"note-preview\"]") {
+            if let Ok(preview) = preview.dyn_into::<HtmlElement>() {
+                let _ = preview
+                    .style()
+                    .set_property("font-size", &format!("{:.1}px", 14.0 * scale));
+                let _ = preview
+                    .style()
+                    .set_property("padding", &format!("{:.1}px", 6.0 * scale));
+            }
+        }
         if let Ok(Some(textarea)) = entry.query_selector("textarea") {
             if let Ok(textarea) = textarea.dyn_into::<HtmlTextAreaElement>() {
+                let _ = textarea
+                    .style()
+                    .set_property("font-size", &format!("{:.1}px", 14.0 * scale));
+                let _ = textarea
+                    .style()
+                    .set_property("padding", &format!("{:.1}px", 6.0 * scale));
                 if textarea.read_only() {
                     textarea.set_value(&note.text);
+                    let _ = textarea.style().set_property("display", "none");
+                    if let Ok(Some(preview)) = entry.query_selector("[data-role=\"note-preview\"]") {
+                        if let Ok(preview) = preview.dyn_into::<HtmlElement>() {
+                            preview.set_inner_html(&render_markdown(&note.text));
+                            let _ = preview.style().set_property("display", "block");
+                        }
+                    }
+                } else {
+                    let _ = textarea.style().set_property("display", "block");
+                    if let Ok(Some(preview)) = entry.query_selector("[data-role=\"note-preview\"]") {
+                        if let Ok(preview) = preview.dyn_into::<HtmlElement>() {
+                            let _ = preview.style().set_property("display", "none");
+                        }
+                    }
                 }
             }
         }
@@ -200,8 +252,14 @@ fn build_note_element(
     textarea.set_attribute("data-role", "note-text").ok()?;
     textarea.set_read_only(true);
 
+    let preview: HtmlElement = document.create_element("div").ok()?.dyn_into().ok()?;
+    preview.set_attribute("class", "note-preview").ok()?;
+    preview.set_attribute("data-role", "note-preview").ok()?;
+    preview.set_inner_html("");
+
     note_el.append_child(&header).ok()?;
     note_el.append_child(&textarea).ok()?;
+    note_el.append_child(&preview).ok()?;
     container.append_child(&note_el).ok()?;
 
     {
@@ -264,6 +322,14 @@ fn build_note_element(
                     if let Ok(Some(textarea)) = note_el.query_selector("textarea") {
                         if let Ok(textarea) = textarea.dyn_into::<HtmlTextAreaElement>() {
                             textarea.set_read_only(false);
+                            let _ = textarea.style().set_property("display", "block");
+                            if let Ok(Some(preview)) =
+                                note_el.query_selector("[data-role=\"note-preview\"]")
+                            {
+                                if let Ok(preview) = preview.dyn_into::<HtmlElement>() {
+                                    let _ = preview.style().set_property("display", "none");
+                                }
+                            }
                             let _ = textarea.focus();
                         }
                     }
@@ -282,7 +348,7 @@ fn build_note_element(
             let Ok(mut avb) = av_clone.try_borrow_mut() else {
                 return;
             };
-            let Some(note_el) = avb.notes_dom.get(&note_id) else {
+            let Some(note_el) = avb.notes_dom.get(&note_id).cloned() else {
                 return;
             };
             let Ok(Some(textarea)) = note_el.query_selector("textarea") else {
@@ -292,8 +358,16 @@ fn build_note_element(
                 return;
             };
             textarea.set_read_only(true);
+            let _ = textarea.style().set_property("display", "none");
+            let text = textarea.value();
             if let Some(note) = avb.canvases[CanvasKind::Draw.idx()].notes.get_mut(note_id) {
-                note.text = textarea.value();
+                note.text = text.clone();
+            }
+            if let Ok(Some(preview)) = note_el.query_selector("[data-role=\"note-preview\"]") {
+                if let Ok(preview) = preview.dyn_into::<HtmlElement>() {
+                    preview.set_inner_html(&render_markdown(&text));
+                    let _ = preview.style().set_property("display", "block");
+                }
             }
         }) as Box<dyn FnMut(_)>);
         textarea
