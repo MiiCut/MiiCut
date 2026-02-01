@@ -2,6 +2,8 @@ use crate::app::{NoteDrag, RefAV};
 use crate::canvas::CanvasKind;
 use crate::dom::Tabs;
 use crate::helpers::math::{to_canvas, to_draw};
+use crate::view_draw::app::on_draw_mouse_wheel;
+
 use js_sys::Array;
 use kurbo::Vec2;
 use pulldown_cmark::{html, Options, Parser};
@@ -93,13 +95,13 @@ pub(crate) fn update_notes_view(av: RefAV) {
     let Some(container) = document.get_element_by_id("canvas-container") else {
         return;
     };
-        let (scale, offset, notes) = {
-            let canvas = &avb.canvases[CanvasKind::Draw.idx()];
-            let scale = canvas.get_scale();
-            let offset = canvas.get_offset();
-            let notes = canvas.notes.notes.clone();
-            (scale, offset, notes)
-        };
+    let (scale, offset, notes) = {
+        let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+        let scale = canvas.get_scale();
+        let offset = canvas.get_offset();
+        let notes = canvas.notes.notes.clone();
+        (scale, offset, notes)
+    };
 
     let note_ids: HashSet<usize> = notes.iter().map(|note| note.id).collect();
     if let Some(selected) = avb.note_selected {
@@ -154,10 +156,13 @@ pub(crate) fn update_notes_view(av: RefAV) {
         let _ = style.set_property("height", &format!("{:.1}px", size_px.y));
         if let Ok(Some(header)) = entry.query_selector("[data-role=\"note-header\"]") {
             if let Ok(header) = header.dyn_into::<HtmlElement>() {
-                let _ = header.style().set_property("height", &format!("{:.1}px", 20.0 * scale));
                 let _ = header
                     .style()
-                    .set_property("padding", &format!("{:.1}px {:.1}px", 2.0 * scale, 6.0 * scale));
+                    .set_property("height", &format!("{:.1}px", 20.0 * scale));
+                let _ = header.style().set_property(
+                    "padding",
+                    &format!("{:.1}px {:.1}px", 2.0 * scale, 6.0 * scale),
+                );
                 let _ = header
                     .style()
                     .set_property("font-size", &format!("{:.1}px", 12.0 * scale));
@@ -184,7 +189,8 @@ pub(crate) fn update_notes_view(av: RefAV) {
                 if textarea.read_only() {
                     textarea.set_value(&note.text);
                     let _ = textarea.style().set_property("display", "none");
-                    if let Ok(Some(preview)) = entry.query_selector("[data-role=\"note-preview\"]") {
+                    if let Ok(Some(preview)) = entry.query_selector("[data-role=\"note-preview\"]")
+                    {
                         if let Ok(preview) = preview.dyn_into::<HtmlElement>() {
                             preview.set_inner_html(&render_markdown(&note.text));
                             let _ = preview.style().set_property("display", "block");
@@ -192,7 +198,8 @@ pub(crate) fn update_notes_view(av: RefAV) {
                     }
                 } else {
                     let _ = textarea.style().set_property("display", "block");
-                    if let Ok(Some(preview)) = entry.query_selector("[data-role=\"note-preview\"]") {
+                    if let Ok(Some(preview)) = entry.query_selector("[data-role=\"note-preview\"]")
+                    {
                         if let Ok(preview) = preview.dyn_into::<HtmlElement>() {
                             let _ = preview.style().set_property("display", "none");
                         }
@@ -261,6 +268,17 @@ fn build_note_element(
     note_el.append_child(&textarea).ok()?;
     note_el.append_child(&preview).ok()?;
     container.append_child(&note_el).ok()?;
+
+    {
+        let av_clone = av.clone();
+        let on_wheel = Closure::wrap(Box::new(move |event: Event| {
+            on_draw_mouse_wheel(av_clone.clone(), event);
+        }) as Box<dyn FnMut(_)>);
+        note_el
+            .add_event_listener_with_callback("wheel", on_wheel.as_ref().unchecked_ref())
+            .ok()?;
+        on_wheel.forget();
+    }
 
     {
         let av_clone = av.clone();
