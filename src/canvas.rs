@@ -10,7 +10,7 @@ use crate::{
     undoredo::UndoRedo,
 };
 use js_sys::Array;
-use kurbo::{BezPath, PathEl, Point, Rect, Size, Vec2};
+use kurbo::{BezPath, PathEl, Point, Rect, Shape, Size, Vec2};
 use std::mem;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CanvasRenderingContext2d, CanvasWindingRule, HtmlCanvasElement, MouseEvent};
@@ -992,6 +992,56 @@ impl Canvas {
                     if let Some(seg) = SegBundle::new(*v1, *v2) {
                         let (path, pattern, colors, mut text) =
                             dim_hv(seg, self.get_canvas_infos(), false);
+                        if rotation.abs() > EPSILON {
+                            let bbox = e.get_bezpath().bounding_box();
+                            let center =
+                                Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+                            let path = rotate_bezpath_about(&path, center, rotation);
+                            text = text
+                                .into_iter()
+                                .map(|mut item| {
+                                    if let TextPos::PosCustom(pos) = item.get_pos() {
+                                        let rotated =
+                                            rotate_vector(pos - center, rotation) + center;
+                                        item.set_pos(TextPos::PosCustom(rotated));
+                                    }
+                                    let mut cfg = item.get_config().clone();
+                                    cfg.set_angle(cfg.get_angle() + rotation);
+                                    item.set_config(cfg);
+                                    item
+                                })
+                                .collect();
+                            if idx == 0 {
+                                let mut deg = rotation.to_degrees();
+                                while deg <= -180.0 {
+                                    deg += 360.0;
+                                }
+                                while deg > 180.0 {
+                                    deg -= 360.0;
+                                }
+                                let angle_pos = points[0]
+                                    + rotate_vector(Vec2::new(10.0, -10.0) / self.scale, rotation);
+                                text.push(CanvasText::new(
+                                    format!("A{deg:.1}°"),
+                                    TextPos::PosCustom(angle_pos),
+                                    CanvasTextConfig::new(
+                                        get_text_colors().stroke_color,
+                                        rotation,
+                                        TextAlign::Left,
+                                        14,
+                                        0.8,
+                                    ),
+                                ));
+                            }
+                            self.draw_path(
+                                &path,
+                                pattern,
+                                colors.fill_color,
+                                colors.stroke_color,
+                                text,
+                            );
+                            continue;
+                        }
                         if idx == 0 && rotation.abs() > EPSILON {
                             let mut deg = rotation.to_degrees();
                             while deg <= -180.0 {
@@ -1026,9 +1076,8 @@ impl Canvas {
             }
             ShapeType::Oblong => {
                 let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
-                if v.len() == 3 {
+                if v.len() >= 2 {
                     if let Some(seg1) = SegBundle::new(v[0], v[1]) {
-                        // Draw the main segment
                         let (path, pattern, colors, text) =
                             dim_radius(seg1, self.get_canvas_infos(), false, true);
                         self.draw_path(
@@ -1038,18 +1087,32 @@ impl Canvas {
                             colors.stroke_color,
                             text,
                         );
-                        // Draw the radius segment
-                        if let Some(seg2) = SegBundle::new(seg1.m, v[2]) {
-                            let (path, pattern, colors, text) =
-                                dim_radius(seg2, self.get_canvas_infos(), true, false);
-                            self.draw_path(
-                                &path,
-                                pattern,
-                                colors.fill_color,
-                                colors.stroke_color,
-                                text,
-                            );
-                        }
+                    }
+                }
+                if v.len() >= 3 {
+                    if let Some(seg2) = SegBundle::new(v[0], v[2]) {
+                        let (path, pattern, colors, text) =
+                            dim_radius(seg2, self.get_canvas_infos(), true, false);
+                        self.draw_path(
+                            &path,
+                            pattern,
+                            colors.fill_color,
+                            colors.stroke_color,
+                            text,
+                        );
+                    }
+                }
+                if v.len() >= 4 {
+                    if let Some(seg3) = SegBundle::new(v[1], v[3]) {
+                        let (path, pattern, colors, text) =
+                            dim_radius(seg3, self.get_canvas_infos(), true, false);
+                        self.draw_path(
+                            &path,
+                            pattern,
+                            colors.fill_color,
+                            colors.stroke_color,
+                            text,
+                        );
                     }
                 }
             }
@@ -1181,36 +1244,36 @@ impl Canvas {
             Pattern::Point
         };
         if shape.get_shape_type() == ShapeType::Text {
-            if let Some(paths) = shape.get_text_paths() {
+            if let Some(paths) = shape.get_text_paths_rotated() {
                 self.draw_svg_paths(
-                    paths,
+                    &paths,
                     pattern,
                     fill_color,
                     stroke_color,
                     SvgFillRule::NonZero,
                 );
             } else {
-                let path = shape.get_bezpath();
-                self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
+                let path = shape.get_bezpath_rotated();
+                self.draw_path(&path, pattern, fill_color, stroke_color, vec![]);
             }
             return;
         }
         if matches!(shape.get_shape_type(), ShapeType::Svg | ShapeType::Voronoi) {
             if svg_bbox_only && !is_voronoi {
-                let path = shape.get_bezpath();
-                self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
+                let path = shape.get_bezpath_rotated();
+                self.draw_path(&path, pattern, fill_color, stroke_color, vec![]);
                 return;
             }
-            if let (Some(paths), Some(svg)) = (shape.get_svg_paths(), shape.get_svg()) {
-                self.draw_svg_paths(paths, pattern, fill_color, stroke_color, svg.fill_rule);
+            if let (Some(paths), Some(svg)) = (shape.get_svg_paths_rotated(), shape.get_svg()) {
+                self.draw_svg_paths(&paths, pattern, fill_color, stroke_color, svg.fill_rule);
             } else {
-                let path = shape.get_bezpath();
-                self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
+                let path = shape.get_bezpath_rotated();
+                self.draw_path(&path, pattern, fill_color, stroke_color, vec![]);
             }
             return;
         }
-        let path = shape.get_bezpath();
-        self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
+        let path = shape.get_bezpath_rotated();
+        self.draw_path(&path, pattern, fill_color, stroke_color, vec![]);
     }
     fn draw_group_paths(
         &mut self,
@@ -1237,8 +1300,9 @@ impl Canvas {
         }
         if is_selected || is_highlighted {
             let stroke_color = get_stroke_color(is_selected, is_highlighted);
+            let path = group.get_bezpath_rotated();
             self.draw_path(
-                group.get_bezpath(),
+                &path,
                 Pattern::Point,
                 Color::Transparent,
                 stroke_color,
@@ -1329,6 +1393,41 @@ impl Color {
             Red => "rgba(255,0,0,1)",
         }
     }
+}
+
+fn rotate_bezpath_about(path: &BezPath, center: Vec2, angle: f64) -> BezPath {
+    let mut out = BezPath::new();
+    for elem in path.iter() {
+        match elem {
+            PathEl::MoveTo(pt) => {
+                out.push(PathEl::MoveTo(rotate_point_about(pt, center, angle)));
+            }
+            PathEl::LineTo(pt) => {
+                out.push(PathEl::LineTo(rotate_point_about(pt, center, angle)));
+            }
+            PathEl::QuadTo(pt1, pt2) => {
+                out.push(PathEl::QuadTo(
+                    rotate_point_about(pt1, center, angle),
+                    rotate_point_about(pt2, center, angle),
+                ));
+            }
+            PathEl::CurveTo(pt1, pt2, pt3) => {
+                out.push(PathEl::CurveTo(
+                    rotate_point_about(pt1, center, angle),
+                    rotate_point_about(pt2, center, angle),
+                    rotate_point_about(pt3, center, angle),
+                ));
+            }
+            PathEl::ClosePath => out.push(PathEl::ClosePath),
+        }
+    }
+    out
+}
+
+fn rotate_point_about(point: Point, center: Vec2, angle: f64) -> Point {
+    let v = Vec2::new(point.x, point.y);
+    let rotated = rotate_vector(v - center, angle) + center;
+    Point::new(rotated.x, rotated.y)
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]

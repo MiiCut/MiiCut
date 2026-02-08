@@ -1,7 +1,7 @@
 use crate::helpers::math::{get_magnets_vertices, length_unit_to_mm};
+use crate::types::others::{Properties, Property, PropertyValue};
 use crate::types::scalar::Scalar;
 use crate::types::vertex::Vertex;
-use crate::types::others::{Properties, Property, PropertyValue};
 use crate::voronoi::{inset_rings, round_rings, voronoi_cells};
 use crate::{
     dom::document,
@@ -178,6 +178,9 @@ impl ShapeRotation {
     }
     pub fn set(&mut self, rotation: f64) {
         self.rotation_saved = self.rotation;
+        self.rotation = rotation;
+    }
+    pub fn set_curr(&mut self, rotation: f64) {
         self.rotation = rotation;
     }
     pub fn get(&self) -> f64 {
@@ -404,24 +407,36 @@ impl GeneralShape {
         )
     }
     pub fn new_shape_oblong(v1: Vec2, v2: Vec2, order: i32) -> Option<Self> {
+        Self::new_shape_oblong_with_radii(v1, v2, None, None, order)
+    }
+
+    pub fn new_shape_oblong_with_radii(
+        v1: Vec2,
+        v2: Vec2,
+        r1: Option<Vec2>,
+        r2: Option<Vec2>,
+        order: i32,
+    ) -> Option<Self> {
         if v1 == v2 {
             return None;
         }
-        let m = (v1 + v2) * 0.5;
         let dir = (v2 - v1).normalize();
-        let side = Vertex::new(m - Vec2::new(dir.y, -dir.x) * 20.);
-        let vs = vec![Vertex::new(v1), Vertex::new(v2), side];
+        let perp = Vec2::new(-dir.y, dir.x);
+        let default_r1 = v1 + perp * 20.0;
+        let default_r2 = v2 + perp * 20.0;
+        let r1 = r1.unwrap_or(default_r1);
+        let r2 = r2.unwrap_or(default_r2);
+        let vs = vec![
+            Vertex::new(v1),
+            Vertex::new(v2),
+            Vertex::new(r1),
+            Vertex::new(r2),
+        ];
 
         use PropertyValue::*;
         let mut properties = Properties::new();
         properties.add(Property::Pt1, Pt1 { idx: 0, value: v1 });
         properties.add(Property::Pt2, Pt2 { idx: 1, value: v2 });
-        properties.add(
-            Property::Thickness,
-            Thickness {
-                value: Scalar::new(20.0, GeneralShape::MIN_RADIUS, f64::INFINITY, 1.0),
-            },
-        );
         properties.add(
             Property::Scale,
             Scale {
@@ -1179,7 +1194,7 @@ impl GeneralShape {
                 true
             }
             ShapeType::Oblong => {
-                if self.vertices.len() != 3 {
+                if self.vertices.len() != 4 {
                     return false;
                 }
                 log!("Moving oblong vertex {:?}", value_uid);
@@ -1187,81 +1202,47 @@ impl GeneralShape {
                     Some(i) => i,
                     None => return false,
                 };
-                // Save the side radius
-                let r_saved = ((self.vertices.val(0).saved() + self.vertices.val(1).saved()) / 2.
-                    - self.vertices.val(2).saved())
-                .hypot();
-
-                // The side is moved, this doesn't change the pos of e1, e2
-                if idx == 2 {
-                    if let Some(seg) =
-                        SegBundle::new(self.vertices.val(0).saved(), self.vertices.val(1).saved())
-                    {
-                        let s_d = (self.vertices.val(2).saved() - seg.m).dot(seg.n);
-                        self.vertices
-                            .val_mut(2)
-                            .set_curr(seg.m + seg.n * snap_val(s_d + delta.dot(seg.n), snap));
+                if idx == 0 || idx == 1 {
+                    let radius_idx = if idx == 0 { 2 } else { 3 };
+                    let saved_center = self.vertices.val(idx as i64).saved();
+                    if user_ui.keys_states.shift_pressed {
+                        self.vertices.val_mut(idx as i64).add(delta);
+                        let other_idx = if idx == 0 { 1 } else { 0 };
+                        if let Some(seg) = SegBundle::new(
+                            self.vertices.val(other_idx).saved(),
+                            self.vertices.val(idx as i64).curr(),
+                        ) {
+                            let r = snap_val(seg.len, snap);
+                            let a = snap_angle(seg.a, snap);
+                            self.vertices
+                                .val_mut(idx as i64)
+                                .set_curr(seg.e - Vec2::new(r * a.cos(), r * a.sin()));
+                        }
                     } else {
-                        self.vertices.val_mut(0).add(delta);
+                        let tmp = self.vertices.val(idx as i64).clone();
+                        self.vertices
+                            .val_mut(idx as i64)
+                            .set_saved(snap_vertex(tmp.saved(), snap));
+                        self.vertices.val_mut(idx as i64).add(delta);
+                        let tmp = self.vertices.val(idx as i64).clone();
+                        self.vertices
+                            .val_mut(idx as i64)
+                            .set_curr(snap_vertex(tmp.curr(), snap));
+                    }
+                    let center_delta = self.vertices.val(idx as i64).curr() - saved_center;
+                    if center_delta.hypot() > EPSILON {
+                        self.vertices.val_mut(radius_idx as i64).add(center_delta);
                     }
                 } else {
-                    // e1 is moved
-                    if idx == 0 {
-                        if user_ui.keys_states.shift_pressed {
-                            self.vertices.val_mut(0).add(delta);
-                            if let Some(seg) = SegBundle::new(
-                                self.vertices.val(0).curr(),
-                                self.vertices.val(1).saved(),
-                            ) {
-                                let r = snap_val(seg.len, snap);
-                                let a = snap_angle(seg.a, snap);
-                                self.vertices
-                                    .val_mut(0)
-                                    .set_curr(seg.e - Vec2::new(r * a.cos(), r * a.sin()));
-                            }
-                        } else {
-                            let tmp = self.vertices.val(0).clone();
-                            self.vertices
-                                .val_mut(0)
-                                .set_saved(snap_vertex(tmp.saved(), snap));
-                            self.vertices.val_mut(0).add(delta);
-                            let tmp = self.vertices.val(0).clone();
-                            self.vertices
-                                .val_mut(0)
-                                .set_curr(snap_vertex(tmp.curr(), snap));
-                        }
-                    } else {
-                        // e2 is moved
-                        if user_ui.keys_states.shift_pressed {
-                            self.vertices.val_mut(1).add(delta);
-                            if let Some(seg) = SegBundle::new(
-                                self.vertices.val(0).saved(),
-                                self.vertices.val(1).curr(),
-                            ) {
-                                let r = snap_val(seg.len, snap);
-                                let a = snap_angle(seg.a, snap);
-                                self.vertices
-                                    .val_mut(1)
-                                    .set_curr(seg.s + Vec2::new(r * a.cos(), r * a.sin()));
-                            }
-                        } else {
-                            let tmp = self.vertices.val(1).clone();
-                            self.vertices
-                                .val_mut(1)
-                                .set_saved(snap_vertex(tmp.saved(), snap));
-                            self.vertices.val_mut(1).add(delta);
-                            let tmp = self.vertices.val(1).clone();
-                            self.vertices
-                                .val_mut(1)
-                                .set_curr(snap_vertex(tmp.curr(), snap));
-                        }
-                    }
-                    // Move the side
-                    if let Some(seg) =
-                        SegBundle::new(self.vertices.val(0).curr(), self.vertices.val(1).curr())
-                    {
-                        self.vertices.val_mut(2).set_curr(seg.m + seg.n * r_saved);
-                    }
+                    let tmp = self.vertices.val(idx as i64).clone();
+                    self.vertices
+                        .val_mut(idx as i64)
+                        .set_saved(snap_vertex(tmp.saved(), snap));
+                    self.vertices.val_mut(idx as i64).add(delta);
+                    let tmp = self.vertices.val(idx as i64).clone();
+                    self.vertices
+                        .val_mut(idx as i64)
+                        .set_curr(snap_vertex(tmp.curr(), snap));
                 }
                 self.set_bezpath();
                 true
@@ -1272,23 +1253,19 @@ impl GeneralShape {
                     return false;
                 }
                 let center = self.bbox_center_saved();
-                let saved =
-                    rotate_vector(user_ui.pointer.saved() - center, -self.rotation.get()) + center;
-                let curr =
-                    rotate_vector(user_ui.pointer.curr() - center, -self.rotation.get()) + center;
-                let mut local_delta = curr - saved;
-                if !user_ui.magnetized {
-                    local_delta = (local_delta / snap.linear()).round() * snap.linear();
-                }
                 if user_ui.keys_states.shift_pressed {
-                    let start = saved - center;
-                    let curr = curr - center;
+                    let start = user_ui.draw_pos_down() - center;
+                    let curr = user_ui.draw_pos() - center;
                     if start.hypot() < EPSILON || curr.hypot() < EPSILON {
                         return false;
                     }
-                    let delta_a = curr.atan2() - start.atan2();
+                    let delta_a = angle_from(start, curr);
                     self.rotation
-                        .set(snap_angle(self.rotation.get_saved() + delta_a, snap));
+                        .set_curr(snap_angle(self.rotation.get_saved() + delta_a, snap));
+                    log!(
+                        "Rotation: {:.2}",
+                        self.rotation.get() / std::f64::consts::PI * 180.
+                    );
                     self.set_bezpath();
                     return true;
                 }
@@ -1306,6 +1283,55 @@ impl GeneralShape {
                     Some(i) => i as i64,
                     None => return false,
                 };
+                let rotation = self.rotation.get();
+                if rotation.abs() > EPSILON {
+                    log!("Rotation: {:.2}", rotation / std::f64::consts::PI * 180.);
+                    let opp_idx = (i + 2).rem_euclid(4) as usize;
+                    let pivot = self.vertices.val(opp_idx as i64).saved();
+                    let saved = rotate_vector(user_ui.pointer.saved() - pivot, -rotation) + pivot;
+                    let curr = rotate_vector(user_ui.pointer.curr() - pivot, -rotation) + pivot;
+                    let mut local_delta = curr - saved;
+                    if !user_ui.magnetized {
+                        local_delta = (local_delta / snap.linear()).round() * snap.linear();
+                    }
+                    let mut local_saved: [Vec2; 4] = [Vec2::ZERO; 4];
+                    let mut local_curr: [Vec2; 4] = [Vec2::ZERO; 4];
+                    for idx in 0..4 {
+                        let pos = self.vertices.val(idx as i64).saved();
+                        let local = rotate_vector(pos - pivot, -rotation) + pivot;
+                        local_saved[idx] = local;
+                        local_curr[idx] = local;
+                    }
+                    let i_usize = i.rem_euclid(4) as usize;
+                    local_curr[i_usize] = local_saved[i_usize] + local_delta;
+                    let tmp = local_saved[i_usize];
+                    if i % 2 == 1 {
+                        let left = (i - 1).rem_euclid(4) as usize;
+                        let right = (i + 1).rem_euclid(4) as usize;
+                        local_saved[left].x = tmp.x;
+                        local_curr[left] = local_saved[left] + Vec2::new(local_delta.x, 0.);
+                        local_saved[right].y = tmp.y;
+                        local_curr[right] = local_saved[right] + Vec2::new(0., local_delta.y);
+                    } else {
+                        let left = (i - 1).rem_euclid(4) as usize;
+                        let right = (i + 1).rem_euclid(4) as usize;
+                        local_saved[left].y = tmp.y;
+                        local_curr[left] = local_saved[left] + Vec2::new(0., local_delta.y);
+                        local_saved[right].x = tmp.x;
+                        local_curr[right] = local_saved[right] + Vec2::new(local_delta.x, 0.);
+                    }
+                    for idx in 0..4 {
+                        let curr = rotate_vector(local_curr[idx] - pivot, rotation) + pivot;
+                        self.vertices.val_mut(idx as i64).set_curr(curr);
+                    }
+                    self.set_bezpath();
+                    return true;
+                }
+
+                let mut local_delta = user_ui.pointer.curr() - user_ui.pointer.saved();
+                if !user_ui.magnetized {
+                    local_delta = (local_delta / snap.linear()).round() * snap.linear();
+                }
                 if !user_ui.magnetized {
                     let tmp = self.vertices.val(i).saved();
                     self.vertices.val_mut(i).set_saved(snap_vertex(tmp, snap));
@@ -1442,24 +1468,6 @@ impl GeneralShape {
                     }
                 }
             }
-            Thickness { value } => {
-                if matches!(self.shape_type, ShapeType::Oblong) && self.vertices.len() >= 3 {
-                    let e1 = self.vertices.val(0).curr();
-                    let e2 = self.vertices.val(1).curr();
-                    let m = (e1 + e2) * 0.5;
-                    let mut dir = e2 - e1;
-                    if dir.hypot() < EPSILON {
-                        dir = Vec2::new(1.0, 0.0);
-                    } else {
-                        dir = dir.normalize();
-                    }
-                    let perp = Vec2::new(-dir.y, dir.x);
-                    let side_pos = m + perp * value.curr();
-                    let side = self.vertices.val_mut(2);
-                    side.set_curr(side_pos);
-                    side.set_saved(side_pos);
-                }
-            }
             Magnets { value } => {
                 if matches!(self.shape_type, ShapeType::ConstrCircle) {
                     self.set_magnets_number(value.curr());
@@ -1549,17 +1557,6 @@ impl GeneralShape {
                     let vertex = self.vertices.val_mut(*idx as i64);
                     *value = vertex.curr();
                 }
-                Thickness { value } => {
-                    if matches!(self.shape_type, ShapeType::Oblong) && self.vertices.len() >= 3 {
-                        let e1 = self.vertices.val(0).curr();
-                        let e2 = self.vertices.val(1).curr();
-                        let side = self.vertices.val(2).curr();
-                        let m = (e1 + e2) * 0.5;
-                        let thickness = (side - m).hypot();
-                        *value =
-                            Scalar::new(thickness, Self::MIN_RADIUS, f64::INFINITY, value.step());
-                    }
-                }
                 _ => {}
             }
         }
@@ -1617,10 +1614,14 @@ impl GeneralShape {
         }
         if matches!(
             self.shape_type,
-            ShapeType::Text | ShapeType::Svg | ShapeType::Voronoi
+            ShapeType::Text
+                | ShapeType::Svg
+                | ShapeType::Voronoi
+                | ShapeType::Square
+                | ShapeType::Group
         ) {
             if self.rotation.get().abs() > EPSILON {
-                return self.get_bezpath().contains(pos.to_point());
+                return self.get_bezpath_rotated().contains(pos.to_point());
             }
             let bbox = self.bezpath.bounding_box();
             return bbox.contains(pos.to_point());
@@ -1744,16 +1745,54 @@ impl GeneralShape {
     pub fn vertex_display_pos(&self, pos: Vec2) -> Vec2 {
         if matches!(
             self.shape_type,
-            ShapeType::Square
-                | ShapeType::Text
-                | ShapeType::Svg
-                | ShapeType::Voronoi
+            ShapeType::Square | ShapeType::Text | ShapeType::Svg | ShapeType::Voronoi
         ) && self.rotation.get().abs() > EPSILON
         {
             let center = self.bbox_center();
             return rotate_vector(pos - center, self.rotation.get()) + center;
         }
         pos
+    }
+
+    pub(crate) fn get_bezpath_rotated(&self) -> BezPath {
+        let rotation = self.rotation.get();
+        if rotation.abs() <= EPSILON
+            || !matches!(
+                self.shape_type,
+                ShapeType::Square
+                    | ShapeType::Text
+                    | ShapeType::Svg
+                    | ShapeType::Voronoi
+                    | ShapeType::Group
+            )
+        {
+            return self.bezpath.clone();
+        }
+        let bbox = self.bezpath.bounding_box();
+        let center = Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+        _rotate_bezpath(&self.bezpath, center, rotation)
+    }
+
+    pub(crate) fn get_text_paths_rotated(&self) -> Option<Vec<BezPath>> {
+        let paths = self.get_text_paths()?.clone();
+        let rotation = self.rotation.get();
+        if rotation.abs() <= EPSILON {
+            return Some(paths);
+        }
+        let bbox = self.bezpath.bounding_box();
+        let center = Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+        Some(_rotate_bezpaths(&paths, center, rotation))
+    }
+
+    pub(crate) fn get_svg_paths_rotated(&self) -> Option<Vec<BezPath>> {
+        let paths = self.get_svg_paths()?.clone();
+        let rotation = self.rotation.get();
+        if rotation.abs() <= EPSILON {
+            return Some(paths);
+        }
+        let bbox = self.bezpath.bounding_box();
+        let center = Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+        Some(_rotate_bezpaths(&paths, center, rotation))
     }
     pub fn get_rotation(&self) -> f64 {
         self.rotation.get()
@@ -1782,49 +1821,84 @@ impl GeneralShape {
                 self.bezpath = path;
             }
             ShapeType::Oblong => {
-                let e1 = self.vertices.val(0).curr();
-                let e2 = self.vertices.val(1).curr();
-                let side = self.vertices.val(2).curr();
-                let m = (e1 + e2) * 0.5;
-                let radius = (side - m).hypot();
-                let angle = (e2 - e1).atan2();
-                let mut dir = e2 - e1;
-
                 let mut path = BezPath::new();
-                if dir.hypot() >= EPSILON {
-                    dir = dir.normalize();
-                    // Perpendicular unit vector
-                    let perp = Vec2::new(-dir.y, dir.x);
-                    // Two points at e1 ± perp * radius
-                    let pt2 = e1 - perp * radius;
-                    // Two points at e2 ± perp * radius
-                    let pt3 = e2 + perp * radius;
+                if self.vertices.len() >= 4 {
+                    let c1 = self.vertices.val(0).curr();
+                    let c2 = self.vertices.val(1).curr();
+                    let r1 = (self.vertices.val(2).curr() - c1).hypot();
+                    let r2 = (self.vertices.val(3).curr() - c2).hypot();
+                    let d = (c2 - c1).hypot();
 
-                    path.extend(
-                        Arc::new(
-                            e1.to_point(),
+                    let (center, radius) = if r1 >= r2 { (c1, r1) } else { (c2, r2) };
+                    if d < EPSILON || d <= (r1 - r2).abs() {
+                        path.extend(
+                            Circle::new(center.to_point(), radius).path_elements(Self::TOLERANCE),
+                        );
+                    } else {
+                        let base = (c2 - c1).atan2();
+                        let ratio = ((r1 - r2) / d).clamp(-1.0, 1.0);
+                        let offset = ratio.acos();
+                        let sweep1 = 2.0 * (PI - offset);
+                        let sweep2 = 2.0 * offset;
+                        let a1 = base + offset;
+                        let a2 = base - offset;
+
+                        let t1_a = c1 + Vec2::new(r1 * a1.cos(), r1 * a1.sin());
+                        let t2_b = c2 + Vec2::new(r2 * a2.cos(), r2 * a2.sin());
+
+                        path.extend(
+                            Arc::new(c1.to_point(), Vec2::new(r1, r1), a1, sweep1, 0.0)
+                                .path_elements(Self::TOLERANCE),
+                        );
+                        path.push(PathEl::LineTo(t2_b.to_point()));
+                        let mut arc2 = Arc::new(c2.to_point(), Vec2::new(r2, r2), a2, sweep2, 0.0)
+                            .path_elements(Self::TOLERANCE);
+                        arc2.next();
+                        path.extend(arc2);
+                        path.push(PathEl::LineTo(t1_a.to_point()));
+                        path.push(PathEl::ClosePath);
+                    }
+                } else if self.vertices.len() == 3 {
+                    let e1 = self.vertices.val(0).curr();
+                    let e2 = self.vertices.val(1).curr();
+                    let side = self.vertices.val(2).curr();
+                    let m = (e1 + e2) * 0.5;
+                    let radius = (side - m).hypot();
+                    let angle = (e2 - e1).atan2();
+                    let mut dir = e2 - e1;
+                    if dir.hypot() >= EPSILON {
+                        dir = dir.normalize();
+                        let perp = Vec2::new(-dir.y, dir.x);
+                        let pt2 = e1 - perp * radius;
+                        let pt3 = e2 + perp * radius;
+                        path.extend(
+                            Arc::new(
+                                e1.to_point(),
+                                Vec2::new(radius, radius),
+                                3.0 * PI / 2.0,
+                                -PI,
+                                angle,
+                            )
+                            .path_elements(Self::TOLERANCE),
+                        );
+                        path.push(PathEl::LineTo(pt3.to_point()));
+                        let mut arc2 = Arc::new(
+                            e2.to_point(),
                             Vec2::new(radius, radius),
-                            3. * PI / 2.,
+                            PI / 2.0,
                             -PI,
                             angle,
                         )
-                        .path_elements(Self::TOLERANCE),
-                    );
-                    path.push(PathEl::LineTo(pt3.to_point()));
-                    let mut arc2 = Arc::new(
-                        e2.to_point(),
-                        Vec2::new(radius, radius),
-                        PI / 2.,
-                        -PI,
-                        angle,
-                    )
-                    .path_elements(Self::TOLERANCE);
-                    arc2.next(); // Remove the MoveTo
-                    path.extend(arc2);
-                    path.push(PathEl::LineTo(pt2.to_point()));
-                    path.push(PathEl::ClosePath);
-                } else {
-                    path.extend(Circle::new(e2.to_point(), radius).path_elements(Self::TOLERANCE));
+                        .path_elements(Self::TOLERANCE);
+                        arc2.next();
+                        path.extend(arc2);
+                        path.push(PathEl::LineTo(pt2.to_point()));
+                        path.push(PathEl::ClosePath);
+                    } else {
+                        path.extend(
+                            Circle::new(e2.to_point(), radius).path_elements(Self::TOLERANCE),
+                        );
+                    }
                 }
                 self.bezpath = path;
             }
@@ -1869,6 +1943,28 @@ impl GeneralShape {
             return Vec2::ZERO;
         }
         (min + max) * 0.5
+    }
+
+    pub(crate) fn rotate_polygon_if_needed(
+        &self,
+        polygon: &MultiPolygon<f64>,
+    ) -> MultiPolygon<f64> {
+        let rotation = self.rotation.get();
+        if rotation.abs() <= EPSILON
+            || !matches!(
+                self.shape_type,
+                ShapeType::Square
+                    | ShapeType::Text
+                    | ShapeType::Svg
+                    | ShapeType::Voronoi
+                    | ShapeType::Group
+            )
+        {
+            return polygon.clone();
+        }
+        let bbox = self.bezpath.bounding_box();
+        let center = Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+        _rotate_multipolygon(polygon, center, rotation)
     }
     fn bbox_center_saved(&self) -> Vec2 {
         let mut min = Vec2::new(f64::INFINITY, f64::INFINITY);
@@ -2674,9 +2770,10 @@ fn rings_to_multipolygon(rings: Vec<LineString<f64>>) -> MultiPolygon<f64> {
             }
             let poly = Polygon::new(outer.clone(), vec![]);
             if poly.contains(&Point::new(pt.x, pt.y))
-                && (container.is_none() || areas[j] < areas[container.unwrap()]) {
-                    container = Some(j);
-                }
+                && (container.is_none() || areas[j] < areas[container.unwrap()])
+            {
+                container = Some(j);
+            }
         }
         if let Some(idx) = container {
             holes.push((idx, ring.clone()));

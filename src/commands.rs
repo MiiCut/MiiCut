@@ -2,6 +2,7 @@ use crate::app::AppVars;
 use crate::dom::Tabs;
 use crate::shape::{GeneralShape, ShapeType};
 use crate::types::others::{EUId, VUId};
+use std::collections::{HashMap, HashSet};
 
 impl AppVars {
     pub(crate) fn esc_pressed(&mut self) {
@@ -12,14 +13,91 @@ impl AppVars {
     pub(crate) fn ctrl_c_pressed(&mut self) {
         if let ShapeType::Arrow = self.icon_selected {
             let canvas_user = self.get_active_canvas_mut();
-            if canvas_user.dataset.shapes_selected.len() == 1 {
-                let eid = *canvas_user.dataset.shapes_selected.iter().next().unwrap();
-                if let Some(elem) = canvas_user.dataset.get_element(eid) {
-                    canvas_user
-                        .clipboard
-                        .copy(elem.clone(), canvas_user.get_user_ui().pointer.clone());
-                    log!("Copying selected element to clipboard");
+            let selected_ids: HashSet<EUId> =
+                canvas_user.dataset.shapes_selected.iter().copied().collect();
+            let mut seen = HashSet::new();
+            let mut items = Vec::new();
+
+            fn collect_group_children(
+                dataset: &crate::shapes::DataSet,
+                selected_ids: &HashSet<EUId>,
+                seen: &mut HashSet<EUId>,
+                group_id: EUId,
+                items: &mut Vec<crate::clipboard::ClipboardItem>,
+            ) {
+                let mut stack = vec![group_id];
+                while let Some(current) = stack.pop() {
+                    let children = dataset
+                        .shapes
+                        .get(&current)
+                        .or_else(|| dataset.grouped_shapes.get(&current))
+                        .and_then(|shape| shape.get_group_children())
+                        .map(|children| children.to_vec())
+                        .unwrap_or_default();
+                    for child_id in children {
+                        if !seen.insert(child_id) {
+                            continue;
+                        }
+                        if let Some(child) = dataset.grouped_shapes.get(&child_id).cloned() {
+                            let is_child = !selected_ids.contains(&child_id);
+                            let is_group = child.is_group();
+                            items.push(crate::clipboard::ClipboardItem {
+                                id: child_id,
+                                shape: child,
+                                is_child,
+                            });
+                            if is_group {
+                                stack.push(child_id);
+                            }
+                        }
+                    }
                 }
+            }
+
+            for eid in selected_ids.iter().copied() {
+                if !seen.insert(eid) {
+                    continue;
+                }
+                if let Some(shape) = canvas_user.dataset.shapes.get(&eid).cloned() {
+                    let is_child = false;
+                    items.push(crate::clipboard::ClipboardItem {
+                        id: eid,
+                        shape: shape.clone(),
+                        is_child,
+                    });
+                    if shape.is_group() {
+                        collect_group_children(
+                            &canvas_user.dataset,
+                            &selected_ids,
+                            &mut seen,
+                            eid,
+                            &mut items,
+                        );
+                    }
+                } else if let Some(shape) = canvas_user.dataset.grouped_shapes.get(&eid).cloned() {
+                    let is_child = !selected_ids.contains(&eid);
+                    items.push(crate::clipboard::ClipboardItem {
+                        id: eid,
+                        shape: shape.clone(),
+                        is_child,
+                    });
+                    if shape.is_group() {
+                        collect_group_children(
+                            &canvas_user.dataset,
+                            &selected_ids,
+                            &mut seen,
+                            eid,
+                            &mut items,
+                        );
+                    }
+                }
+            }
+
+            if !items.is_empty() {
+                canvas_user
+                    .clipboard
+                    .copy(items, canvas_user.get_user_ui().pointer.clone());
+                log!("Copying selected elements to clipboard");
             }
         }
     }
@@ -31,7 +109,47 @@ impl AppVars {
                 .clipboard
                 .make_paste(&canvas_user.get_user_ui().pointer)
             {
-                let _ = canvas_user.dataset.push_element(pasted);
+                let mut id_map: HashMap<EUId, EUId> = HashMap::new();
+                let mut children = Vec::new();
+
+                for item in pasted.iter() {
+                    if item.is_child {
+                        let new_id = EUId::new();
+                        id_map.insert(item.id, new_id);
+                        children.push((new_id, item.shape.clone()));
+                    }
+                }
+
+                for (new_id, shape) in children {
+                    canvas_user.dataset.grouped_shapes.insert(new_id, shape);
+                }
+
+                for item in pasted.iter() {
+                    if !item.is_child {
+                        let new_id = canvas_user.dataset.push_element(item.shape.clone());
+                        id_map.insert(item.id, new_id);
+                    }
+                }
+
+                for (_old_id, new_id) in id_map.iter() {
+                    let shape = canvas_user
+                        .dataset
+                        .shapes
+                        .get_mut(new_id)
+                        .or_else(|| canvas_user.dataset.grouped_shapes.get_mut(new_id));
+                    let Some(shape) = shape else {
+                        continue;
+                    };
+                    let Some(children_ids) = shape.get_group_children() else {
+                        continue;
+                    };
+                    let new_children: Vec<EUId> = children_ids
+                        .iter()
+                        .filter_map(|child| id_map.get(child).copied())
+                        .collect();
+                    shape.set_group_children(new_children);
+                }
+
                 canvas_user.dataset.mark_final_polygon_dirty();
                 canvas_user.dataset.calc_final_polygon();
             }

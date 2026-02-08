@@ -113,6 +113,14 @@ impl UserUI {
         self.button_level = ButtonLevel::Up;
         self.moving = false;
     }
+
+    pub fn draw_pos(&self) -> Vec2 {
+        self.draw_pos
+    }
+
+    pub fn draw_pos_down(&self) -> Vec2 {
+        self.draw_pos_down
+    }
 }
 
 #[derive(Debug, EnumString, Display)]

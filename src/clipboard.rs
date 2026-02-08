@@ -1,9 +1,16 @@
-use crate::{shape::GeneralShape, types::vertex::Vertex};
+use crate::{shape::GeneralShape, types::others::EUId, types::vertex::Vertex};
+
+#[derive(Clone, Debug)]
+pub struct ClipboardItem {
+    pub id: EUId,
+    pub shape: GeneralShape,
+    pub is_child: bool,
+}
 
 #[derive(Clone, Debug)]
 pub struct Clipboard {
-    item_copy: Option<(GeneralShape, Vertex)>,
-    item_paste: Option<(GeneralShape, Vertex)>,
+    item_copy: Option<(Vec<ClipboardItem>, Vertex)>,
+    item_paste: Option<(Vec<ClipboardItem>, Vertex)>,
 }
 impl Default for Clipboard {
     fn default() -> Self {
@@ -19,7 +26,7 @@ impl Clipboard {
         }
     }
 
-    pub fn copy(&mut self, nodes: GeneralShape, pointer_copy: Vertex) {
+    pub fn copy(&mut self, nodes: Vec<ClipboardItem>, pointer_copy: Vertex) {
         self.item_copy = Some((nodes, pointer_copy));
         self.item_paste = None;
     }
@@ -30,12 +37,24 @@ impl Clipboard {
         }
     }
 
-    pub fn make_paste(&self, pointer: &Vertex) -> Option<GeneralShape> {
-        let (shape, copy_pointer) = self.item_copy.as_ref()?;
+    pub fn make_paste(&self, pointer: &Vertex) -> Option<Vec<ClipboardItem>> {
+        let (items, copy_pointer) = self.item_copy.as_ref()?;
         let delta = pointer.curr() - copy_pointer.curr();
-        let mut pasted = shape.clone();
-        pasted.move_shape(delta);
-        Some(pasted)
+        let mut pasted = Vec::with_capacity(items.len());
+        for item in items {
+            let mut shape = item.shape.clone();
+            shape.move_shape(delta);
+            pasted.push(ClipboardItem {
+                id: item.id,
+                shape,
+                is_child: item.is_child,
+            });
+        }
+        if pasted.is_empty() {
+            None
+        } else {
+            Some(pasted)
+        }
     }
 
     pub fn move_paste(&mut self, pointer_paste: &mut Vertex) {

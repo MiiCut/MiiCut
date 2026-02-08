@@ -1,7 +1,7 @@
 use crate::app::{load_toolpath_params, save_toolpath_params, RefAV};
 use crate::canvas::{CanvasKind, NotesData};
 use crate::helpers::canvas_fit::fit_paths_canvas;
-use crate::helpers::math::to_draw;
+use crate::helpers::math::{to_draw, EPSILON};
 use crate::shape::{GeneralShape, Operation, ShapeType, SvgData, SvgFillRule};
 use crate::shapes::DataSet;
 use crate::status::update_status_bar;
@@ -983,7 +983,33 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
                 let Some(v1) = positions.get(1) else {
                     continue;
                 };
-                GeneralShape::new_shape_oblong(*v0, *v1, shape.order)
+                let (r1, r2) = match (positions.get(2), positions.get(3)) {
+                    (Some(r1), Some(r2)) => (Some(*r1), Some(*r2)),
+                    (Some(side), None) => {
+                        let mid = (*v0 + *v1) * 0.5;
+                        let mut dir = *v1 - *v0;
+                        let perp = if dir.hypot() < EPSILON {
+                            Vec2::new(0.0, 1.0)
+                        } else {
+                            dir = dir.normalize();
+                            Vec2::new(-dir.y, dir.x)
+                        };
+                        let s = (*side - mid).dot(perp);
+                        (Some(*v0 + perp * s), Some(*v1 + perp * s))
+                    }
+                    _ => (None, None),
+                };
+                if let (Some(r1), Some(r2)) = (r1, r2) {
+                    GeneralShape::new_shape_oblong_with_radii(
+                        *v0,
+                        *v1,
+                        Some(r1),
+                        Some(r2),
+                        shape.order,
+                    )
+                } else {
+                    GeneralShape::new_shape_oblong(*v0, *v1, shape.order)
+                }
             }
             ShapeType::Text => {
                 let Some((min, max)) = min_max_from_positions(&positions) else {

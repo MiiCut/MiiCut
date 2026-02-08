@@ -1237,13 +1237,15 @@ impl DataSet {
             };
             let (shape_poly, op) = if shape.is_group() {
                 let children = shape.get_group_children().unwrap_or_default();
-                (self.calc_group_polygon(children), shape.get_operation())
+                let poly = self.calc_group_polygon(children);
+                (shape.rotate_polygon_if_needed(&poly), shape.get_operation())
             } else {
                 let mut polys = Vec::new();
                 for poly in shape.get_polygon().iter() {
                     polys.push(normalize_polygon_orientation(poly));
                 }
-                (MultiPolygon::new(polys), shape.get_operation())
+                let poly = MultiPolygon::new(polys);
+                (shape.rotate_polygon_if_needed(&poly), shape.get_operation())
             };
             if shape_poly.0.is_empty() {
                 continue;
@@ -1280,13 +1282,15 @@ impl DataSet {
             };
             let shape_poly = if shape.is_group() {
                 let children = shape.get_group_children().unwrap_or_default();
-                self.calc_group_polygon(children)
+                let poly = self.calc_group_polygon(children);
+                shape.rotate_polygon_if_needed(&poly)
             } else {
                 let mut polys = Vec::new();
                 for poly in shape.get_polygon().iter() {
                     polys.push(normalize_polygon_orientation(poly));
                 }
-                MultiPolygon::new(polys)
+                let poly = MultiPolygon::new(polys);
+                shape.rotate_polygon_if_needed(&poly)
             };
             if shape_poly.0.is_empty() {
                 continue;

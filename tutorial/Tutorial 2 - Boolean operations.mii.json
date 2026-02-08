@@ -2,7 +2,7 @@
   "version": 1,
   "meta": {
     "title": "MiiCut",
-    "timestamp": "20260131-094232",
+    "timestamp": "20260208-071102",
     "canvas": {
       "size": [3000.000000, 1500.000000],
       "scale": 1.000000,
@@ -11,31 +11,21 @@
   },
   "shapes": [
     {
-      "id": 3,
-      "type": "square",
-      "operation": "union",
-      "order": 15,
+      "id": 10,
+      "type": "text",
+      "operation": "difference",
+      "order": 3,
       "rotation": 0.000000,
       "vertices": [
-        {"x": -420.000000, "y": -1250.000000, "rounded": null},
-        {"x": -420.000000, "y": -970.000000, "rounded": null},
-        {"x": 10.000000, "y": -970.000000, "rounded": null},
-        {"x": 10.000000, "y": -1250.000000, "rounded": null}
-      ]
+        {"x": -960.000000, "y": -960.000000, "rounded": null},
+        {"x": -960.000000, "y": -520.000000, "rounded": null},
+        {"x": -510.000000, "y": -520.000000, "rounded": null},
+        {"x": -510.000000, "y": -960.000000, "rounded": null}
+      ],
+      "text": "5"
     },
     {
-      "id": 2,
-      "type": "disc",
-      "operation": "union",
-      "order": 13,
-      "rotation": 0.000000,
-      "vertices": [
-        {"x": -760.000000, "y": -1150.000000, "rounded": null},
-        {"x": -620.000000, "y": -1150.000000, "rounded": null}
-      ]
-    },
-    {
-      "id": 4,
+      "id": 8,
       "type": "voronoi",
       "operation": "difference",
       "order": 16,
@@ -93,7 +83,7 @@
       }
     },
     {
-      "id": 0,
+      "id": 9,
       "type": "square",
       "operation": "union",
       "order": 0,
@@ -106,33 +96,44 @@
       ]
     },
     {
-      "id": 1,
-      "type": "text",
-      "operation": "difference",
-      "order": 3,
-      "rotation": 0.000000,
-      "vertices": [
-        {"x": -960.000000, "y": -960.000000, "rounded": null},
-        {"x": -960.000000, "y": -520.000000, "rounded": null},
-        {"x": -510.000000, "y": -520.000000, "rounded": null},
-        {"x": -510.000000, "y": -960.000000, "rounded": null}
-      ],
-      "text": "5"
-    },
-    {
-      "id": 5,
+      "id": 11,
       "type": "oblong",
       "operation": "difference",
       "order": 17,
       "rotation": 0.000000,
       "vertices": [
-        {"x": -850.000000, "y": -1150.000000, "rounded": null},
-        {"x": -670.000000, "y": -1150.000000, "rounded": null},
+        {"x": -880.000000, "y": -1150.000000, "rounded": null},
+        {"x": -760.000000, "y": -1150.000000, "rounded": null},
+        {"x": -940.000000, "y": -1120.000000, "rounded": null},
         {"x": -760.000000, "y": -1120.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 6,
+      "type": "square",
+      "operation": "union",
+      "order": 15,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": -420.000000, "y": -1250.000000, "rounded": null},
+        {"x": -420.000000, "y": -970.000000, "rounded": null},
+        {"x": 10.000000, "y": -970.000000, "rounded": null},
+        {"x": 10.000000, "y": -1250.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 7,
+      "type": "disc",
+      "operation": "union",
+      "order": 13,
+      "rotation": 0.000000,
+      "vertices": [
+        {"x": -760.000000, "y": -1150.000000, "rounded": null},
+        {"x": -620.000000, "y": -1150.000000, "rounded": null}
       ]
     }
   ],
   "notes": [
-    {"id": 0, "pos": [-422.973275, -791.660495], "size": [456.045694, 140.061511], "text": "# Tutorial 2 – Boolean Operations\n\n## When a shape is selected\n- Press **SPACE** to toggle its boolean operation.\n- Press **ARROW UP / ARROW DOWN** to change the drawing order."}
+    {"id": 0, "pos": [-422.973275, -791.660495], "size": [456.017646, 140.049760], "text": "# Tutorial 2 – Boolean Operations\n\n## When a shape is selected\n- Press **SPACE** to toggle its boolean operation.\n- Press **ARROW UP / ARROW DOWN** to change the drawing order."}
   ]
 }
