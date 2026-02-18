@@ -147,7 +147,7 @@ pub(crate) fn add_property_number_input(
 ) -> Option<HtmlInputElement> {
     let row = add_property_row(document, body, label)?;
     let input: HtmlInputElement = document.create_element("input").ok()?.dyn_into().ok()?;
-    input.set_class_name("shape-prop-input");
+    input.set_class_name("shape-prop-input shape-prop-input-single");
     input.set_type("number");
     input.set_step(&format!("{step:.3}"));
     let _ = input.set_attribute("inputmode", "decimal");
@@ -196,7 +196,7 @@ pub(crate) fn add_property_text_input(
 ) -> Option<HtmlInputElement> {
     let row = add_property_row(document, body, label)?;
     let input: HtmlInputElement = document.create_element("input").ok()?.dyn_into().ok()?;
-    input.set_class_name("shape-prop-input");
+    input.set_class_name("shape-prop-input shape-prop-input-single");
     input.set_type("text");
     input.set_value(value);
     let _ = row.append_child(&input);

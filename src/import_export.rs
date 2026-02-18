@@ -311,9 +311,11 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
                     if let Some(shape) = sh {
                         let canvas_user =
                             &mut av_for_load.borrow_mut().canvases[CanvasKind::Draw.idx()];
+                        let before = canvas_user.snapshot_draw_state();
                         canvas_user.dataset.push_element(shape);
                         canvas_user.dataset.mark_final_polygon_dirty();
                         canvas_user.dataset.calc_final_polygon();
+                        canvas_user.push_history_action(before);
                     };
                 }
             }) as Box<dyn FnMut(_)>);
@@ -700,6 +702,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
     };
     let mut avb = av.borrow_mut();
     let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+    let before = canvas.snapshot_draw_state();
 
     if let Some(meta) = get_prop(&value, "meta") {
         if let Some(canvas_meta) = get_prop(&meta, "canvas") {
@@ -1201,6 +1204,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
 
         fit_paths_canvas(canvas, &paths);
     }
+    canvas.push_history_action(before);
     drop(avb);
     update_status_bar(av);
 }
@@ -1208,6 +1212,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
 pub(crate) fn clear_draw_view(av: RefAV) {
     let mut avb = av.borrow_mut();
     let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+    let before = canvas.snapshot_draw_state();
     canvas.dataset.shapes.clear();
     canvas.dataset.grouped_shapes.clear();
     canvas.dataset.shapes_selected.clear();
@@ -1219,6 +1224,7 @@ pub(crate) fn clear_draw_view(av: RefAV) {
     canvas.dataset.refresh_svg_cache();
     canvas.dataset.mark_final_polygon_dirty();
     canvas.dataset.calc_final_polygon();
+    canvas.push_history_action(before);
     avb.note_drag = None;
     avb.note_selected = None;
 }

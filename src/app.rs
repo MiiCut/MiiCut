@@ -95,6 +95,7 @@ pub(crate) struct AppVars {
     pub(crate) note_selected: Option<usize>,
     pub(crate) notes_dom: HashMap<usize, HtmlElement>,
     pub(crate) notes_resize_observers: HashMap<usize, ResizeObserver>,
+    pub(crate) selection_window: Option<SelectionWindow>,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +108,12 @@ pub(crate) struct NoteDraft {
 pub(crate) struct NoteDrag {
     pub(crate) id: usize,
     pub(crate) offset: Vec2,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SelectionWindow {
+    pub(crate) start: Vec2,
+    pub(crate) current: Vec2,
 }
 
 impl AppVars {
@@ -245,6 +252,7 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         note_selected: None,
         notes_dom: HashMap::new(),
         notes_resize_observers: HashMap::new(),
+        selection_window: None,
     }));
 
     if let Some(cnc) = app_vars.borrow().cnc.clone() {

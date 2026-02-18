@@ -5,7 +5,7 @@ use crate::types::vertex::Vertex;
 use crate::types::others::{EUId, Property, PropertyValue, Snap, VUId};
 use geo::algorithm::unary_union;
 use geo::{BooleanOps, Coord, LineString, MultiPolygon, Polygon};
-use kurbo::{flatten, stroke, BezPath, Cap, Join, PathEl, Shape, Stroke, StrokeOpts, Vec2};
+use kurbo::{flatten, stroke, BezPath, Cap, Join, PathEl, Rect, Shape, Stroke, StrokeOpts, Vec2};
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 
@@ -493,7 +493,7 @@ pub fn toolpath_to_plasma_gcode(tp: &Toolpath, p: &ToolpathParams) -> String {
     out
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DataSet {
     pub shapes: HashMap<EUId, GeneralShape>,
     pub grouped_shapes: HashMap<EUId, GeneralShape>,
@@ -865,6 +865,75 @@ impl DataSet {
             }
         }
         highlight_changed
+    }
+
+    fn has_element_in_rect(shape_rect: Rect, window_rect: Rect, select_touching: bool) -> bool {
+        if select_touching {
+            !(shape_rect.x1 < window_rect.x0
+                || window_rect.x1 < shape_rect.x0
+                || shape_rect.y1 < window_rect.y0
+                || window_rect.y1 < shape_rect.y0)
+        } else {
+            shape_rect.x0 >= window_rect.x0
+                && shape_rect.y0 >= window_rect.y0
+                && shape_rect.x1 <= window_rect.x1
+                && shape_rect.y1 <= window_rect.y1
+        }
+    }
+
+    fn normalize_selection_rect(start: Vec2, end: Vec2) -> Rect {
+        Rect::new(
+            start.x.min(end.x),
+            start.y.min(end.y),
+            start.x.max(end.x),
+            start.y.max(end.y),
+        )
+    }
+
+    pub fn has_element_at(&self, draw_pos: Vec2) -> bool {
+        self.shapes.values().any(|shape| shape.contains(draw_pos))
+    }
+
+    pub fn has_selected_element_at(&self, draw_pos: Vec2) -> bool {
+        self.shapes_selected.iter().any(|eid| {
+            self.shapes
+                .get(eid)
+                .map(|shape| shape.contains(draw_pos))
+                .unwrap_or(false)
+        })
+    }
+
+    pub fn select_elements_in_window(
+        &mut self,
+        start: Vec2,
+        end: Vec2,
+        select_touching: bool,
+        append: bool,
+    ) {
+        let window_rect = Self::normalize_selection_rect(start, end);
+        let selected_now: HashSet<EUId> = self
+            .shapes
+            .iter()
+            .filter_map(|(eid, shape)| {
+                let shape_rect = shape.get_bezpath_rotated().bounding_box();
+                if Self::has_element_in_rect(shape_rect, window_rect, select_touching) {
+                    Some(*eid)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if append {
+            for eid in selected_now {
+                self.shapes_selected.insert(eid);
+            }
+        } else {
+            self.shapes_selected = selected_now;
+        }
+        self.vertex_selected = None;
+        self.shapes_selector
+            .refresh_selectable_elems(self.shapes_selected.clone());
     }
 
     pub fn select_elements(&mut self, userui: &UserUI) {

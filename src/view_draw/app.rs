@@ -1,5 +1,5 @@
 use crate::{
-    app::{set_callback, AppVars, RefAV},
+    app::{set_callback, AppVars, RefAV, SelectionWindow},
     canvas::{CanvasKind, Color, Pattern},
     dimensions::dim_hv,
     dom::{
@@ -134,8 +134,41 @@ impl AppVars {
         self.get_active_canvas_mut().move_vertices_selected()
     }
 
-    pub(crate) fn _undo(&mut self) {}
-    pub(crate) fn _redo(&mut self) {}
+    fn update_selection_window_current(&mut self) -> bool {
+        let current = self.get_active_canvas().get_user_ui().draw_pos();
+        if let Some(selection_window) = self.selection_window.as_mut() {
+            selection_window.current = current;
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn _undo(&mut self) {
+        if self.active_canvas != CanvasKind::Draw {
+            return;
+        }
+        let canvas = &mut self.canvases[CanvasKind::Draw.idx()];
+        if canvas.undo_history() {
+            canvas.dataset.refresh_svg_cache();
+            canvas.dataset.mark_final_polygon_dirty();
+            canvas.dataset.calc_final_polygon();
+            self.refresh_toolpath_cache();
+            self.refresh_gcode_cache();
+        }
+    }
+    pub(crate) fn _redo(&mut self) {
+        if self.active_canvas != CanvasKind::Draw {
+            return;
+        }
+        let canvas = &mut self.canvases[CanvasKind::Draw.idx()];
+        if canvas.redo_history() {
+            canvas.dataset.refresh_svg_cache();
+            canvas.dataset.mark_final_polygon_dirty();
+            canvas.dataset.calc_final_polygon();
+            self.refresh_toolpath_cache();
+            self.refresh_gcode_cache();
+        }
+    }
     pub(crate) fn update_draw_cursor(&mut self) {
         let canvas = &mut self.canvases[CanvasKind::Draw.idx()];
         if self.active_canvas != CanvasKind::Draw || !canvas.is_pointer_on_canvas() {
@@ -1237,7 +1270,10 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                     if !is_draw_view {
                         return Ok(());
                     }
-                    if avb.set_move_vertices_selected().is_some() || avb.set_move_elements() {
+                    if avb.update_selection_window_current() {
+                        do_render = true;
+                    } else if avb.set_move_vertices_selected().is_some() || avb.set_move_elements()
+                    {
                         do_render = true;
                     }
                 } else {
@@ -1253,8 +1289,10 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                     }
 
                     let canvas = avb.get_active_canvas_mut();
+                    canvas.begin_history_action();
                     canvas.dataset.save_elements_positions();
                     if avb.set_element_select_vertex() {
+                        avb.selection_window = None;
                         do_render = true;
                         drop(avb);
                         if do_render {
@@ -1262,7 +1300,24 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         }
                         return Ok(());
                     }
-                    avb.set_select_elements();
+                    let draw_pos = avb.get_active_canvas().get_user_ui().draw_pos();
+                    let has_selected_shape_at_pos = avb.canvases[CanvasKind::Draw.idx()]
+                        .dataset
+                        .has_selected_element_at(draw_pos);
+                    let has_shape_at_pos = avb.canvases[CanvasKind::Draw.idx()]
+                        .dataset
+                        .has_element_at(draw_pos);
+                    if has_selected_shape_at_pos {
+                        avb.selection_window = None;
+                    } else if has_shape_at_pos {
+                        avb.selection_window = None;
+                        avb.set_select_elements();
+                    } else {
+                        avb.selection_window = Some(SelectionWindow {
+                            start: draw_pos,
+                            current: draw_pos,
+                        });
+                    }
                     do_render = true;
                 } else {
                     avb.get_active_canvas_mut().save_offset();
@@ -1270,6 +1325,26 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
             }
             UserAction::ClickUp(button, _) => {
                 if button == MouseButton::Left && is_draw_view {
+                    if let Some(selection_window) = avb.selection_window.take() {
+                        let end = avb.get_active_canvas().get_user_ui().draw_pos();
+                        let delta = end - selection_window.start;
+                        let append = avb.get_active_canvas().get_user_ui().keys_states.shift_pressed;
+                        if delta.hypot() > 0.0 {
+                            let select_touching = delta.x < 0.0;
+                            avb.canvases[CanvasKind::Draw.idx()]
+                                .dataset
+                                .select_elements_in_window(
+                                    selection_window.start,
+                                    end,
+                                    select_touching,
+                                    append,
+                                );
+                        } else if !append {
+                            let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                            canvas.dataset.shapes_selected.clear();
+                            canvas.dataset.vertex_selected = None;
+                        }
+                    }
                     let needs_final_update = avb.canvases[CanvasKind::Draw.idx()]
                         .dataset
                         .selection_affects_final_polygon();
@@ -1285,6 +1360,7 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         avb.last_gcode = Some(gcode);
                         avb.refresh_gcode_cache();
                     }
+                    avb.canvases[CanvasKind::Draw.idx()].commit_history_action();
                     do_render = true;
                 }
             }
@@ -1507,7 +1583,10 @@ pub(crate) fn on_draw_mouse_leave(av: RefAV, _event: Event) {
     let Ok(mut avb) = av.try_borrow_mut() else {
         return;
     };
-    avb.canvases[CanvasKind::Draw.idx()].set_pointer_on_canvas(false);
+    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+    canvas.set_pointer_on_canvas(false);
+    canvas.abort_history_action();
+    avb.selection_window = None;
     avb.element_on_creation = None;
     avb.go_to_arrow_tool();
     // avb.update_draw_cursor();
@@ -1541,6 +1620,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
         let mut avb = av.borrow_mut();
         let svg_bbox_only = true;
         let element_on_creation = avb.element_on_creation.clone();
+        let selection_window = avb.selection_window;
         let canvas_draw = &mut avb.canvases[CanvasKind::Draw.idx()];
 
         canvas_draw.clear();
@@ -1686,6 +1766,16 @@ pub(crate) fn render_draw_view(av: RefAV) {
                 _ => {}
             }
         }
+        if let Some(selection_window) = selection_window {
+            let path = selection_window_path(selection_window.start, selection_window.current);
+            canvas_draw.draw_path(
+                &path,
+                Pattern::OnCreation,
+                Color::Transparent,
+                Color::OnCreation,
+                vec![],
+            );
+        }
         canvas_draw.draw_pointer(canvas_draw.get_user_ui().pointer.curr());
         avb.update_draw_cursor();
     }
@@ -1767,6 +1857,18 @@ fn render_active_view(av: RefAV) {
         Tabs::Toolpath => render_toolpath_view(av),
         Tabs::Machine => render_machine_view(av),
     }
+}
+
+fn selection_window_path(start: Vec2, end: Vec2) -> BezPath {
+    let min = Vec2::new(start.x.min(end.x), start.y.min(end.y));
+    let max = Vec2::new(start.x.max(end.x), start.y.max(end.y));
+    let mut path = BezPath::new();
+    path.move_to(Point::new(min.x, min.y));
+    path.line_to(Point::new(min.x, max.y));
+    path.line_to(Point::new(max.x, max.y));
+    path.line_to(Point::new(max.x, min.y));
+    path.close_path();
+    path
 }
 
 fn icon_tooltip(icon: ShapeType) -> &'static str {

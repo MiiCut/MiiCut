@@ -383,6 +383,10 @@ html {
   border-radius: 3px;
   background-color: #fff;
 }
+.shape-prop-input-single {
+  width: 116px;
+  flex: 0 0 116px;
+}
 .shape-prop-input::-webkit-outer-spin-button,
 .shape-prop-input::-webkit-inner-spin-button {
   -webkit-appearance: none;

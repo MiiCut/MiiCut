@@ -105,6 +105,7 @@ impl AppVars {
     pub(crate) fn ctrl_v_pressed(&mut self) {
         if let ShapeType::Arrow = self.icon_selected {
             let canvas_user = self.get_active_canvas_mut();
+            let before = canvas_user.snapshot_draw_state();
             if let Some(pasted) = canvas_user
                 .clipboard
                 .make_paste(&canvas_user.get_user_ui().pointer)
@@ -152,6 +153,7 @@ impl AppVars {
 
                 canvas_user.dataset.mark_final_polygon_dirty();
                 canvas_user.dataset.calc_final_polygon();
+                canvas_user.push_history_action(before);
             }
         }
     }

@@ -7,7 +7,7 @@ use crate::{
     shapes::DataSet,
     types::vertex::Vertex,
     types::others::{EUId, Property, PropertyValue, SegBundle},
-    undoredo::UndoRedo,
+    undoredo::{DrawState, UndoRedo},
 };
 use js_sys::Array;
 use kurbo::{BezPath, PathEl, Point, Rect, Shape, Size, Vec2};
@@ -23,7 +23,7 @@ pub struct Note {
     pub text: String,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct NotesData {
     pub notes: Vec<Note>,
     next_id: usize,
@@ -466,6 +466,51 @@ impl Canvas {
     }
     pub fn save_offset(&mut self) {
         self.offset_saved = self.offset
+    }
+    pub fn snapshot_draw_state(&self) -> DrawState {
+        DrawState {
+            dataset: self.dataset.clone(),
+            notes: self.notes.clone(),
+            scale: self.scale,
+            offset: self.offset,
+        }
+    }
+    pub fn restore_draw_state(&mut self, state: DrawState) {
+        self.dataset = state.dataset;
+        self.notes = state.notes;
+        self.scale = state.scale;
+        self.offset = state.offset;
+    }
+    pub fn begin_history_action(&mut self) {
+        let before = self.snapshot_draw_state();
+        self.undo_redo.begin(before);
+    }
+    pub fn commit_history_action(&mut self) {
+        let after = self.snapshot_draw_state();
+        self.undo_redo.commit(after);
+    }
+    pub fn abort_history_action(&mut self) {
+        self.undo_redo.abort();
+    }
+    pub fn push_history_action(&mut self, before: DrawState) {
+        let after = self.snapshot_draw_state();
+        self.undo_redo.push(before, after);
+    }
+    pub fn undo_history(&mut self) -> bool {
+        let current = self.snapshot_draw_state();
+        if let Some(state) = self.undo_redo.undo(current) {
+            self.restore_draw_state(state);
+            return true;
+        }
+        false
+    }
+    pub fn redo_history(&mut self) -> bool {
+        let current = self.snapshot_draw_state();
+        if let Some(state) = self.undo_redo.redo(current) {
+            self.restore_draw_state(state);
+            return true;
+        }
+        false
     }
     pub fn set_scale(&mut self, scale: f64) {
         self.scale = scale

@@ -183,6 +183,24 @@ pub(crate) fn on_window_keydown(av: RefAV, event: Event) {
                 }
                 do_render = true;
             }
+            "z" | "Z" => {
+                if ctrl_cmd {
+                    let _ = with_av_try_mut(&av, |avb| {
+                        if shift {
+                            avb._redo();
+                        } else {
+                            avb._undo();
+                        }
+                    });
+                    do_render = true;
+                }
+            }
+            "y" | "Y" => {
+                if ctrl_cmd {
+                    let _ = with_av_try_mut(&av, |avb| avb._redo());
+                    do_render = true;
+                }
+            }
             "s" | "S" => {
                 if ctrl_cmd {
                     kb_event.prevent_default();
