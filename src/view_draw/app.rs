@@ -1301,13 +1301,17 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         return Ok(());
                     }
                     let draw_pos = avb.get_active_canvas().get_user_ui().draw_pos();
+                    let selected_len = avb.canvases[CanvasKind::Draw.idx()]
+                        .dataset
+                        .shapes_selected
+                        .len();
                     let has_selected_shape_at_pos = avb.canvases[CanvasKind::Draw.idx()]
                         .dataset
                         .has_selected_element_at(draw_pos);
                     let has_shape_at_pos = avb.canvases[CanvasKind::Draw.idx()]
                         .dataset
                         .has_element_at(draw_pos);
-                    if has_selected_shape_at_pos {
+                    if has_selected_shape_at_pos && selected_len > 1 {
                         avb.selection_window = None;
                     } else if has_shape_at_pos {
                         avb.selection_window = None;
