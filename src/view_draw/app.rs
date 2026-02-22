@@ -366,7 +366,7 @@ pub(crate) fn update_shape_properties_panel(
         return Some(());
     }
 
-    let (eid, shape_props) = {
+    let (eid, shape_props, shape_section_label) = {
         let avb = av.borrow();
         let canvas = &avb.canvases[CanvasKind::Draw.idx()];
         let eid = selected[0];
@@ -377,10 +377,46 @@ pub(crate) fn update_shape_properties_panel(
             .map(|(key, prop)| (prop.to_string(), *key, prop.clone()))
             .collect();
         props.sort_by(|a, b| a.1.order().cmp(&b.1.order()).then_with(|| a.0.cmp(&b.0)));
-        (eid, props)
+
+        let shape_type = shape.get_shape_type();
+        let base = shape_type_label(shape_type);
+        let mut count = 0usize;
+        for ordered_eid in ordered {
+            let Some(ordered_shape) = canvas.dataset.shapes.get(ordered_eid) else {
+                continue;
+            };
+            let ordered_type = ordered_shape.get_shape_type();
+            if matches!(
+                ordered_type,
+                ShapeType::ConstrLine | ShapeType::ConstrCircle
+            ) {
+                continue;
+            }
+            if ordered_type == shape_type {
+                count += 1;
+            }
+            if *ordered_eid == eid {
+                break;
+            }
+        }
+
+        let default_name = if count == 0 {
+            base.to_string()
+        } else {
+            format!("{base} {count}")
+        };
+        let display_name = shape
+            .get_name()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .unwrap_or(default_name);
+        let shape_section_label = format!("Shape: {display_name}");
+
+        (eid, props, shape_section_label)
     };
 
-    let _ = add_property_section(&document, &body, "Shape");
+    let _ = add_property_section(&document, &body, &shape_section_label);
     for (label, prop, prop_val) in shape_props {
         use PropertyValue::*;
 
@@ -847,7 +883,8 @@ pub(crate) fn update_shapes_panel(av: RefAV) {
         let base = shape_type_label(shape_type);
         let entry = counts.entry(base).or_insert(0);
         *entry += 1;
-        let default_name = format!("{base}{}", *entry);
+        let count = *entry;
+        let default_name = format!("{base} {count}");
         let display_name = shape
             .get_name()
             .map(|value| value.trim().to_string())
@@ -1332,7 +1369,11 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                     if let Some(selection_window) = avb.selection_window.take() {
                         let end = avb.get_active_canvas().get_user_ui().draw_pos();
                         let delta = end - selection_window.start;
-                        let append = avb.get_active_canvas().get_user_ui().keys_states.shift_pressed;
+                        let append = avb
+                            .get_active_canvas()
+                            .get_user_ui()
+                            .keys_states
+                            .shift_pressed;
                         if delta.hypot() > 0.0 {
                             let select_touching = delta.x < 0.0;
                             avb.canvases[CanvasKind::Draw.idx()]

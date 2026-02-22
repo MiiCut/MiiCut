@@ -695,67 +695,7 @@ impl GeneralShape {
         {
             return None;
         }
-        let svg = SvgData::new(rings, fill_rule);
-        let vs = GeneralShape::bb(bbox_max, bbox_min);
-
-        use PropertyValue::*;
-        let mut properties = Properties::new();
-        properties.add(
-            Property::BottomLeft,
-            BottomLeft {
-                idx: 0,
-                value: vs[0].curr(),
-                radius: None,
-            },
-        );
-        properties.add(
-            Property::TopLeft,
-            TopLeft {
-                idx: 1,
-                value: vs[1].curr(),
-                radius: None,
-            },
-        );
-        properties.add(
-            Property::TopRight,
-            TopRight {
-                idx: 2,
-                value: vs[2].curr(),
-                radius: None,
-            },
-        );
-        properties.add(
-            Property::BottomRight,
-            BottomRight {
-                idx: 3,
-                value: vs[3].curr(),
-                radius: None,
-            },
-        );
-        properties.add(
-            Property::Scale,
-            Scale {
-                value: Scalar::new(
-                    Self::DEFAULT_SCALE,
-                    Self::MIN_SCALE,
-                    Self::MAX_SCALE,
-                    Self::SCALE_STEP,
-                ),
-            },
-        );
-
-        GeneralShape::new(
-            ShapeType::Svg,
-            vs,
-            properties,
-            order,
-            None,
-            Some(svg),
-            None,
-            None,
-            Operation::Union,
-            None,
-        )
+        Self::new_svg_shape_with_rings(order, rings, fill_rule, bbox_min, bbox_max)
     }
     pub fn new_shape_svg_fit(
         order: i32,
@@ -865,6 +805,67 @@ impl GeneralShape {
             None,
         )
     }
+    pub fn new_shapes_svg_fit(order: i32, svg_data: String, v1: Vec2, v2: Vec2) -> Option<Vec<Self>> {
+        let (parsed, _scale) = parse_svg(svg_data, false)?;
+        let mut svg_min = Vec2::new(f64::INFINITY, f64::INFINITY);
+        let mut svg_max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for shape in &parsed {
+            svg_min.x = svg_min.x.min(shape.bbox_min.x);
+            svg_min.y = svg_min.y.min(shape.bbox_min.y);
+            svg_max.x = svg_max.x.max(shape.bbox_max.x);
+            svg_max.y = svg_max.y.max(shape.bbox_max.y);
+        }
+        if !svg_min.x.is_finite()
+            || !svg_min.y.is_finite()
+            || !svg_max.x.is_finite()
+            || !svg_max.y.is_finite()
+        {
+            return None;
+        }
+
+        let target_min = Vec2::new(v1.x.min(v2.x), v1.y.min(v2.y));
+        let target_max = Vec2::new(v1.x.max(v2.x), v1.y.max(v2.y));
+        let target_size = target_max - target_min;
+        let svg_size = svg_max - svg_min;
+        let center = (target_min + target_max) * 0.5;
+        let fit_size = if svg_size.x > target_size.x || svg_size.y > target_size.y {
+            let scale = (target_size.x / svg_size.x).min(target_size.y / svg_size.y);
+            svg_size * scale
+        } else {
+            svg_size
+        };
+        let scale = if svg_size.x > 0.0 { fit_size.x / svg_size.x } else { 1.0 };
+        let fit_min = center - fit_size * 0.5;
+
+        let mut shapes = Vec::new();
+        for parsed_shape in parsed {
+            let transformed_rings: Vec<Vec<Vec2>> = parsed_shape
+                .rings
+                .into_iter()
+                .map(|ring| {
+                    ring.into_iter()
+                        .map(|pt| (pt - svg_min) * scale + fit_min)
+                        .collect()
+                })
+                .collect();
+            let bbox_min = (parsed_shape.bbox_min - svg_min) * scale + fit_min;
+            let bbox_max = (parsed_shape.bbox_max - svg_min) * scale + fit_min;
+            if let Some(shape) = Self::new_svg_shape_with_rings(
+                order,
+                transformed_rings,
+                parsed_shape._fill_rule,
+                bbox_min,
+                bbox_max,
+            ) {
+                shapes.push(shape);
+            }
+        }
+
+        if shapes.is_empty() {
+            return None;
+        }
+        Some(shapes)
+    }
     pub fn new_shape_group(v1: Vec2, v2: Vec2, order: i32, children: Vec<EUId>) -> Option<Self> {
         if v1 == v2 || children.is_empty() {
             return None;
@@ -926,6 +927,83 @@ impl GeneralShape {
             None,
             None,
             Some(GroupShape::new(children)),
+            Operation::Union,
+            None,
+        )
+    }
+    fn new_svg_shape_with_rings(
+        order: i32,
+        rings: Vec<Vec<Vec2>>,
+        fill_rule: SvgFillRule,
+        bbox_min: Vec2,
+        bbox_max: Vec2,
+    ) -> Option<Self> {
+        if rings.is_empty()
+            || !bbox_min.x.is_finite()
+            || !bbox_min.y.is_finite()
+            || !bbox_max.x.is_finite()
+            || !bbox_max.y.is_finite()
+        {
+            return None;
+        }
+        let svg = SvgData::new(rings, fill_rule);
+        let vs = GeneralShape::bb(bbox_max, bbox_min);
+
+        use PropertyValue::*;
+        let mut properties = Properties::new();
+        properties.add(
+            Property::BottomLeft,
+            BottomLeft {
+                idx: 0,
+                value: vs[0].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopLeft,
+            TopLeft {
+                idx: 1,
+                value: vs[1].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::TopRight,
+            TopRight {
+                idx: 2,
+                value: vs[2].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::BottomRight,
+            BottomRight {
+                idx: 3,
+                value: vs[3].curr(),
+                radius: None,
+            },
+        );
+        properties.add(
+            Property::Scale,
+            Scale {
+                value: Scalar::new(
+                    Self::DEFAULT_SCALE,
+                    Self::MIN_SCALE,
+                    Self::MAX_SCALE,
+                    Self::SCALE_STEP,
+                ),
+            },
+        );
+
+        GeneralShape::new(
+            ShapeType::Svg,
+            vs,
+            properties,
+            order,
+            None,
+            Some(svg),
+            None,
+            None,
             Operation::Union,
             None,
         )
@@ -2483,8 +2561,9 @@ fn build_voronoi_rings(p1: Vec2, p2: Vec2, seeds: usize) -> Vec<Vec<Vec2>> {
     points.extend_from_slice(&guard_points);
     let rings = voronoi_cells(&points, &guard_points);
     let rings = inset_rings(rings, cell * 0.15);
-    round_rings(rings, cell * 0.1, 6)
+    round_rings(rings, cell * 0.1, 3)
 }
+
 fn voronoi_rings_to_svg_data(rings: Vec<Vec<Vec2>>) -> SvgData {
     let mut normalized = Vec::new();
     for ring in rings {

@@ -307,16 +307,25 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
                         let br = to_draw(Vec2::new(size.width, size.height), scale, offset);
                         (tl, br)
                     };
-                    let sh = GeneralShape::new_shape_svg_fit(0, result, combine_paths, tl, br);
-                    if let Some(shape) = sh {
-                        let canvas_user =
-                            &mut av_for_load.borrow_mut().canvases[CanvasKind::Draw.idx()];
-                        let before = canvas_user.snapshot_draw_state();
-                        canvas_user.dataset.push_element(shape);
+                    let canvas_user = &mut av_for_load.borrow_mut().canvases[CanvasKind::Draw.idx()];
+                    let before = canvas_user.snapshot_draw_state();
+                    let mut imported_any = false;
+                    if combine_paths {
+                        if let Some(shape) = GeneralShape::new_shape_svg_fit(0, result, true, tl, br) {
+                            canvas_user.dataset.push_element(shape);
+                            imported_any = true;
+                        }
+                    } else if let Some(shapes) = GeneralShape::new_shapes_svg_fit(0, result, tl, br) {
+                        for shape in shapes {
+                            canvas_user.dataset.push_element(shape);
+                            imported_any = true;
+                        }
+                    }
+                    if imported_any {
                         canvas_user.dataset.mark_final_polygon_dirty();
                         canvas_user.dataset.calc_final_polygon();
                         canvas_user.push_history_action(before);
-                    };
+                    }
                 }
             }) as Box<dyn FnMut(_)>);
 
