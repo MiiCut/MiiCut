@@ -4,7 +4,67 @@ use std::f64::consts::PI;
 
 use crate::helpers::math::fillet_at_apex;
 
-pub(crate) fn voronoi_cells(points: &[Vec2], excluded: &[Vec2]) -> Vec<Vec<Vec2>> {
+pub(crate) fn voronoi_cells(
+    points: &[Vec2],
+    excluded: &[Vec2],
+    clip_min: Vec2,
+    clip_max: Vec2,
+) -> Vec<Vec<Vec2>> {
+    voronoi_cells_with_sites(points, excluded, clip_min, clip_max)
+        .into_iter()
+        .map(|(_, cell)| cell)
+        .collect()
+}
+
+pub(crate) fn lloyd_relax_points(
+    points: &mut [Vec2],
+    excluded: &[Vec2],
+    clip_min: Vec2,
+    clip_max: Vec2,
+    iterations: usize,
+) {
+    if points.is_empty() || iterations == 0 {
+        return;
+    }
+
+    for _ in 0..iterations {
+        let mut all_points = Vec::with_capacity(points.len() + excluded.len());
+        all_points.extend_from_slice(points);
+        all_points.extend_from_slice(excluded);
+        let cells = voronoi_cells_with_sites(&all_points, excluded, clip_min, clip_max);
+        if cells.is_empty() {
+            break;
+        }
+
+        let mut next = points.to_vec();
+        for (idx, point) in points.iter().enumerate() {
+            let mut best: Option<(f64, Vec2)> = None;
+            for (site, cell) in &cells {
+                let Some(centroid) = polygon_centroid(cell) else {
+                    continue;
+                };
+                let dist = (*site - *point).hypot();
+                if best.is_none_or(|(best_dist, _)| dist < best_dist) {
+                    best = Some((dist, centroid));
+                }
+            }
+            if let Some((_, centroid)) = best {
+                next[idx] = Vec2::new(
+                    centroid.x.clamp(clip_min.x, clip_max.x),
+                    centroid.y.clamp(clip_min.y, clip_max.y),
+                );
+            }
+        }
+        points.copy_from_slice(&next);
+    }
+}
+
+fn voronoi_cells_with_sites(
+    points: &[Vec2],
+    excluded: &[Vec2],
+    clip_min: Vec2,
+    clip_max: Vec2,
+) -> Vec<(Vec2, Vec<Vec2>)> {
     if points.len() < 3 {
         return Vec::new();
     }
@@ -38,12 +98,90 @@ pub(crate) fn voronoi_cells(points: &[Vec2], excluded: &[Vec2]) -> Vec<Vec<Vec2>
         if finite && ring.len() >= 3 {
             let cleaned = clean_ring(&ring, 2.0);
             if cleaned.len() >= 3 {
-                cells.push(cleaned);
+                let clipped = clip_ring_to_rect(&cleaned, clip_min, clip_max);
+                let clipped_cleaned = clean_ring(&clipped, 1e-6);
+                if clipped_cleaned.len() >= 3 {
+                    cells.push((site, clipped_cleaned));
+                }
             }
         }
     }
 
     cells
+}
+
+fn clip_ring_to_rect(ring: &[Vec2], min: Vec2, max: Vec2) -> Vec<Vec2> {
+    let clipped_left = clip_polygon(
+        ring,
+        |p| p.x >= min.x,
+        |a, b| line_x_intersection(a, b, min.x),
+    );
+    let clipped_right = clip_polygon(
+        &clipped_left,
+        |p| p.x <= max.x,
+        |a, b| line_x_intersection(a, b, max.x),
+    );
+    let clipped_bottom = clip_polygon(
+        &clipped_right,
+        |p| p.y >= min.y,
+        |a, b| line_y_intersection(a, b, min.y),
+    );
+    clip_polygon(
+        &clipped_bottom,
+        |p| p.y <= max.y,
+        |a, b| line_y_intersection(a, b, max.y),
+    )
+}
+
+fn clip_polygon<FInside, FIntersect>(
+    input: &[Vec2],
+    inside: FInside,
+    intersect: FIntersect,
+) -> Vec<Vec2>
+where
+    FInside: Fn(Vec2) -> bool,
+    FIntersect: Fn(Vec2, Vec2) -> Vec2,
+{
+    if input.is_empty() {
+        return Vec::new();
+    }
+
+    let mut output = Vec::new();
+    let mut prev = *input.last().unwrap_or(&Vec2::ZERO);
+    let mut prev_inside = inside(prev);
+    for curr in input {
+        let curr = *curr;
+        let curr_inside = inside(curr);
+        if curr_inside {
+            if !prev_inside {
+                output.push(intersect(prev, curr));
+            }
+            output.push(curr);
+        } else if prev_inside {
+            output.push(intersect(prev, curr));
+        }
+        prev = curr;
+        prev_inside = curr_inside;
+    }
+    output
+}
+
+fn line_x_intersection(a: Vec2, b: Vec2, x: f64) -> Vec2 {
+    let dx = b.x - a.x;
+    if dx.abs() < 1e-9 {
+        return Vec2::new(x, a.y);
+    }
+    let t = ((x - a.x) / dx).clamp(0.0, 1.0);
+    Vec2::new(x, a.y + (b.y - a.y) * t)
+}
+
+fn line_y_intersection(a: Vec2, b: Vec2, y: f64) -> Vec2 {
+    let dy = b.y - a.y;
+    if dy.abs() < 1e-9 {
+        return Vec2::new(a.x, y);
+    }
+    let t = ((y - a.y) / dy).clamp(0.0, 1.0);
+    Vec2::new(a.x + (b.x - a.x) * t, y)
 }
 
 fn clean_ring(ring: &[Vec2], min_dist: f64) -> Vec<Vec2> {
@@ -132,6 +270,28 @@ fn ring_centroid(ring: &[Vec2]) -> Option<Vec2> {
         sum += *p;
     }
     Some(sum / ring.len() as f64)
+}
+
+fn polygon_centroid(ring: &[Vec2]) -> Option<Vec2> {
+    if ring.len() < 3 {
+        return None;
+    }
+    let mut twice_area = 0.0;
+    let mut cx = 0.0;
+    let mut cy = 0.0;
+    for i in 0..ring.len() {
+        let p0 = ring[i];
+        let p1 = ring[(i + 1) % ring.len()];
+        let cross = p0.x * p1.y - p1.x * p0.y;
+        twice_area += cross;
+        cx += (p0.x + p1.x) * cross;
+        cy += (p0.y + p1.y) * cross;
+    }
+    if twice_area.abs() <= 1e-9 {
+        return ring_centroid(ring);
+    }
+    let factor = 1.0 / (3.0 * twice_area);
+    Some(Vec2::new(cx * factor, cy * factor))
 }
 
 fn round_ring_vertices(ring: &[Vec2], radius: f64, segments: usize) -> Vec<Vec2> {

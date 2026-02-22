@@ -2,7 +2,7 @@ use crate::helpers::math::{get_magnets_vertices, length_unit_to_mm};
 use crate::types::others::{Properties, Property, PropertyValue};
 use crate::types::scalar::Scalar;
 use crate::types::vertex::Vertex;
-use crate::voronoi::{inset_rings, round_rings, voronoi_cells};
+use crate::voronoi::{inset_rings, lloyd_relax_points, round_rings, voronoi_cells};
 use crate::{
     dom::document,
     helpers::math::*,
@@ -264,6 +264,13 @@ impl GeneralShape {
     const DEFAULT_SEEDS: usize = 40;
     const MIN_SEEDS: usize = 10;
     const MAX_SEEDS: usize = 100;
+    const DEFAULT_VORONOI_GAP: f64 = 0.2;
+    const MIN_VORONOI_GAP: f64 = 0.0;
+    const MAX_VORONOI_GAP: f64 = 0.8;
+    const VORONOI_GAP_STEP: f64 = 0.01;
+    const DEFAULT_VORONOI_RELAXATION: usize = 1;
+    const MIN_VORONOI_RELAXATION: usize = 0;
+    const MAX_VORONOI_RELAXATION: usize = 5;
     const DEFAULT_SCALE: f64 = 1.0;
     const MIN_SCALE: f64 = 0.01;
     const MAX_SCALE: f64 = 1000.0;
@@ -278,7 +285,6 @@ impl GeneralShape {
     pub fn op_difference(&mut self) {
         self.operation.difference();
     }
-
     pub(crate) fn bb(v1: Vec2, v2: Vec2) -> Vec<Vertex> {
         let min_x = v1.x.min(v2.x);
         let max_x = v1.x.max(v2.x);
@@ -409,7 +415,6 @@ impl GeneralShape {
     pub fn new_shape_oblong(v1: Vec2, v2: Vec2, order: i32) -> Option<Self> {
         Self::new_shape_oblong_with_radii(v1, v2, None, None, order)
     }
-
     pub fn new_shape_oblong_with_radii(
         v1: Vec2,
         v2: Vec2,
@@ -597,7 +602,13 @@ impl GeneralShape {
         if v1 == v2 {
             return None;
         }
-        let rings = build_voronoi_rings(v1, v2, GeneralShape::DEFAULT_SEEDS);
+        let rings = build_voronoi_rings(
+            v1,
+            v2,
+            GeneralShape::DEFAULT_SEEDS,
+            Self::DEFAULT_VORONOI_GAP,
+            Self::DEFAULT_VORONOI_RELAXATION,
+        );
         let voronoi_svg = voronoi_rings_to_svg_data(rings);
 
         let vs = GeneralShape::bb(v1, v2);
@@ -648,6 +659,28 @@ impl GeneralShape {
             },
         );
         properties.add(
+            Property::VoronoiGap,
+            VoronoiGap {
+                value: Scalar::new(
+                    Self::DEFAULT_VORONOI_GAP,
+                    Self::MIN_VORONOI_GAP,
+                    Self::MAX_VORONOI_GAP,
+                    Self::VORONOI_GAP_STEP,
+                ),
+            },
+        );
+        properties.add(
+            Property::VoronoiRelaxation,
+            VoronoiRelaxation {
+                value: Scalar::new(
+                    Self::DEFAULT_VORONOI_RELAXATION as u64,
+                    Self::MIN_VORONOI_RELAXATION as u64,
+                    Self::MAX_VORONOI_RELAXATION as u64,
+                    1,
+                ),
+            },
+        );
+        properties.add(
             Property::Scale,
             Scale {
                 value: Scalar::new(
@@ -671,31 +704,6 @@ impl GeneralShape {
             Operation::Union,
             None,
         )
-    }
-    pub fn new_shape_svg(order: i32, svg_data: String, combine_paths: bool) -> Option<Self> {
-        let (parsed, _scale) = parse_svg(svg_data, combine_paths)?;
-        let mut bbox_min = Vec2::new(f64::INFINITY, f64::INFINITY);
-        let mut bbox_max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
-        let mut rings = Vec::new();
-        let fill_rule = parsed
-            .first()
-            .map(|shape| shape._fill_rule)
-            .unwrap_or(SvgFillRule::NonZero);
-        for shape in parsed {
-            bbox_min.x = bbox_min.x.min(shape.bbox_min.x);
-            bbox_min.y = bbox_min.y.min(shape.bbox_min.y);
-            bbox_max.x = bbox_max.x.max(shape.bbox_max.x);
-            bbox_max.y = bbox_max.y.max(shape.bbox_max.y);
-            rings.extend(shape.rings);
-        }
-        if !bbox_min.x.is_finite()
-            || !bbox_min.y.is_finite()
-            || !bbox_max.x.is_finite()
-            || !bbox_max.y.is_finite()
-        {
-            return None;
-        }
-        Self::new_svg_shape_with_rings(order, rings, fill_rule, bbox_min, bbox_max)
     }
     pub fn new_shape_svg_fit(
         order: i32,
@@ -805,7 +813,12 @@ impl GeneralShape {
             None,
         )
     }
-    pub fn new_shapes_svg_fit(order: i32, svg_data: String, v1: Vec2, v2: Vec2) -> Option<Vec<Self>> {
+    pub fn new_shapes_svg_fit(
+        order: i32,
+        svg_data: String,
+        v1: Vec2,
+        v2: Vec2,
+    ) -> Option<Vec<Self>> {
         let (parsed, _scale) = parse_svg(svg_data, false)?;
         let mut svg_min = Vec2::new(f64::INFINITY, f64::INFINITY);
         let mut svg_max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
@@ -834,7 +847,11 @@ impl GeneralShape {
         } else {
             svg_size
         };
-        let scale = if svg_size.x > 0.0 { fit_size.x / svg_size.x } else { 1.0 };
+        let scale = if svg_size.x > 0.0 {
+            fit_size.x / svg_size.x
+        } else {
+            1.0
+        };
         let fit_min = center - fit_size * 0.5;
 
         let mut shapes = Vec::new();
@@ -1551,25 +1568,9 @@ impl GeneralShape {
                     self.set_magnets_number(value.curr());
                 }
             }
-            Seeds { value } => {
+            Seeds { .. } | VoronoiGap { .. } | VoronoiRelaxation { .. } => {
                 if matches!(self.shape_type, ShapeType::Voronoi) {
-                    let mut min = Vec2::new(f64::INFINITY, f64::INFINITY);
-                    let mut max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
-                    for (_, vertex) in self.vertices.iter() {
-                        let pos = vertex.curr();
-                        min.x = min.x.min(pos.x);
-                        min.y = min.y.min(pos.y);
-                        max.x = max.x.max(pos.x);
-                        max.y = max.y.max(pos.y);
-                    }
-                    if min.x.is_finite()
-                        && min.y.is_finite()
-                        && max.x.is_finite()
-                        && max.y.is_finite()
-                    {
-                        let rings = build_voronoi_rings(min, max, value.curr() as usize);
-                        self.voronoi_shape_data = Some(voronoi_rings_to_svg_data(rings));
-                    }
+                    self.rebuild_voronoi_from_properties();
                 }
             }
             _ => {}
@@ -1577,6 +1578,46 @@ impl GeneralShape {
         self.update_properties();
         self.set_bezpath();
         Some(())
+    }
+    fn rebuild_voronoi_from_properties(&mut self) {
+        let mut min = Vec2::new(f64::INFINITY, f64::INFINITY);
+        let mut max = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for (_, vertex) in self.vertices.iter() {
+            let pos = vertex.curr();
+            min.x = min.x.min(pos.x);
+            min.y = min.y.min(pos.y);
+            max.x = max.x.max(pos.x);
+            max.y = max.y.max(pos.y);
+        }
+        if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
+            return;
+        }
+        let seeds = self
+            .properties
+            .get(&Property::Seeds)
+            .and_then(|value| match value {
+                PropertyValue::Seeds { value } => Some(value.curr() as usize),
+                _ => None,
+            })
+            .unwrap_or(Self::DEFAULT_SEEDS);
+        let gap = self
+            .properties
+            .get(&Property::VoronoiGap)
+            .and_then(|value| match value {
+                PropertyValue::VoronoiGap { value } => Some(value.curr()),
+                _ => None,
+            })
+            .unwrap_or(Self::DEFAULT_VORONOI_GAP);
+        let relaxation = self
+            .properties
+            .get(&Property::VoronoiRelaxation)
+            .and_then(|value| match value {
+                PropertyValue::VoronoiRelaxation { value } => Some(value.curr() as usize),
+                _ => None,
+            })
+            .unwrap_or(Self::DEFAULT_VORONOI_RELAXATION);
+        let rings = build_voronoi_rings(min, max, seeds, gap, relaxation);
+        self.voronoi_shape_data = Some(voronoi_rings_to_svg_data(rings));
     }
     pub fn save_vertices_positions(&mut self) {
         for (_, value) in self.vertices.iter_mut() {
@@ -2481,7 +2522,13 @@ fn text_to_multipolygon(
 }
 
 // VORONOI
-fn build_voronoi_rings(p1: Vec2, p2: Vec2, seeds: usize) -> Vec<Vec<Vec2>> {
+fn build_voronoi_rings(
+    p1: Vec2,
+    p2: Vec2,
+    seeds: usize,
+    gap_factor: f64,
+    relaxation: usize,
+) -> Vec<Vec<Vec2>> {
     let min = Vec2::new(p1.x.min(p2.x), p1.y.min(p2.y));
     let max = Vec2::new(p1.x.max(p2.x), p1.y.max(p2.y));
     let size = max - min;
@@ -2489,18 +2536,11 @@ fn build_voronoi_rings(p1: Vec2, p2: Vec2, seeds: usize) -> Vec<Vec<Vec2>> {
         return Vec::new();
     }
 
-    let center = Vec2::new((min.x + max.x) * 0.5, (min.y + max.y) * 0.5);
-    let scale = 2.0;
-    let half: Vec2 = size * 0.5 * scale;
-    let seed_min = center - half;
-    let seed_max = center + half;
-    let seed_size = seed_max - seed_min;
-
     let guard_pad_x = size.x;
     let guard_pad_y = size.y;
     let guard_min = min - Vec2::new(guard_pad_x, guard_pad_y);
     let guard_max = max + Vec2::new(guard_pad_x, guard_pad_y);
-    let guard_steps = 8usize;
+    let guard_steps = 20;
     let mut guard_points = Vec::new();
     for i in 0..=guard_steps {
         let t = i as f64 / guard_steps as f64;
@@ -2524,11 +2564,10 @@ fn build_voronoi_rings(p1: Vec2, p2: Vec2, seeds: usize) -> Vec<Vec<Vec2>> {
     }
     let count = seeds;
     let mut points = Vec::with_capacity(count + guard_points.len());
-    let band = 0.001 * size.x.min(size.y);
     let grid_x = (count as f64).sqrt().ceil() as usize;
     let grid_y = count.div_ceil(grid_x).max(1);
-    let step_x = seed_size.x / grid_x as f64;
-    let step_y = seed_size.y / grid_y as f64;
+    let step_x = size.x / grid_x as f64;
+    let step_y = size.y / grid_y as f64;
     let cell = step_x.min(step_y);
     let jitter = cell * 0.5;
 
@@ -2537,30 +2576,20 @@ fn build_voronoi_rings(p1: Vec2, p2: Vec2, seeds: usize) -> Vec<Vec<Vec2>> {
             if points.len() >= count {
                 break 'outer;
             }
-            let base_x = seed_min.x + (ix as f64 + 0.5) * step_x;
-            let base_y = seed_min.y + (iy as f64 + 0.5) * step_y;
+            let base_x = min.x + (ix as f64 + 0.5) * step_x;
+            let base_y = min.y + (iy as f64 + 0.5) * step_y;
             let jx = (Math::random() * 2.0 - 1.0) * jitter;
             let jy = (Math::random() * 2.0 - 1.0) * jitter;
-            let x = base_x + jx;
-            let y = base_y + jy;
-            if x >= min.x
-                && x <= max.x
-                && y >= min.y
-                && y <= max.y
-                && (x <= min.x + band
-                    || x >= max.x - band
-                    || y <= min.y + band
-                    || y >= max.y - band)
-            {
-                continue;
-            }
+            let x = (base_x + jx).clamp(min.x, max.x);
+            let y = (base_y + jy).clamp(min.y, max.y);
             points.push(Vec2::new(x, y));
         }
     }
 
+    lloyd_relax_points(&mut points, &guard_points, min, max, relaxation);
     points.extend_from_slice(&guard_points);
-    let rings = voronoi_cells(&points, &guard_points);
-    let rings = inset_rings(rings, cell * 0.15);
+    let rings = voronoi_cells(&points, &guard_points, min, max);
+    let rings = inset_rings(rings, cell * gap_factor.clamp(0.0, 0.95));
     round_rings(rings, cell * 0.1, 3)
 }
 

@@ -53,6 +53,8 @@ pub enum Property {
     Text,
     Font,
     Seeds,
+    VoronoiGap,
+    VoronoiRelaxation,
     Magnets,
     Apex { idx: usize },
 }
@@ -73,7 +75,9 @@ impl Property {
             Property::Text => 120,
             Property::Font => 130,
             Property::Seeds => 140,
-            Property::Magnets => 150,
+            Property::VoronoiGap => 150,
+            Property::VoronoiRelaxation => 160,
+            Property::Magnets => 170,
             Property::Apex { idx } => 1000 + idx,
         }
     }
@@ -135,6 +139,12 @@ pub enum PropertyValue {
     Seeds {
         value: Scalar<u64>,
     },
+    VoronoiGap {
+        value: Scalar<f64>,
+    },
+    VoronoiRelaxation {
+        value: Scalar<u64>,
+    },
     Magnets {
         value: Scalar<usize>,
     },
@@ -162,6 +172,8 @@ impl fmt::Display for PropertyValue {
             Text { .. } => write!(f, "text"),
             Font { .. } => write!(f, "font"),
             Seeds { .. } => write!(f, "seeds"),
+            VoronoiGap { .. } => write!(f, "gap"),
+            VoronoiRelaxation { .. } => write!(f, "relaxation"),
             Magnets { .. } => write!(f, "magnets"),
             Apex { idx, .. } => write!(f, "apex {}", idx),
         }

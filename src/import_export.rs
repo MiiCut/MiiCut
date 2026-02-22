@@ -449,6 +449,25 @@ pub(crate) fn build_json_from_dataset(
         if let Some(count) = elem.get_magnets_number() {
             out.push_str(&format!("      \"constr_vertices\": {count},\n"));
         }
+        if matches!(elem.get_shape_type(), ShapeType::Voronoi) {
+            if let Some(PropertyValue::Seeds { value }) = elem.get_properties().get(&Property::Seeds)
+            {
+                out.push_str(&format!("      \"voronoi_seeds\": {},\n", value.curr()));
+            }
+            if let Some(PropertyValue::VoronoiGap { value }) =
+                elem.get_properties().get(&Property::VoronoiGap)
+            {
+                out.push_str(&format!("      \"voronoi_gap\": {:.6},\n", value.curr()));
+            }
+            if let Some(PropertyValue::VoronoiRelaxation { value }) =
+                elem.get_properties().get(&Property::VoronoiRelaxation)
+            {
+                out.push_str(&format!(
+                    "      \"voronoi_relaxation\": {},\n",
+                    value.curr()
+                ));
+            }
+        }
         let vertices = elem.get_vertices();
         out.push_str("      \"vertices\": [\n");
         for (idx, (_, v)) in vertices.iter().enumerate() {
@@ -756,6 +775,9 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         rotation: f64,
         children: Vec<usize>,
         constr_vertices: Option<usize>,
+        voronoi_seeds: Option<usize>,
+        voronoi_gap: Option<f64>,
+        voronoi_relaxation: Option<usize>,
         vertices: Vec<LoadedVertex>,
         svg_data: Option<SvgData>,
         voronoi_data: Option<SvgData>,
@@ -875,6 +897,10 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             }
         }
         let constr_vertices = get_f64(&shape_value, "constr_vertices").and_then(f64_to_usize);
+        let voronoi_seeds = get_f64(&shape_value, "voronoi_seeds").and_then(f64_to_usize);
+        let voronoi_gap = get_f64(&shape_value, "voronoi_gap");
+        let voronoi_relaxation =
+            get_f64(&shape_value, "voronoi_relaxation").and_then(f64_to_usize);
 
         let vertices_value = get_prop(&shape_value, "vertices");
         let Some(vertices_value) = vertices_value else {
@@ -954,6 +980,9 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             rotation,
             children,
             constr_vertices,
+            voronoi_seeds,
+            voronoi_gap,
+            voronoi_relaxation,
             vertices,
             svg_data,
             voronoi_data,
@@ -1080,10 +1109,25 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
                 let Some(mut properties) = build_bb_properties(&positions) else {
                     continue;
                 };
+                let seeds = shape.voronoi_seeds.unwrap_or(40).clamp(10, 100) as u64;
+                let gap = shape.voronoi_gap.unwrap_or(0.2).clamp(0.0, 0.8);
+                let relaxation = shape.voronoi_relaxation.unwrap_or(1).clamp(0, 5) as u64;
                 properties.add(
                     Property::Seeds,
                     PropertyValue::Seeds {
-                        value: Scalar::new(40_u64, 10_u64, 100_u64, 1_u64),
+                        value: Scalar::new(seeds, 10_u64, 100_u64, 1_u64),
+                    },
+                );
+                properties.add(
+                    Property::VoronoiGap,
+                    PropertyValue::VoronoiGap {
+                        value: Scalar::new(gap, 0.0, 0.8, 0.01),
+                    },
+                );
+                properties.add(
+                    Property::VoronoiRelaxation,
+                    PropertyValue::VoronoiRelaxation {
+                        value: Scalar::new(relaxation, 0_u64, 5_u64, 1_u64),
                     },
                 );
                 let vertices: Vec<Vertex> = positions.iter().copied().map(Vertex::new).collect();

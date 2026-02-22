@@ -762,6 +762,101 @@ pub(crate) fn update_shape_properties_panel(
                     .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
                 on_change.forget();
             }
+            PropertyValue::VoronoiGap { value } => {
+                let input = add_property_number_input(
+                    &document,
+                    &body,
+                    &label,
+                    Some(value.curr()),
+                    value.step(),
+                )?;
+                input.set_value(&format!("{:.3}", value.curr()));
+
+                let min = value.min();
+                let max = value.max();
+                input.set_min(&format!("{min:.3}"));
+                input.set_max(&format!("{max:.3}"));
+
+                let av_in = av.clone();
+                let input_clone = input.clone();
+                let on_change = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                    let Ok(value) = input_clone.value().parse::<f64>() else {
+                        return;
+                    };
+                    let Ok(mut avb) = av_in.try_borrow_mut() else {
+                        return;
+                    };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                        return;
+                    };
+                    let value = value.clamp(min, max);
+                    if let Some(PropertyValue::VoronoiGap { value: v }) =
+                        shape.get_properties_mut().get_mut(&prop)
+                    {
+                        v.set_curr(value);
+                    }
+                    input_clone.set_value(&format!("{value:.3}"));
+                    let _ = shape.update_from_property(&prop);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_in.clone());
+                });
+                let _ = input
+                    .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+                on_change.forget();
+            }
+            PropertyValue::VoronoiRelaxation { value } => {
+                let input = add_property_number_input(
+                    &document,
+                    &body,
+                    &label,
+                    Some(value.curr() as f64),
+                    value.step() as f64,
+                )?;
+                input.set_step("1");
+                input.set_value(&format!("{}", value.curr()));
+                let _ = input.set_attribute("inputmode", "numeric");
+
+                let min = value.min();
+                let max = value.max();
+                input.set_min(&format!("{min}"));
+                input.set_max(&format!("{max}"));
+
+                let av_in = av.clone();
+                let input_clone = input.clone();
+                let on_change = Closure::<dyn FnMut(Event)>::new(move |_evt: Event| {
+                    let Ok(value) = input_clone.value().parse::<f64>() else {
+                        return;
+                    };
+                    let Ok(mut avb) = av_in.try_borrow_mut() else {
+                        return;
+                    };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else {
+                        return;
+                    };
+                    let value = value.round() as u64;
+                    let value = value.clamp(min, max);
+                    if let Some(PropertyValue::VoronoiRelaxation { value: v }) =
+                        shape.get_properties_mut().get_mut(&prop)
+                    {
+                        v.set_curr(value);
+                    }
+                    input_clone.set_value(&format!("{value}"));
+                    let _ = shape.update_from_property(&prop);
+                    canvas.dataset.mark_final_polygon_dirty();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_in.clone());
+                });
+                let _ = input
+                    .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+                on_change.forget();
+            }
             Magnets { value } => {
                 let input = add_property_number_input(
                     &document,
