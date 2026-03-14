@@ -31,8 +31,8 @@ pub(crate) fn on_window_click(av: RefAV, event: Event) {
     let note_id = target.as_ref().and_then(note_id_from_element);
     let mut updated = false;
     if let Ok(mut avb) = av.try_borrow_mut() {
-        if avb.note_selected != note_id {
-            avb.note_selected = note_id;
+        if avb.notes.selected != note_id {
+            avb.notes.selected = note_id;
             updated = true;
         }
     }
@@ -104,44 +104,45 @@ pub(crate) fn update_notes_view(av: RefAV) {
     };
 
     let note_ids: HashSet<usize> = notes.iter().map(|note| note.id).collect();
-    if let Some(selected) = avb.note_selected {
+    if let Some(selected) = avb.notes.selected {
         if !note_ids.contains(&selected) {
-            avb.note_selected = None;
+            avb.notes.selected = None;
         }
     }
     let remove_ids: Vec<usize> = avb
-        .notes_dom
+        .notes
+        .dom
         .keys()
         .filter(|id| !note_ids.contains(id))
         .copied()
         .collect();
     for id in remove_ids {
-        if let Some(observer) = avb.notes_resize_observers.remove(&id) {
+        if let Some(observer) = avb.notes.resize_observers.remove(&id) {
             observer.disconnect();
         }
-        if let Some(el) = avb.notes_dom.remove(&id) {
+        if let Some(el) = avb.notes.dom.remove(&id) {
             let _ = container.remove_child(&el);
         }
     }
 
     for note in &notes {
-        let entry = if let Some(entry) = avb.notes_dom.get(&note.id) {
+        let entry = if let Some(entry) = avb.notes.dom.get(&note.id) {
             entry.clone()
         } else {
             let Some(entry) = build_note_element(av.clone(), note.id, &container, &document) else {
                 continue;
             };
-            avb.notes_dom.insert(note.id, entry.clone());
+            avb.notes.dom.insert(note.id, entry.clone());
             entry
         };
         if let std::collections::hash_map::Entry::Vacant(e) =
-            avb.notes_resize_observers.entry(note.id)
+            avb.notes.resize_observers.entry(note.id)
         {
             if let Some(observer) = create_note_resize_observer(av.clone(), note.id, &entry) {
                 e.insert(observer);
             }
         }
-        let class_name = if avb.note_selected == Some(note.id) {
+        let class_name = if avb.notes.selected == Some(note.id) {
             "note-item note-selected"
         } else {
             "note-item"
@@ -214,7 +215,7 @@ pub(crate) fn focus_note_editor(av: RefAV, note_id: usize) {
     let Ok(avb) = av.try_borrow_mut() else {
         return;
     };
-    let Some(note_el) = avb.notes_dom.get(&note_id) else {
+    let Some(note_el) = avb.notes.dom.get(&note_id) else {
         return;
     };
     let Ok(Some(textarea)) = note_el.query_selector("textarea") else {
@@ -287,10 +288,10 @@ fn build_note_element(
             let Ok(mut avb) = av_select.try_borrow_mut() else {
                 return;
             };
-            if avb.note_selected == Some(note_id) {
+            if avb.notes.selected == Some(note_id) {
                 return;
             }
-            avb.note_selected = Some(note_id);
+            avb.notes.selected = Some(note_id);
             drop(avb);
             update_notes_view(av_select.clone());
         }) as Box<dyn FnMut(_)>);
@@ -306,8 +307,8 @@ fn build_note_element(
                 return;
             };
             let mut changed = false;
-            if avb.note_selected != Some(note_id) {
-                avb.note_selected = Some(note_id);
+            if avb.notes.selected != Some(note_id) {
+                avb.notes.selected = Some(note_id);
                 changed = true;
             }
             let canvas = &avb.canvases[CanvasKind::Draw.idx()];
@@ -316,7 +317,7 @@ fn build_note_element(
                 return;
             };
             let offset = draw_pos - note.pos;
-            avb.note_drag = Some(NoteDrag {
+            avb.notes.drag = Some(NoteDrag {
                 id: note_id,
                 offset,
             });
@@ -336,7 +337,7 @@ fn build_note_element(
         let on_dbl = Closure::wrap(Box::new(move |event: Event| {
             event.prevent_default();
             if let Ok(avb) = av_clone.try_borrow_mut() {
-                if let Some(note_el) = avb.notes_dom.get(&note_id) {
+                if let Some(note_el) = avb.notes.dom.get(&note_id) {
                     if let Ok(Some(textarea)) = note_el.query_selector("textarea") {
                         if let Ok(textarea) = textarea.dyn_into::<HtmlTextAreaElement>() {
                             textarea.set_read_only(false);
@@ -366,7 +367,7 @@ fn build_note_element(
             let Ok(mut avb) = av_clone.try_borrow_mut() else {
                 return;
             };
-            let Some(note_el) = avb.notes_dom.get(&note_id).cloned() else {
+            let Some(note_el) = avb.notes.dom.get(&note_id).cloned() else {
                 return;
             };
             let Ok(Some(textarea)) = note_el.query_selector("textarea") else {
@@ -438,14 +439,14 @@ pub(crate) fn init_note_handlers(av: RefAV) -> Result<(), JsValue> {
         let Ok(mut avb) = av_clone.try_borrow_mut() else {
             return;
         };
-        let Some(drag) = avb.note_drag.clone() else {
+        let Some(drag) = avb.notes.drag.clone() else {
             return;
         };
         let (scale, offset, note_el) = {
             let canvas = &avb.canvases[CanvasKind::Draw.idx()];
             let scale = canvas.get_scale();
             let offset = canvas.get_offset();
-            let note_el = avb.notes_dom.get(&drag.id).cloned();
+            let note_el = avb.notes.dom.get(&drag.id).cloned();
             (scale, offset, note_el)
         };
         let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
@@ -471,7 +472,7 @@ pub(crate) fn init_note_handlers(av: RefAV) -> Result<(), JsValue> {
         let Ok(mut avb) = av_clone.try_borrow_mut() else {
             return;
         };
-        avb.note_drag = None;
+        avb.notes.drag = None;
     });
     window.add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref())?;
     on_up.forget();

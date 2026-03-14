@@ -1278,8 +1278,8 @@ pub(crate) fn clear_draw_view(av: RefAV) {
     canvas.dataset.mark_final_polygon_dirty();
     canvas.dataset.calc_final_polygon();
     canvas.push_history_action(before);
-    avb.note_drag = None;
-    avb.note_selected = None;
+    avb.notes.drag = None;
+    avb.notes.selected = None;
 }
 
 fn geo_multipolygon_to_bez_paths(poly: &geo::MultiPolygon<f64>) -> Vec<BezPath> {

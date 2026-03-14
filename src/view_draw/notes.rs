@@ -12,12 +12,12 @@ pub(crate) enum NoteDraftOutcome {
 }
 
 pub(crate) fn handle_note_draft_move(avb: &mut AppVars) -> NoteDraftOutcome {
-    if avb.note_draft.is_none() || avb.active_view != Tabs::Draw {
+    if avb.notes.draft.is_none() || avb.active_view != Tabs::Draw {
         return NoteDraftOutcome::None;
     }
     let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
     let draw_pos = canvas.get_user_ui().draw_pos;
-    if let Some(draft) = avb.note_draft.clone() {
+    if let Some(draft) = avb.notes.draft.clone() {
         let min = Vec2::new(draft.start.x.min(draw_pos.x), draft.start.y.min(draw_pos.y));
         let max = Vec2::new(draft.start.x.max(draw_pos.x), draft.start.y.max(draw_pos.y));
         if let Some(note) = canvas.notes.get_mut(draft.id) {
@@ -30,18 +30,18 @@ pub(crate) fn handle_note_draft_move(avb: &mut AppVars) -> NoteDraftOutcome {
 }
 
 pub(crate) fn handle_note_draft_start(avb: &mut AppVars, button: i16) -> NoteDraftOutcome {
-    if !avb.note_mode || avb.active_view != Tabs::Draw || button != 0 {
+    if !avb.notes.mode || avb.active_view != Tabs::Draw || button != 0 {
         return NoteDraftOutcome::None;
     }
     let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
     let start = canvas.get_user_ui().draw_pos;
     let id = canvas.notes.add(start, Vec2::new(1.0, 1.0), String::new());
-    avb.note_draft = Some(NoteDraft { id, start });
+    avb.notes.draft = Some(NoteDraft { id, start });
     NoteDraftOutcome::Started
 }
 
 pub(crate) fn handle_note_draft_finish(avb: &mut AppVars) -> NoteDraftOutcome {
-    let Some(draft) = avb.note_draft.take() else {
+    let Some(draft) = avb.notes.draft.take() else {
         return NoteDraftOutcome::None;
     };
     let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
@@ -56,13 +56,13 @@ pub(crate) fn delete_note_if_selected(av: &RefAV, active_note_id: Option<usize>)
     let Ok(mut avb) = av.try_borrow_mut() else {
         return false;
     };
-    let note_id = active_note_id.or(avb.note_selected);
+    let note_id = active_note_id.or(avb.notes.selected);
     let Some(note_id) = note_id else {
         return false;
     };
     let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
     if canvas.notes.remove(note_id).is_some() {
-        avb.note_selected = None;
+        avb.notes.selected = None;
         return true;
     }
     false

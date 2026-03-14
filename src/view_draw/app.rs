@@ -61,10 +61,10 @@ impl AppVars {
 
     pub(crate) fn go_to_arrow_tool(&mut self) {
         self.icon_selected = ShapeType::Arrow;
-        self.note_mode = false;
-        self.note_draft = None;
-        self.note_drag = None;
-        self.note_selected = None;
+        self.notes.mode = false;
+        self.notes.draft = None;
+        self.notes.drag = None;
+        self.notes.selected = None;
         self.user_icons
             .iter()
             .for_each(|icon| self.html_deselect_icons(*icon));
@@ -73,10 +73,10 @@ impl AppVars {
     }
     pub(crate) fn select_note_tool(&mut self) {
         self.icon_selected = ShapeType::Arrow;
-        self.note_mode = true;
+        self.notes.mode = true;
         self.element_on_creation = None;
-        self.note_drag = None;
-        self.note_selected = None;
+        self.notes.drag = None;
+        self.notes.selected = None;
         self.user_icons
             .iter()
             .for_each(|icon| self.html_deselect_icons(*icon));
@@ -1934,9 +1934,9 @@ pub(crate) fn on_icon_click(av: RefAV, icon: ShapeType) {
         return;
     };
     avb.icon_selected = icon;
-    avb.note_mode = false;
-    avb.note_draft = None;
-    avb.note_drag = None;
+    avb.notes.mode = false;
+    avb.notes.draft = None;
+    avb.notes.drag = None;
     avb.user_icons
         .iter()
         .for_each(|icon| avb.html_deselect_icons(*icon));
@@ -1972,7 +1972,7 @@ pub(crate) fn on_icon_mouseout(av: RefAV, _event: Event) {
         return;
     };
     let _ = avb.tooltip.set_attribute("style", "display:none;");
-    if !avb.note_mode {
+    if !avb.notes.mode {
         if let Some(html_element) = avb.icon_selected.get_html_element() {
             let selected_color = Color::OnCreation.get();
             let _ = html_element.set_attribute("style", &format!("color:{selected_color}"));
@@ -1984,7 +1984,7 @@ pub(crate) fn on_icon_mouseout(av: RefAV, _event: Event) {
         }
     }
     avb.user_icons.iter().for_each(|icon| {
-        if *icon != avb.icon_selected || avb.note_mode {
+        if *icon != avb.icon_selected || avb.notes.mode {
             if let Some(html_element) = icon.get_html_element() {
                 let text_color = Color::Text.get();
                 let _ = html_element.set_attribute("style", &format!("color:{text_color}"));

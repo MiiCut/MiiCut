@@ -66,12 +66,7 @@ pub(crate) struct AppVars {
     pub(crate) gc: GcodeCache,
     pub(crate) machine: MachineState,
     pub(crate) shapes_drag_from: Option<usize>,
-    pub(crate) note_mode: bool,
-    pub(crate) note_draft: Option<NoteDraft>,
-    pub(crate) note_drag: Option<NoteDrag>,
-    pub(crate) note_selected: Option<usize>,
-    pub(crate) notes_dom: HashMap<usize, HtmlElement>,
-    pub(crate) notes_resize_observers: HashMap<usize, ResizeObserver>,
+    pub(crate) notes: NoteState,
     pub(crate) selection_window: Option<SelectionWindow>,
 }
 
@@ -85,6 +80,15 @@ pub(crate) struct NoteDraft {
 pub(crate) struct NoteDrag {
     pub(crate) id: usize,
     pub(crate) offset: Vec2,
+}
+
+pub(crate) struct NoteState {
+    pub(crate) mode: bool,
+    pub(crate) draft: Option<NoteDraft>,
+    pub(crate) drag: Option<NoteDrag>,
+    pub(crate) selected: Option<usize>,
+    pub(crate) dom: HashMap<usize, HtmlElement>,
+    pub(crate) resize_observers: HashMap<usize, ResizeObserver>,
 }
 
 pub(crate) struct ToolpathCache {
@@ -264,12 +268,14 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
             cnc,
         },
         shapes_drag_from: None,
-        note_mode: false,
-        note_draft: None,
-        note_drag: None,
-        note_selected: None,
-        notes_dom: HashMap::new(),
-        notes_resize_observers: HashMap::new(),
+        notes: NoteState {
+            mode: false,
+            draft: None,
+            drag: None,
+            selected: None,
+            dom: HashMap::new(),
+            resize_observers: HashMap::new(),
+        },
         selection_window: None,
     }));
 
