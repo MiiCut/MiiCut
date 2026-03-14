@@ -749,6 +749,17 @@ impl Canvas {
             self.draw_text(text);
         }
     }
+    pub fn draw_paths(
+        &self,
+        paths: &[BezPath],
+        pattern: Pattern,
+        fill_color: Color,
+        stroke_color: Color,
+    ) {
+        for path in paths.iter() {
+            self.draw_path(path, pattern, fill_color, stroke_color, vec![]);
+        }
+    }
     pub fn draw_svg_paths(
         &self,
         paths: &[BezPath],

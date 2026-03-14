@@ -356,51 +356,13 @@ pub(crate) fn render_toolpath_view(av: RefAV) {
     let canvas_toolpath = &mut avb.canvases[CanvasKind::Toolpath.idx()];
     canvas_toolpath.clear();
 
-    for path in original_paths.iter() {
-        canvas_toolpath.draw_path(
-            path,
-            Pattern::Dim,
-            Color::Transparent,
-            Color::Gray20,
-            vec![],
-        );
-    }
-    for path in travels.iter() {
-        canvas_toolpath.draw_path(
-            path,
-            Pattern::Dim,
-            Color::Transparent,
-            Color::Purple55,
-            vec![],
-        );
-    }
-    for path in travel_arrows.iter() {
-        canvas_toolpath.draw_path(
-            path,
-            Pattern::Point,
-            Color::Purple55,
-            Color::Purple55,
-            vec![],
-        );
-    }
-    for path in paths.iter() {
-        canvas_toolpath.draw_path(path, Pattern::Dim, Color::Transparent, Color::Black, vec![]);
-    }
-    for path in lead_ins.iter() {
-        canvas_toolpath.draw_path(
-            path,
-            Pattern::Dim,
-            Color::Transparent,
-            Color::Green40,
-            vec![],
-        );
-    }
-    for path in lead_outs.iter() {
-        canvas_toolpath.draw_path(path, Pattern::Dim, Color::Transparent, Color::Red60, vec![]);
-    }
-    for path in arrows.iter() {
-        canvas_toolpath.draw_path(path, Pattern::Point, Color::Green40, Color::Green40, vec![]);
-    }
+    canvas_toolpath.draw_paths(&original_paths, Pattern::Dim, Color::Transparent, Color::Gray20);
+    canvas_toolpath.draw_paths(&travels, Pattern::Dim, Color::Transparent, Color::Purple55);
+    canvas_toolpath.draw_paths(&travel_arrows, Pattern::Point, Color::Purple55, Color::Purple55);
+    canvas_toolpath.draw_paths(&paths, Pattern::Dim, Color::Transparent, Color::Black);
+    canvas_toolpath.draw_paths(&lead_ins, Pattern::Dim, Color::Transparent, Color::Green40);
+    canvas_toolpath.draw_paths(&lead_outs, Pattern::Dim, Color::Transparent, Color::Red60);
+    canvas_toolpath.draw_paths(&arrows, Pattern::Point, Color::Green40, Color::Green40);
     let scale = canvas_toolpath.get_scale();
     for pos in starts.iter() {
         canvas_toolpath.draw_path(

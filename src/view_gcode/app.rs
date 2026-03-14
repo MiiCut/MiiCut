@@ -193,18 +193,8 @@ pub(crate) fn render_gcode_view(av: RefAV) {
                 canvas_gcode.draw_path(&path, Pattern::Dim, Color::Transparent, color, vec![]);
             }
         }
-        for path in lead_ins.iter() {
-            canvas_gcode.draw_path(
-                path,
-                Pattern::Dim,
-                Color::Transparent,
-                Color::Green40,
-                vec![],
-            );
-        }
-        for path in lead_outs.iter() {
-            canvas_gcode.draw_path(path, Pattern::Dim, Color::Transparent, Color::Red60, vec![]);
-        }
+        canvas_gcode.draw_paths(&lead_ins, Pattern::Dim, Color::Transparent, Color::Green40);
+        canvas_gcode.draw_paths(&lead_outs, Pattern::Dim, Color::Transparent, Color::Red60);
     } else if let Some(path) = path.as_ref() {
         canvas_gcode.draw_path(path, Pattern::Dim, Color::Transparent, Color::Black, vec![]);
     }
