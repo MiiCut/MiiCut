@@ -27,10 +27,10 @@ impl AppVars {
         el.set_inner_text(&text);
     }
     fn wire_machine_inputs(&self, av: RefAV) -> Result<(), JsValue> {
-        let Some(cnc) = self.cnc.clone() else {
+        let Some(cnc) = self.machine.cnc.clone() else {
             return Ok(());
         };
-        for group in self.machine_groups.iter() {
+        for group in self.machine.groups.iter() {
             for setting in group.settings.iter() {
                 let input_id = machine_input_id(&setting.id);
                 let Some(el) = self.document.get_element_by_id(&input_id) else {
@@ -57,13 +57,13 @@ impl AppVars {
                         let result = cnc.send_http_cmd_ts(&cmd).await;
                         if let Ok(mut avb) = av.try_borrow_mut() {
                             match result {
-                                Ok(true) => avb.last_http_error = None,
+                                Ok(true) => avb.machine.last_http_error = None,
                                 Ok(false) => {
-                                    avb.last_http_error =
+                                    avb.machine.last_http_error =
                                         Some(format!("Machine setting failed: {cmd}"))
                                 }
                                 Err(_) => {
-                                    avb.last_http_error =
+                                    avb.machine.last_http_error =
                                         Some(format!("Machine setting failed: {cmd}"))
                                 }
                             }
@@ -129,10 +129,10 @@ impl AppVars {
             return;
         };
         let mut parts = Vec::new();
-        if let Some(msg) = self.last_ws_error.as_ref() {
+        if let Some(msg) = self.machine.last_ws_error.as_ref() {
             parts.push(format!("WS: {msg}"));
         }
-        if let Some(msg) = self.last_http_error.as_ref() {
+        if let Some(msg) = self.machine.last_http_error.as_ref() {
             parts.push(format!("HTTP: {msg}"));
         }
         let text = parts.join(" | ");
@@ -144,23 +144,23 @@ impl AppVars {
         }
     }
     pub(crate) fn ensure_machine_view(&mut self, av: RefAV) -> Result<(), JsValue> {
-        if self.machine_groups.is_empty() {
-            self.machine_groups = load_machine_schema();
+        if self.machine.groups.is_empty() {
+            self.machine.groups = load_machine_schema();
         }
-        if !self.machine_view_built {
-            build_machine_view(&self.document, &self.machine_groups)?;
+        if !self.machine.view_built {
+            build_machine_view(&self.document, &self.machine.groups)?;
             self.wire_machine_inputs(av.clone())?;
             self.wire_machine_controls(av)?;
             self.set_machine_status_time(None);
             self.set_machine_status_error();
-            self.machine_view_built = true;
+            self.machine.view_built = true;
         }
         Ok(())
     }
     pub(crate) fn request_machine_settings(&mut self, av: RefAV) {
-        if let Some(cnc) = &self.cnc {
+        if let Some(cnc) = &self.machine.cnc {
             self.set_machine_status("Status: updating...", Some("pending"));
-            self.last_http_error = None;
+            self.machine.last_http_error = None;
             self.set_machine_status_error();
             let cnc = cnc.clone();
             let av = av.clone();
@@ -168,15 +168,17 @@ impl AppVars {
                 let result = cnc.send_http_cmd_ts("$$").await;
                 if let Ok(mut avb) = av.try_borrow_mut() {
                     match result {
-                        Ok(true) => avb.last_http_error = None,
+                        Ok(true) => avb.machine.last_http_error = None,
                         Ok(false) => {
-                            avb.last_http_error = Some("Machine settings request failed: $$".into())
+                            avb.machine.last_http_error =
+                                Some("Machine settings request failed: $$".into())
                         }
                         Err(_) => {
-                            avb.last_http_error = Some("Machine settings request failed: $$".into())
+                            avb.machine.last_http_error =
+                                Some("Machine settings request failed: $$".into())
                         }
                     }
-                    if avb.last_http_error.is_some() {
+                    if avb.machine.last_http_error.is_some() {
                         avb.set_machine_status("Status: unable to update", Some("error"));
                     }
                     avb.set_machine_status_error();
@@ -188,7 +190,7 @@ impl AppVars {
         let mut updated = 0;
         for line in msg.lines() {
             if let Some((id, value)) = parse_grbl_setting_line(line) {
-                if update_machine_value(&mut self.machine_groups, &id, &value) {
+                if update_machine_value(&mut self.machine.groups, &id, &value) {
                     self.update_machine_input(&id, &value);
                     updated += 1;
                 }
@@ -197,9 +199,9 @@ impl AppVars {
         if updated > 0 {
             self.set_machine_status("Status: updated", Some("ok"));
             let now = Date::new_0().to_string().as_string().unwrap_or_default();
-            self.machine_last_update = Some(now.clone());
+            self.machine.last_update = Some(now.clone());
             self.set_machine_status_time(Some(&now));
-            self.last_http_error = None;
+            self.machine.last_http_error = None;
             self.set_machine_status_error();
         }
     }

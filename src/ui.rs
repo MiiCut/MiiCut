@@ -384,13 +384,13 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
 
     if matches!(selected, Tabs::Toolpath) {
         avb.refresh_toolpath_cache();
-        avb.last_gcode = None;
-        avb.toolpath_auto_center = true;
+        avb.gc.last_gcode = None;
+        avb.tp.auto_center = true;
     }
     if matches!(selected, Tabs::Gcode) {
         avb.refresh_toolpath_cache();
-        avb.last_gcode = None;
-        avb.gcode_auto_center = true;
+        avb.gc.last_gcode = None;
+        avb.gc.auto_center = true;
     }
     if matches!(selected, Tabs::Machine) {
         let _ = avb.ensure_machine_view(av.clone());

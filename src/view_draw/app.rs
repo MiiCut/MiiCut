@@ -1497,9 +1497,9 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                             canvas.dataset.mark_final_polygon_dirty();
                         }
                         avb.refresh_toolpath_cache();
-                        let toolpath = avb.toolpath.clone().unwrap_or(Toolpath::new(Vec::new()));
-                        let gcode = toolpath_to_plasma_gcode(&toolpath, &avb.toolpath_params);
-                        avb.last_gcode = Some(gcode);
+                        let toolpath = avb.tp.toolpath.clone().unwrap_or(Toolpath::new(Vec::new()));
+                        let gcode = toolpath_to_plasma_gcode(&toolpath, &avb.tp.params);
+                        avb.gc.last_gcode = Some(gcode);
                         avb.refresh_gcode_cache();
                     }
                     avb.canvases[CanvasKind::Draw.idx()].commit_history_action();

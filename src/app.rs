@@ -62,32 +62,9 @@ pub(crate) struct AppVars {
     pub(crate) active_canvas: CanvasKind,
     pub(crate) active_view: Tabs,
 
-    pub(crate) last_gcode: Option<String>,
-    pub(crate) gcode_auto_center: bool,
-    pub(crate) gcode_auto_fit: bool,
-    pub(crate) gcode_segments: Vec<Seg>,
-    pub(crate) gcode_cut_path: Option<BezPath>,
-    pub(crate) toolpath: Option<Toolpath>,
-    pub(crate) toolpath_params: ToolpathParams,
-    pub(crate) toolpath_paths: Vec<BezPath>,
-    pub(crate) toolpath_lead_ins: Vec<BezPath>,
-    pub(crate) toolpath_lead_outs: Vec<BezPath>,
-    pub(crate) toolpath_travels: Vec<BezPath>,
-    pub(crate) toolpath_travel_arrows: Vec<BezPath>,
-    pub(crate) toolpath_arrows: Vec<BezPath>,
-    pub(crate) toolpath_starts: Vec<Vec2>,
-    pub(crate) toolpath_ends: Vec<Vec2>,
-    pub(crate) toolpath_original_paths: Vec<BezPath>,
-    pub(crate) toolpath_auto_center: bool,
-    pub(crate) toolpath_auto_fit: bool,
-    pub(crate) machine_groups: Vec<MachineGroup>,
-    pub(crate) machine_view_built: bool,
-    pub(crate) machine_last_update: Option<String>,
-    pub(crate) ws_connected: bool,
-    pub(crate) ws_status: String,
-    pub(crate) last_ws_error: Option<String>,
-    pub(crate) last_http_error: Option<String>,
-    pub(crate) cnc: Option<Rc<CncLink>>,
+    pub(crate) tp: ToolpathCache,
+    pub(crate) gc: GcodeCache,
+    pub(crate) machine: MachineState,
     pub(crate) shapes_drag_from: Option<usize>,
     pub(crate) note_mode: bool,
     pub(crate) note_draft: Option<NoteDraft>,
@@ -108,6 +85,41 @@ pub(crate) struct NoteDraft {
 pub(crate) struct NoteDrag {
     pub(crate) id: usize,
     pub(crate) offset: Vec2,
+}
+
+pub(crate) struct ToolpathCache {
+    pub(crate) toolpath: Option<Toolpath>,
+    pub(crate) params: ToolpathParams,
+    pub(crate) paths: Vec<BezPath>,
+    pub(crate) lead_ins: Vec<BezPath>,
+    pub(crate) lead_outs: Vec<BezPath>,
+    pub(crate) travels: Vec<BezPath>,
+    pub(crate) travel_arrows: Vec<BezPath>,
+    pub(crate) arrows: Vec<BezPath>,
+    pub(crate) starts: Vec<Vec2>,
+    pub(crate) ends: Vec<Vec2>,
+    pub(crate) original_paths: Vec<BezPath>,
+    pub(crate) auto_center: bool,
+    pub(crate) auto_fit: bool,
+}
+
+pub(crate) struct GcodeCache {
+    pub(crate) last_gcode: Option<String>,
+    pub(crate) auto_center: bool,
+    pub(crate) auto_fit: bool,
+    pub(crate) segments: Vec<Seg>,
+    pub(crate) cut_path: Option<BezPath>,
+}
+
+pub(crate) struct MachineState {
+    pub(crate) groups: Vec<MachineGroup>,
+    pub(crate) view_built: bool,
+    pub(crate) last_update: Option<String>,
+    pub(crate) ws_connected: bool,
+    pub(crate) ws_status: String,
+    pub(crate) last_ws_error: Option<String>,
+    pub(crate) last_http_error: Option<String>,
+    pub(crate) cnc: Option<Rc<CncLink>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -210,41 +222,47 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         user_icons,
         tooltip,
         icon_selected: ShapeType::Arrow,
-        last_gcode: None,
-        gcode_auto_center: false,
-        gcode_auto_fit: false,
-        gcode_segments: Vec::new(),
-        gcode_cut_path: None,
-        toolpath: None,
-        toolpath_params: ToolpathParams {
-            feed_xy: 1200.0,
-            travel_feed_xy: 3000.0,
-            pierce_delay_s: 0.3,
-            lead_in_mm: 2.0,
-            lead_out_mm: 2.0,
-            kerf_mm: 1.0,
-            torch_on_m3: "M3".to_string(),
-            torch_off_m5: "M5".to_string(),
+        tp: ToolpathCache {
+            toolpath: None,
+            params: ToolpathParams {
+                feed_xy: 1200.0,
+                travel_feed_xy: 3000.0,
+                pierce_delay_s: 0.3,
+                lead_in_mm: 2.0,
+                lead_out_mm: 2.0,
+                kerf_mm: 1.0,
+                torch_on_m3: "M3".to_string(),
+                torch_off_m5: "M5".to_string(),
+            },
+            paths: Vec::new(),
+            lead_ins: Vec::new(),
+            lead_outs: Vec::new(),
+            travels: Vec::new(),
+            travel_arrows: Vec::new(),
+            arrows: Vec::new(),
+            starts: Vec::new(),
+            ends: Vec::new(),
+            original_paths: Vec::new(),
+            auto_center: false,
+            auto_fit: false,
         },
-        toolpath_paths: Vec::new(),
-        toolpath_lead_ins: Vec::new(),
-        toolpath_lead_outs: Vec::new(),
-        toolpath_travels: Vec::new(),
-        toolpath_travel_arrows: Vec::new(),
-        toolpath_arrows: Vec::new(),
-        toolpath_starts: Vec::new(),
-        toolpath_ends: Vec::new(),
-        toolpath_original_paths: Vec::new(),
-        toolpath_auto_center: false,
-        toolpath_auto_fit: false,
-        machine_groups: Vec::new(),
-        machine_view_built: false,
-        machine_last_update: None,
-        ws_connected: false,
-        ws_status: "WS disconnected".to_string(),
-        last_ws_error: None,
-        last_http_error: None,
-        cnc,
+        gc: GcodeCache {
+            last_gcode: None,
+            auto_center: false,
+            auto_fit: false,
+            segments: Vec::new(),
+            cut_path: None,
+        },
+        machine: MachineState {
+            groups: Vec::new(),
+            view_built: false,
+            last_update: None,
+            ws_connected: false,
+            ws_status: "WS disconnected".to_string(),
+            last_ws_error: None,
+            last_http_error: None,
+            cnc,
+        },
         shapes_drag_from: None,
         note_mode: false,
         note_draft: None,
@@ -255,7 +273,7 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         selection_window: None,
     }));
 
-    if let Some(cnc) = app_vars.borrow().cnc.clone() {
+    if let Some(cnc) = app_vars.borrow().machine.cnc.clone() {
         let av_clone = app_vars.clone();
         cnc.set_on_text_handler(Some(Box::new(move |msg| {
             if let Ok(mut avb) = av_clone.try_borrow_mut() {
@@ -265,12 +283,12 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         let av_clone = app_vars.clone();
         cnc.set_on_status_handler(Some(Box::new(move |msg| {
             if let Ok(mut avb) = av_clone.try_borrow_mut() {
-                avb.ws_status = msg.clone();
-                avb.ws_connected = msg.starts_with("WS connected");
+                avb.machine.ws_status = msg.clone();
+                avb.machine.ws_connected = msg.starts_with("WS connected");
                 if msg.starts_with("WS error") || msg.starts_with("WS closed") {
-                    avb.last_ws_error = Some(msg);
+                    avb.machine.last_ws_error = Some(msg);
                 } else {
-                    avb.last_ws_error = None;
+                    avb.machine.last_ws_error = None;
                 }
                 avb.set_machine_status_error();
             }
@@ -317,9 +335,9 @@ pub(crate) fn save_toolpath_params(av: RefAV) {
     let document = av.borrow().document.clone();
     let (params, machine_values) = {
         let avb = av.borrow();
-        let params = avb.toolpath_params.clone();
+        let params = avb.tp.params.clone();
         let mut machine_values = Vec::new();
-        for group in avb.machine_groups.iter() {
+        for group in avb.machine.groups.iter() {
             for setting in group.settings.iter() {
                 machine_values.push((setting.id.clone(), setting.value.clone()));
             }
@@ -459,7 +477,7 @@ pub(crate) fn apply_toolpath_params_from_json(av: RefAV, json_data: String) {
     let Some(toolpath_value) = get_prop(&value, "toolpath") else {
         return;
     };
-    let params = &mut avb.toolpath_params;
+    let params = &mut avb.tp.params;
 
     if let Some(val) = get_prop(&toolpath_value, "feed_xy").and_then(|val| val.as_f64()) {
         params.feed_xy = val;
@@ -503,14 +521,14 @@ pub(crate) fn apply_toolpath_params_from_json(av: RefAV, json_data: String) {
             if value_str.is_empty() {
                 continue;
             }
-            if update_machine_value(&mut avb.machine_groups, &id, &value_str) {
+            if update_machine_value(&mut avb.machine.groups, &id, &value_str) {
                 avb.update_machine_input(&id, &value_str);
             }
         }
     }
 
     drop(avb);
-    let params = av.borrow().toolpath_params.clone();
+    let params = av.borrow().tp.params.clone();
     let set_value = |id: &str, value: &str| {
         if let Some(el) = document.get_element_by_id(id) {
             if let Ok(input) = el.dyn_into::<HtmlInputElement>() {

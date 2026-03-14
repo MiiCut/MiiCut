@@ -50,11 +50,11 @@ pub(crate) fn update_status_bar(av: RefAV) {
             text
         }
         Tabs::Machine => {
-            let mut parts = vec![avb.ws_status.clone()];
-            if let Some(msg) = avb.last_ws_error.as_ref() {
+            let mut parts = vec![avb.machine.ws_status.clone()];
+            if let Some(msg) = avb.machine.last_ws_error.as_ref() {
                 parts.push(format!("WS error: {msg}"));
             }
-            if let Some(msg) = avb.last_http_error.as_ref() {
+            if let Some(msg) = avb.machine.last_http_error.as_ref() {
                 parts.push(format!("HTTP error: {msg}"));
             }
             parts.join(" | ")

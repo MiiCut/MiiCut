@@ -14,15 +14,15 @@ use web_sys::{Event, MouseEvent, WheelEvent};
 
 impl AppVars {
     pub(crate) fn refresh_gcode_cache(&mut self) {
-        let gcode = self.last_gcode.as_deref().unwrap_or("");
+        let gcode = self.gc.last_gcode.as_deref().unwrap_or("");
         let segs = gcode_to_segments(gcode);
         let mut path = BezPath::new();
         for s in segs.iter().filter(|s| s.cut) {
             path.push(PathEl::MoveTo(Point::new(s.x1, s.y1)));
             path.push(PathEl::LineTo(Point::new(s.x2, s.y2)));
         }
-        self.gcode_segments = segs;
-        self.gcode_cut_path = if path.is_empty() { None } else { Some(path) };
+        self.gc.segments = segs;
+        self.gc.cut_path = if path.is_empty() { None } else { Some(path) };
     }
 }
 
@@ -142,32 +142,32 @@ pub(crate) fn render_gcode_view(av: RefAV) {
     begin_render(av.clone(), "G-code");
     update_status_bar(av.clone());
     let mut avb = av.borrow_mut();
-    if avb.last_gcode.is_none() {
+    if avb.gc.last_gcode.is_none() {
         avb.refresh_toolpath_cache();
-        let toolpath = avb.toolpath.clone().unwrap_or(Toolpath::new(Vec::new()));
-        let gcode = toolpath_to_plasma_gcode(&toolpath, &avb.toolpath_params);
-        avb.last_gcode = Some(gcode);
+        let toolpath = avb.tp.toolpath.clone().unwrap_or(Toolpath::new(Vec::new()));
+        let gcode = toolpath_to_plasma_gcode(&toolpath, &avb.tp.params);
+        avb.gc.last_gcode = Some(gcode);
         avb.refresh_gcode_cache();
     }
-    let gcode = avb.last_gcode.as_deref().unwrap_or("");
+    let gcode = avb.gc.last_gcode.as_deref().unwrap_or("");
 
     if let Some(el) = avb.document.get_element_by_id("gcode-text") {
         el.set_text_content(Some(gcode));
     }
 
-    let gcode_action = if avb.gcode_auto_fit {
-        avb.gcode_auto_center = false;
-        avb.gcode_auto_fit = false;
+    let gcode_action = if avb.gc.auto_fit {
+        avb.gc.auto_center = false;
+        avb.gc.auto_fit = false;
         Some(true)
-    } else if avb.gcode_auto_center {
-        avb.gcode_auto_center = false;
+    } else if avb.gc.auto_center {
+        avb.gc.auto_center = false;
         Some(false)
     } else {
         None
     };
 
     if let Some(do_fit) = gcode_action {
-        let segs = avb.gcode_segments.clone();
+        let segs = avb.gc.segments.clone();
         let canvas_gcode = &mut avb.canvases[CanvasKind::Gcode.idx()];
         if do_fit {
             fit_segments_canvas(canvas_gcode, &segs, |seg| (seg.x1, seg.y1, seg.x2, seg.y2));
@@ -175,10 +175,10 @@ pub(crate) fn render_gcode_view(av: RefAV) {
             center_segments_canvas(canvas_gcode, &segs, |seg| (seg.x1, seg.y1, seg.x2, seg.y2));
         }
     }
-    let toolpath = avb.toolpath.clone();
-    let lead_ins = avb.toolpath_lead_ins.clone();
-    let lead_outs = avb.toolpath_lead_outs.clone();
-    let path = avb.gcode_cut_path.clone();
+    let toolpath = avb.tp.toolpath.clone();
+    let lead_ins = avb.tp.lead_ins.clone();
+    let lead_outs = avb.tp.lead_outs.clone();
+    let path = avb.gc.cut_path.clone();
     let canvas_gcode = &mut avb.canvases[CanvasKind::Gcode.idx()];
     canvas_gcode.clear();
 

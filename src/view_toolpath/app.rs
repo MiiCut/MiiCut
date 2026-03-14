@@ -16,27 +16,27 @@ use web_sys::{Event, HtmlElement, HtmlInputElement, MouseEvent, WheelEvent};
 
 impl AppVars {
     pub(crate) fn clear_toolpath_gcode(&mut self) {
-        self.toolpath = None;
-        self.toolpath_paths.clear();
-        self.toolpath_lead_ins.clear();
-        self.toolpath_lead_outs.clear();
-        self.toolpath_travels.clear();
-        self.toolpath_travel_arrows.clear();
-        self.toolpath_arrows.clear();
-        self.toolpath_starts.clear();
-        self.toolpath_ends.clear();
-        self.toolpath_original_paths.clear();
-        self.last_gcode = Some(String::new());
-        self.gcode_segments.clear();
-        self.gcode_cut_path = None;
+        self.tp.toolpath = None;
+        self.tp.paths.clear();
+        self.tp.lead_ins.clear();
+        self.tp.lead_outs.clear();
+        self.tp.travels.clear();
+        self.tp.travel_arrows.clear();
+        self.tp.arrows.clear();
+        self.tp.starts.clear();
+        self.tp.ends.clear();
+        self.tp.original_paths.clear();
+        self.gc.last_gcode = Some(String::new());
+        self.gc.segments.clear();
+        self.gc.cut_path = None;
     }
     pub(crate) fn refresh_toolpath_cache(&mut self) {
         let canvas_draw = &mut self.canvases[CanvasKind::Draw.idx()];
         canvas_draw.dataset.calc_final_polygon();
         let original_paths = canvas_draw.dataset.final_paths.clone();
         let toolpath =
-            multipolygon_to_toolpath(&canvas_draw.dataset.final_polygon, &self.toolpath_params);
-        self.last_gcode = None;
+            multipolygon_to_toolpath(&canvas_draw.dataset.final_polygon, &self.tp.params);
+        self.gc.last_gcode = None;
         let mut paths = Vec::new();
         let mut lead_ins = Vec::new();
         let mut lead_outs = Vec::new();
@@ -86,23 +86,23 @@ impl AppVars {
                 }
             }
         }
-        self.toolpath = Some(toolpath);
-        self.toolpath_paths = paths;
-        self.toolpath_lead_ins = lead_ins;
-        self.toolpath_lead_outs = lead_outs;
-        self.toolpath_travels = travels;
-        self.toolpath_travel_arrows = travel_arrows;
-        self.toolpath_arrows = arrows;
-        self.toolpath_starts = starts;
-        self.toolpath_ends = ends;
-        self.toolpath_original_paths = original_paths;
+        self.tp.toolpath = Some(toolpath);
+        self.tp.paths = paths;
+        self.tp.lead_ins = lead_ins;
+        self.tp.lead_outs = lead_outs;
+        self.tp.travels = travels;
+        self.tp.travel_arrows = travel_arrows;
+        self.tp.arrows = arrows;
+        self.tp.starts = starts;
+        self.tp.ends = ends;
+        self.tp.original_paths = original_paths;
         if self.active_canvas == CanvasKind::Gcode {
             let gcode = self
-                .toolpath
+                .tp.toolpath
                 .as_ref()
-                .map(|tp| toolpath_to_plasma_gcode(tp, &self.toolpath_params))
+                .map(|tp| toolpath_to_plasma_gcode(tp, &self.tp.params))
                 .unwrap_or_default();
-            self.last_gcode = Some(gcode);
+            self.gc.last_gcode = Some(gcode);
             self.refresh_gcode_cache();
         }
     }
@@ -112,7 +112,7 @@ pub(crate) fn update_toolpath_params(av: RefAV) {
     let document = av.borrow().document.clone();
     let active = av.borrow().active_canvas;
     let mut avb = av.borrow_mut();
-    let params = &mut avb.toolpath_params;
+    let params = &mut avb.tp.params;
     let torch_on = params.torch_on_m3.clone();
     let torch_off = params.torch_off_m5.clone();
 
@@ -127,9 +127,9 @@ pub(crate) fn update_toolpath_params(av: RefAV) {
     params.torch_off_m5 = read_input_string(&document, "tp-torch-off", &torch_off);
 
     avb.refresh_toolpath_cache();
-    let toolpath = avb.toolpath.clone().unwrap_or(Toolpath::new(Vec::new()));
-    let gcode = toolpath_to_plasma_gcode(&toolpath, &avb.toolpath_params);
-    avb.last_gcode = Some(gcode);
+    let toolpath = avb.tp.toolpath.clone().unwrap_or(Toolpath::new(Vec::new()));
+    let gcode = toolpath_to_plasma_gcode(&toolpath, &avb.tp.params);
+    avb.gc.last_gcode = Some(gcode);
     avb.refresh_gcode_cache();
     drop(avb);
 
@@ -181,7 +181,7 @@ pub(crate) fn init_toolpath_panel(av: RefAV) -> Result<(), JsValue> {
         on_click.forget();
     }
 
-    let params = av.borrow().toolpath_params.clone();
+    let params = av.borrow().tp.params.clone();
     let set_value = |id: &str, value: &str| {
         if let Some(el) = document.get_element_by_id(id) {
             if let Ok(input) = el.dyn_into::<HtmlInputElement>() {
@@ -318,24 +318,24 @@ pub(crate) fn render_toolpath_view(av: RefAV) {
     update_status_bar(av.clone());
     let mut avb = av.borrow_mut();
 
-    let action = if avb.toolpath_auto_fit {
-        avb.toolpath_auto_center = false;
-        avb.toolpath_auto_fit = false;
+    let action = if avb.tp.auto_fit {
+        avb.tp.auto_center = false;
+        avb.tp.auto_fit = false;
         Some(true)
-    } else if avb.toolpath_auto_center {
-        avb.toolpath_auto_center = false;
+    } else if avb.tp.auto_center {
+        avb.tp.auto_center = false;
         Some(false)
     } else {
         None
     };
 
     if let Some(do_fit) = action {
-        let mut paths = avb.toolpath_paths.clone();
-        paths.extend(avb.toolpath_lead_ins.iter().cloned());
-        paths.extend(avb.toolpath_lead_outs.iter().cloned());
-        paths.extend(avb.toolpath_travels.iter().cloned());
-        paths.extend(avb.toolpath_travel_arrows.iter().cloned());
-        paths.extend(avb.toolpath_arrows.iter().cloned());
+        let mut paths = avb.tp.paths.clone();
+        paths.extend(avb.tp.lead_ins.iter().cloned());
+        paths.extend(avb.tp.lead_outs.iter().cloned());
+        paths.extend(avb.tp.travels.iter().cloned());
+        paths.extend(avb.tp.travel_arrows.iter().cloned());
+        paths.extend(avb.tp.arrows.iter().cloned());
         let canvas_toolpath = &mut avb.canvases[CanvasKind::Toolpath.idx()];
         if do_fit {
             fit_paths_canvas(canvas_toolpath, &paths);
@@ -344,15 +344,15 @@ pub(crate) fn render_toolpath_view(av: RefAV) {
         }
     }
 
-    let original_paths = avb.toolpath_original_paths.clone();
-    let paths = avb.toolpath_paths.clone();
-    let lead_ins = avb.toolpath_lead_ins.clone();
-    let lead_outs = avb.toolpath_lead_outs.clone();
-    let travels = avb.toolpath_travels.clone();
-    let travel_arrows = avb.toolpath_travel_arrows.clone();
-    let arrows = avb.toolpath_arrows.clone();
-    let starts = avb.toolpath_starts.clone();
-    let ends = avb.toolpath_ends.clone();
+    let original_paths = avb.tp.original_paths.clone();
+    let paths = avb.tp.paths.clone();
+    let lead_ins = avb.tp.lead_ins.clone();
+    let lead_outs = avb.tp.lead_outs.clone();
+    let travels = avb.tp.travels.clone();
+    let travel_arrows = avb.tp.travel_arrows.clone();
+    let arrows = avb.tp.arrows.clone();
+    let starts = avb.tp.starts.clone();
+    let ends = avb.tp.ends.clone();
     let canvas_toolpath = &mut avb.canvases[CanvasKind::Toolpath.idx()];
     canvas_toolpath.clear();
 
