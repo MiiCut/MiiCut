@@ -85,29 +85,17 @@ pub(crate) fn document() -> Document {
 
 // Helpers
 pub(crate) fn get_element_height(element: &Element) -> u32 {
-    let style = window()
-        .unwrap()
-        .get_computed_style(element)
-        .unwrap()
-        .unwrap();
-    style
-        .get_property_value("height")
-        .unwrap()
-        .replace("px", "")
-        .parse::<u32>()
+    window()
+        .and_then(|w| w.get_computed_style(element).ok().flatten())
+        .and_then(|style| style.get_property_value("height").ok())
+        .and_then(|s| s.replace("px", "").trim().parse::<u32>().ok())
         .unwrap_or(0)
 }
 pub(crate) fn get_element_width(element: &Element) -> u32 {
-    let style = window()
-        .unwrap()
-        .get_computed_style(element)
-        .unwrap()
-        .unwrap();
-    style
-        .get_property_value("width")
-        .unwrap()
-        .replace("px", "")
-        .parse::<u32>()
+    window()
+        .and_then(|w| w.get_computed_style(element).ok().flatten())
+        .and_then(|style| style.get_property_value("width").ok())
+        .and_then(|s| s.replace("px", "").trim().parse::<u32>().ok())
         .unwrap_or(0)
 }
 
@@ -241,14 +229,23 @@ fn init_splitter(
     splitter_id: &str,
     canvas_kind: CanvasKind,
 ) -> Result<(), JsValue> {
-    let window: Window = web_sys::window().unwrap();
-    let document = window.document().unwrap();
+    let window: Window =
+        web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
+    let document = window
+        .document()
+        .ok_or_else(|| JsValue::from_str("no document"))?;
 
-    let split: HtmlElement = document.get_element_by_id(split_id).unwrap().dyn_into()?;
-    let left: HtmlElement = document.get_element_by_id(left_id).unwrap().dyn_into()?;
+    let split: HtmlElement = document
+        .get_element_by_id(split_id)
+        .ok_or_else(|| JsValue::from_str(split_id))?
+        .dyn_into()?;
+    let left: HtmlElement = document
+        .get_element_by_id(left_id)
+        .ok_or_else(|| JsValue::from_str(left_id))?
+        .dyn_into()?;
     let splitter: HtmlElement = document
         .get_element_by_id(splitter_id)
-        .unwrap()
+        .ok_or_else(|| JsValue::from_str(splitter_id))?
         .dyn_into()?;
 
     let left_id = left_id.to_string();

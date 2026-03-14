@@ -93,7 +93,9 @@ pub(crate) fn init_status(av: RefAV) -> Result<(), JsValue> {
     let active_canvas = av.borrow().active_canvas;
     let setup_checkbox =
         |id: &str, av: RefAV, is_linear: bool, value: f64| -> Result<(), JsValue> {
-            let el = document.get_element_by_id(id).unwrap();
+            let Some(el) = document.get_element_by_id(id) else {
+                return Ok(());
+            };
             let input: HtmlInputElement = el.dyn_into::<HtmlInputElement>()?;
             let on_change = Closure::wrap(Box::new(move |_event: Event| {
                 {

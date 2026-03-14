@@ -267,7 +267,9 @@ pub(crate) fn init_toolpath_canvas(av: RefAV) -> Result<(), JsValue> {
 pub(crate) fn on_toolpath_mouse_move(av: RefAV, event: Event) {
     if let Ok(mouse_event) = event.dyn_into::<MouseEvent>() {
         let sys_mouse = SystemMouse::Move;
-        let action = av.borrow_mut().update_canvas_inputs(mouse_event, sys_mouse);
+        let Ok(action) = av.try_borrow_mut().map(|mut avb| avb.update_canvas_inputs(mouse_event, sys_mouse)) else {
+            return;
+        };
         let _ = update(av.clone(), action);
     }
 }
@@ -275,7 +277,9 @@ pub(crate) fn on_toolpath_mouse_move(av: RefAV, event: Event) {
 pub(crate) fn on_toolpath_mouse_down(av: RefAV, event: Event) {
     if let Ok(mouse_event) = event.dyn_into::<MouseEvent>() {
         let sys_mouse = SystemMouse::Down(mouse_event.detail());
-        let action = av.borrow_mut().update_canvas_inputs(mouse_event, sys_mouse);
+        let Ok(action) = av.try_borrow_mut().map(|mut avb| avb.update_canvas_inputs(mouse_event, sys_mouse)) else {
+            return;
+        };
         let _ = update(av.clone(), action);
     }
 }
@@ -283,7 +287,9 @@ pub(crate) fn on_toolpath_mouse_down(av: RefAV, event: Event) {
 pub(crate) fn on_toolpath_mouse_up(av: RefAV, event: Event) {
     if let Ok(mouse_event) = event.dyn_into::<MouseEvent>() {
         let sys_mouse = SystemMouse::Up(mouse_event.detail());
-        let action = av.borrow_mut().update_canvas_inputs(mouse_event, sys_mouse);
+        let Ok(action) = av.try_borrow_mut().map(|mut avb| avb.update_canvas_inputs(mouse_event, sys_mouse)) else {
+            return;
+        };
         let _ = update(av.clone(), action);
     }
 }

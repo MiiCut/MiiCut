@@ -1109,7 +1109,9 @@ pub(crate) fn init_icons(av: RefAV) -> Result<(), JsValue> {
             "click".into(),
             &note_icon,
             Box::new(move |av, _event| {
-                let mut avb = av.borrow_mut();
+                let Ok(mut avb) = av.try_borrow_mut() else {
+                    return;
+                };
                 avb.select_note_tool();
                 drop(avb);
                 update_notes_view(av_clone.clone());
@@ -1690,7 +1692,9 @@ pub(crate) fn on_draw_mouse_wheel(av: RefAV, event: Event) {
         wheel_event.stop_propagation();
         let delta_y = wheel_event.delta_y();
         if let Ok(mouse_event) = wheel_event.clone().dyn_into::<MouseEvent>() {
-            let mut avb = av.borrow_mut();
+            let Ok(mut avb) = av.try_borrow_mut() else {
+                return;
+            };
             let sys_mouse = SystemMouse::Move;
             let _ = avb.update_canvas_inputs(mouse_event, sys_mouse);
             let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
@@ -1926,7 +1930,9 @@ pub(crate) fn render_draw_view(av: RefAV) {
 }
 
 pub(crate) fn on_icon_click(av: RefAV, icon: ShapeType) {
-    let mut avb = av.borrow_mut();
+    let Ok(mut avb) = av.try_borrow_mut() else {
+        return;
+    };
     avb.icon_selected = icon;
     avb.note_mode = false;
     avb.note_draft = None;
@@ -1941,12 +1947,12 @@ pub(crate) fn on_icon_click(av: RefAV, icon: ShapeType) {
 
 pub(crate) fn on_icon_mouseover(av: RefAV, event: Event, icon: ShapeType) {
     if let Ok(event) = event.dyn_into::<MouseEvent>() {
-        let avb = av.borrow_mut();
+        let Ok(avb) = av.try_borrow_mut() else {
+            return;
+        };
         if let Some(html_element) = icon.get_html_element() {
             let selected_color = Color::OnCreation.get();
-            html_element
-                .set_attribute("style", &format!("color:{selected_color}"))
-                .unwrap();
+            let _ = html_element.set_attribute("style", &format!("color:{selected_color}"));
         }
         show_tooltip(&avb, event.x(), event.y(), icon_tooltip(icon));
     }
@@ -1954,36 +1960,34 @@ pub(crate) fn on_icon_mouseover(av: RefAV, event: Event, icon: ShapeType) {
 
 pub(crate) fn on_icon_mouseover_label(av: RefAV, event: Event, label: &'static str) {
     if let Ok(event) = event.dyn_into::<MouseEvent>() {
-        let avb = av.borrow_mut();
+        let Ok(avb) = av.try_borrow_mut() else {
+            return;
+        };
         show_tooltip(&avb, event.x(), event.y(), label);
     }
 }
 
 pub(crate) fn on_icon_mouseout(av: RefAV, _event: Event) {
-    let avb = av.borrow_mut();
+    let Ok(avb) = av.try_borrow_mut() else {
+        return;
+    };
     let _ = avb.tooltip.set_attribute("style", "display:none;");
     if !avb.note_mode {
         if let Some(html_element) = avb.icon_selected.get_html_element() {
             let selected_color = Color::OnCreation.get();
-            html_element
-                .set_attribute("style", &format!("color:{selected_color}"))
-                .unwrap();
+            let _ = html_element.set_attribute("style", &format!("color:{selected_color}"));
         }
     } else if let Some(html_element) = avb.document.get_element_by_id("icon-note") {
         if let Ok(html_element) = html_element.dyn_into::<HtmlElement>() {
             let selected_color = Color::OnCreation.get();
-            html_element
-                .set_attribute("style", &format!("color:{selected_color}"))
-                .unwrap();
+            let _ = html_element.set_attribute("style", &format!("color:{selected_color}"));
         }
     }
     avb.user_icons.iter().for_each(|icon| {
         if *icon != avb.icon_selected || avb.note_mode {
             if let Some(html_element) = icon.get_html_element() {
                 let text_color = Color::Text.get();
-                html_element
-                    .set_attribute("style", &format!("color:{text_color}"))
-                    .unwrap();
+                let _ = html_element.set_attribute("style", &format!("color:{text_color}"));
             }
         }
     });
