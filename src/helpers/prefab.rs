@@ -201,11 +201,9 @@ pub fn dim_radius_classic(center: Vec2, radius: f64, angle: f64, scale: f64) -> 
     let arrow_len = 8.0 / scale;
     let arrow_w = 3.0 / scale;
     let tail = 6.0 / scale; // short overshoot past the arrowhead
-    let hs = 3.0 / scale;
 
     let arrow_base = circ_pt + u * arrow_len;
     let line_end = arrow_base + u * tail;
-    let handle = center + u * (radius * 0.5); // mid-radius, on the line
 
     // Line from center through circumference, ending just past the arrow
     path.move_to(center.to_point());
@@ -217,14 +215,8 @@ pub fn dim_radius_classic(center: Vec2, radius: f64, angle: f64, scale: f64) -> 
     path.line_to((arrow_base - n * arrow_w).to_point());
     path.close_path();
 
-    // Draggable handle square at mid-radius
-    path.move_to((handle + Vec2::new(-hs, -hs)).to_point());
-    path.line_to((handle + Vec2::new(hs, -hs)).to_point());
-    path.line_to((handle + Vec2::new(hs, hs)).to_point());
-    path.line_to((handle + Vec2::new(-hs, hs)).to_point());
-    path.close_path();
-
-    (path, handle)
+    // Handle is at the arrowhead tip (on the circle circumference)
+    (path, circ_pt)
 }
 
 pub fn get_stroke_color(selected: bool, highlighted: bool) -> Color {

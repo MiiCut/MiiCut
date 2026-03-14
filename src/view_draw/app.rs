@@ -1,5 +1,5 @@
 use crate::{
-    app::{set_callback, AppVars, DimDrag, RefAV, SelectionWindow},
+    app::{set_callback, AppVars, DimDrag, RefAV, RotationDrag, SelectionWindow},
     canvas::{CanvasKind, Color, Pattern},
     dimensions::dim_hv,
     dom::{
@@ -175,11 +175,17 @@ impl AppVars {
             canvas.set_cursor("default");
             return;
         }
-        let has_vertex = canvas.dataset.vertex_highlighted.is_some();
-        if has_vertex {
-            if canvas.get_user_ui().keys_states.shift_pressed {
-                canvas.set_cursor("url(\"assets/cursor_rotate_16.png\") 8 8, auto");
-            }
+        let draw_pos = canvas.get_user_ui().draw_pos;
+        let scale = canvas.get_scale();
+        let hit_radius = 6.0 / scale.max(0.001);
+        let on_rotation_handle = canvas.dataset.shapes.values().any(|shape| {
+            shape
+                .rotation_handle_world_pos(scale)
+                .map(|p| (p - draw_pos).hypot() < hit_radius)
+                .unwrap_or(false)
+        });
+        if on_rotation_handle {
+            canvas.set_cursor("url(\"assets/cursor_rotate_16.png\") 8 8, auto");
         } else {
             canvas.set_cursor("default");
         }
@@ -1416,7 +1422,7 @@ fn hit_test_dim_handle(
                 let angle =
                     if (stored - (-20.0)).abs() < 1e-9 { natural } else { stored };
                 let u = Vec2::new(angle.cos(), angle.sin());
-                let handle = center + u * (radius * 0.5);
+                let handle = center + u * radius;
                 let dist = (handle - mouse_pos).hypot();
                 if dist < hit_radius {
                     if best.as_ref().map_or(true, |(_, d)| dist < *d) {
@@ -1457,7 +1463,7 @@ fn hit_test_dim_handle(
                         let stored0 = offsets[1];
                         let a0 = if (stored0 - (-20.0)).abs() < 1e-9 { natural0 } else { stored0 };
                         let u0 = Vec2::new(a0.cos(), a0.sin());
-                        let handle0 = pts[0] + u0 * (r0 * 0.5);
+                        let handle0 = pts[0] + u0 * r0;
                         let dist = (handle0 - mouse_pos).hypot();
                         if dist < hit_radius {
                             if best.as_ref().map_or(true, |(_, d)| dist < *d) {
@@ -1474,7 +1480,7 @@ fn hit_test_dim_handle(
                         let stored1 = offsets[2];
                         let a1 = if (stored1 - (-20.0)).abs() < 1e-9 { natural1 } else { stored1 };
                         let u1 = Vec2::new(a1.cos(), a1.sin());
-                        let handle1 = pts[1] + u1 * (r1 * 0.5);
+                        let handle1 = pts[1] + u1 * r1;
                         let dist = (handle1 - mouse_pos).hypot();
                         if dist < hit_radius {
                             if best.as_ref().map_or(true, |(_, d)| dist < *d) {
@@ -1552,7 +1558,7 @@ fn hit_test_dim_handle(
                             let angle =
                                 if (stored - (-20.0)).abs() < 1e-9 { natural } else { stored };
                             let u = Vec2::new(angle.cos(), angle.sin());
-                            let handle_local = arc_center_local + u * (r_f * 0.5);
+                            let handle_local = arc_center_local + u * r_f;
                             let handle = if rotation.abs() > 1e-9 {
                                 rotate_vector(handle_local - center, rotation) + center
                             } else {
@@ -1619,6 +1625,30 @@ fn hit_test_dim_handle(
                         }
                     }
                 }
+                // Premier apex arrondi — handle angulaire, dim_idx=2
+                if shape.get_vertices().len() >= 3 {
+                    use crate::helpers::math::ApexType;
+                    let apices = shape.get_vertices().get_apices();
+                    if let Some(ApexType::Arc { s, c, .. }) =
+                        apices.iter().find(|a| matches!(a, ApexType::Arc { .. }))
+                    {
+                        let radius = (*s - *c).hypot();
+                        if radius > 0.01 {
+                            let natural = (*s - *c).y.atan2((*s - *c).x);
+                            let stored = offsets[2];
+                            let angle =
+                                if (stored - (-20.0)).abs() < 1e-9 { natural } else { stored };
+                            let u = Vec2::new(angle.cos(), angle.sin());
+                            let handle = *c + u * radius;
+                            let dist = (handle - mouse_pos).hypot();
+                            if dist < hit_radius {
+                                if best.as_ref().map_or(true, |(_, d)| dist < *d) {
+                                    best = Some(((*eid, 2, Vec2::ZERO, true, *c), dist));
+                                }
+                            }
+                        }
+                    }
+                }
             }
             _ => continue,
         }
@@ -1659,6 +1689,23 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         };
                         if let Some(shape) = avb.canvases[CanvasKind::Draw.idx()].dataset.shapes.get_mut(&dd.shape_id) {
                             shape.set_dim_offset(dd.dim_idx, new_offset);
+                        }
+                        do_render = true;
+                    } else if let Some(rd) = avb.rotation_drag {
+                        use crate::helpers::math::snap_angle;
+                        let mouse_pos =
+                            avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
+                        let snap = avb.canvases[CanvasKind::Draw.idx()].get_user_ui().snap;
+                        let v = mouse_pos - rd.center;
+                        let curr_angle = v.y.atan2(v.x);
+                        let new_rotation =
+                            snap_angle(rd.saved_rotation + (curr_angle - rd.start_angle), snap);
+                        if let Some(shape) = avb.canvases[CanvasKind::Draw.idx()]
+                            .dataset
+                            .shapes
+                            .get_mut(&rd.shape_id)
+                        {
+                            shape.set_rotation_curr(new_rotation);
                         }
                         do_render = true;
                     } else if avb.update_selection_window_current() {
@@ -1715,9 +1762,27 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                                         (bbox.x0 + bbox.x1) * 0.5,
                                         (bbox.y0 + bbox.y1) * 0.5,
                                     );
-                                    // arc_center is between shape_center and corner;
-                                    // outward = from shape_center through arc_center
                                     (drag_center - shape_center).y.atan2((drag_center - shape_center).x)
+                                }
+                                (Some(ShapeType::Poly), 2) => {
+                                    use crate::helpers::math::ApexType;
+                                    // drag_center = arc center c; natural = c→s direction
+                                    shapes
+                                        .get(&shape_id)
+                                        .and_then(|sh| {
+                                            if sh.get_vertices().len() < 3 {
+                                                return None;
+                                            }
+                                            let apices = sh.get_vertices().get_apices();
+                                            apices.into_iter().find_map(|a| {
+                                                if let ApexType::Arc { s, c, .. } = a {
+                                                    Some((s - c).y.atan2((s - c).x))
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                        })
+                                        .unwrap_or(0.0)
                                 }
                                 _ if pts.len() >= 2 =>
                                     (pts[1] - pts[0]).y.atan2((pts[1] - pts[0]).x),
@@ -1746,6 +1811,43 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                     let canvas = avb.get_active_canvas_mut();
                     canvas.begin_history_action();
                     canvas.dataset.save_elements_positions();
+                    // Check rotation handle before vertex selection
+                    {
+                        use crate::helpers::math::snap_angle;
+                        let draw_pos =
+                            avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
+                        let scale = avb.canvases[CanvasKind::Draw.idx()].get_scale();
+                        let hit_radius = 6.0 / scale.max(0.001);
+                        let found = avb.canvases[CanvasKind::Draw.idx()]
+                            .dataset
+                            .shapes
+                            .iter()
+                            .find_map(|(&sid, shape)| {
+                                shape
+                                    .rotation_handle_world_pos(scale)
+                                    .filter(|&p| (p - draw_pos).hypot() < hit_radius)
+                                    .map(|_| {
+                                        let center = shape.bbox_center_pub();
+                                        let start_angle =
+                                            (draw_pos - center).y.atan2((draw_pos - center).x);
+                                        RotationDrag {
+                                            shape_id: sid,
+                                            center,
+                                            start_angle,
+                                            saved_rotation: shape.get_rotation(),
+                                        }
+                                    })
+                            });
+                        let _ = snap_angle; // used in Move handler
+                        if let Some(rd) = found {
+                            avb.rotation_drag = Some(rd);
+                            avb.selection_window = None;
+                            do_render = true;
+                            drop(avb);
+                            render_active_view(av.clone());
+                            return Ok(());
+                        }
+                    }
                     if avb.set_element_select_vertex() {
                         avb.selection_window = None;
                         do_render = true;
@@ -1790,6 +1892,20 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         if do_render {
                             render_active_view(av.clone());
                         }
+                        return Ok(());
+                    }
+                    if avb.rotation_drag.take().is_some() {
+                        {
+                            let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                            canvas.dataset.mark_final_polygon_dirty();
+                            canvas.dataset.calc_final_polygon();
+                            canvas.commit_history_action();
+                        }
+                        avb.refresh_toolpath_cache();
+                        avb.refresh_gcode_cache();
+                        do_render = true;
+                        drop(avb);
+                        render_active_view(av.clone());
                         return Ok(());
                     }
                     if let Some(selection_window) = avb.selection_window.take() {

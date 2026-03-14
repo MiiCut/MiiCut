@@ -1176,6 +1176,10 @@ impl Canvas {
                 }
             }
             ShapeType::Poly => {
+                let verts = e.get_vertices();
+                if verts.len() < 3 {
+                    return;
+                }
                 let bbox = e.get_bezpath().bounding_box();
                 if bbox.width() < 0.1 && bbox.height() < 0.1 {
                     return;
@@ -1197,6 +1201,38 @@ impl Canvas {
                     format!("{:.0}", bbox.height()), cinfo,
                 );
                 self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
+                // Rayons des apex arrondis
+                let apices = verts.get_apices();
+                let mut first_arc = true;
+                for apex in apices.iter() {
+                    if let ApexType::Arc { s, c, .. } = apex {
+                        let radius = (*s - *c).hypot();
+                        if radius < 0.01 {
+                            continue;
+                        }
+                        let natural_angle = (*s - *c).y.atan2((*s - *c).x);
+                        let angle = if first_arc {
+                            let stored = dim_offsets[2];
+                            if (stored - (-20.0)).abs() < 1e-9 {
+                                natural_angle
+                            } else {
+                                stored
+                            }
+                        } else {
+                            natural_angle
+                        };
+                        let (path, pattern, colors, text, _) =
+                            dim_disc(*c, radius, angle, cinfo);
+                        self.draw_path(
+                            &path,
+                            pattern,
+                            colors.fill_color,
+                            colors.stroke_color,
+                            text,
+                        );
+                        first_arc = false;
+                    }
+                }
             }
             ShapeType::Arrow => (),
         }
@@ -1242,6 +1278,17 @@ impl Canvas {
                 Pattern::Point,
                 colors.fill_color,
                 colors.stroke_color,
+                vec![],
+            );
+        }
+        // Rotation handle (outside v[2]) for rotatable shapes
+        if let Some(h) = e.rotation_handle_world_pos(scale) {
+            let ring = point_path(h, scale * 0.8);
+            self.draw_path(
+                &ring,
+                Pattern::Composed(false),
+                Color::Transparent,
+                Color::OnCreation,
                 vec![],
             );
         }

@@ -1350,23 +1350,6 @@ impl GeneralShape {
                 if len != 4 {
                     return false;
                 }
-                let center = self.bbox_center_saved();
-                if user_ui.keys_states.shift_pressed {
-                    let start = user_ui.draw_pos_down() - center;
-                    let curr = user_ui.draw_pos() - center;
-                    if start.hypot() < EPSILON || curr.hypot() < EPSILON {
-                        return false;
-                    }
-                    let delta_a = angle_from(start, curr);
-                    self.rotation
-                        .set_curr(snap_angle(self.rotation.get_saved() + delta_a, snap));
-                    log!(
-                        "Rotation: {:.2}",
-                        self.rotation.get() / std::f64::consts::PI * 180.
-                    );
-                    self.set_bezpath();
-                    return true;
-                }
                 if let Some(text_data) = &mut self.text_shape_data {
                     text_data.invalidate_cache();
                 }
@@ -1383,45 +1366,48 @@ impl GeneralShape {
                 };
                 let rotation = self.rotation.get();
                 if rotation.abs() > EPSILON {
-                    log!("Rotation: {:.2}", rotation / std::f64::consts::PI * 180.);
-                    let opp_idx = (i + 2).rem_euclid(4) as usize;
-                    let pivot = self.vertices.val(opp_idx as i64).saved();
-                    let saved = rotate_vector(user_ui.pointer.saved() - pivot, -rotation) + pivot;
-                    let curr = rotate_vector(user_ui.pointer.curr() - pivot, -rotation) + pivot;
-                    let mut local_delta = curr - saved;
+                    // Vertices are stored in local (unrotated) space.
+                    // Mouse pointer is in world (rotated) space.
+                    // Un-rotate mouse around the bbox center to convert to local space.
+                    let center = self.bbox_center_saved();
+                    let mouse_saved_local =
+                        rotate_vector(user_ui.pointer.saved() - center, -rotation) + center;
+                    let mouse_curr_local =
+                        rotate_vector(user_ui.pointer.curr() - center, -rotation) + center;
+                    let mut local_delta = mouse_curr_local - mouse_saved_local;
                     if !user_ui.magnetized {
                         local_delta = (local_delta / snap.linear()).round() * snap.linear();
                     }
-                    let mut local_saved: [Vec2; 4] = [Vec2::ZERO; 4];
-                    let mut local_curr: [Vec2; 4] = [Vec2::ZERO; 4];
-                    for idx in 0..4 {
-                        let pos = self.vertices.val(idx as i64).saved();
-                        let local = rotate_vector(pos - pivot, -rotation) + pivot;
-                        local_saved[idx] = local;
-                        local_curr[idx] = local;
-                    }
                     let i_usize = i.rem_euclid(4) as usize;
-                    local_curr[i_usize] = local_saved[i_usize] + local_delta;
-                    let tmp = local_saved[i_usize];
+                    let dragged_saved = self.vertices.val(i).saved();
+                    self.vertices
+                        .val_mut(i)
+                        .set_curr(dragged_saved + local_delta);
                     if i % 2 == 1 {
-                        let left = (i - 1).rem_euclid(4) as usize;
-                        let right = (i + 1).rem_euclid(4) as usize;
-                        local_saved[left].x = tmp.x;
-                        local_curr[left] = local_saved[left] + Vec2::new(local_delta.x, 0.);
-                        local_saved[right].y = tmp.y;
-                        local_curr[right] = local_saved[right] + Vec2::new(0., local_delta.y);
+                        let left = (i - 1).rem_euclid(4);
+                        let right = (i + 1).rem_euclid(4);
+                        let left_saved = self.vertices.val(left).saved();
+                        let right_saved = self.vertices.val(right).saved();
+                        self.vertices
+                            .val_mut(left)
+                            .set_curr(left_saved + Vec2::new(local_delta.x, 0.));
+                        self.vertices
+                            .val_mut(right)
+                            .set_curr(right_saved + Vec2::new(0., local_delta.y));
                     } else {
-                        let left = (i - 1).rem_euclid(4) as usize;
-                        let right = (i + 1).rem_euclid(4) as usize;
-                        local_saved[left].y = tmp.y;
-                        local_curr[left] = local_saved[left] + Vec2::new(0., local_delta.y);
-                        local_saved[right].x = tmp.x;
-                        local_curr[right] = local_saved[right] + Vec2::new(local_delta.x, 0.);
+                        let left = (i - 1).rem_euclid(4);
+                        let right = (i + 1).rem_euclid(4);
+                        let left_saved = self.vertices.val(left).saved();
+                        let right_saved = self.vertices.val(right).saved();
+                        self.vertices
+                            .val_mut(left)
+                            .set_curr(left_saved + Vec2::new(0., local_delta.y));
+                        self.vertices
+                            .val_mut(right)
+                            .set_curr(right_saved + Vec2::new(local_delta.x, 0.));
                     }
-                    for idx in 0..4 {
-                        let curr = rotate_vector(local_curr[idx] - pivot, rotation) + pivot;
-                        self.vertices.val_mut(idx as i64).set_curr(curr);
-                    }
+                    // Opposite vertex (opp_idx) stays implicitly at saved() — not modified.
+                    let _ = i_usize; // suppress unused warning
                     self.set_bezpath();
                     return true;
                 }
@@ -1925,6 +1911,35 @@ impl GeneralShape {
         self.set_bezpath();
     }
 
+    /// Update current rotation without saving (used during live drag preview).
+    pub fn set_rotation_curr(&mut self, rotation: f64) {
+        self.rotation.set_curr(rotation);
+        self.set_bezpath();
+    }
+
+    /// World-space position of the rotation handle (14 px outside v[2] from center).
+    /// Returns `None` for shape types that do not support rotation via the handle.
+    pub fn rotation_handle_world_pos(&self, scale: f64) -> Option<Vec2> {
+        if !matches!(
+            self.shape_type,
+            ShapeType::Square | ShapeType::Text | ShapeType::Svg | ShapeType::Voronoi
+        ) {
+            return None;
+        }
+        if self.vertices.len() < 4 {
+            return None;
+        }
+        let v2_world = self.vertex_display_pos(self.vertices.val(2).curr());
+        let center = self.bbox_center();
+        let outward = v2_world - center;
+        let dist = outward.hypot();
+        if dist < 1e-9 {
+            return None;
+        }
+        const OFFSET_PX: f64 = 14.0;
+        Some(v2_world + outward / dist * (OFFSET_PX / scale))
+    }
+
     pub fn get_dim_offsets(&self) -> [f64; 4] {
         self.dim_offsets
     }
@@ -2059,6 +2074,10 @@ impl GeneralShape {
         if bezpath_only {
             self.update_polygon();
         }
+    }
+
+    pub fn bbox_center_pub(&self) -> Vec2 {
+        self.bbox_center()
     }
 
     fn bbox_center(&self) -> Vec2 {

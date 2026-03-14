@@ -69,6 +69,7 @@ pub(crate) struct AppVars {
     pub(crate) notes: NoteState,
     pub(crate) selection_window: Option<SelectionWindow>,
     pub(crate) dim_drag: Option<DimDrag>,
+    pub(crate) rotation_drag: Option<RotationDrag>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +95,14 @@ pub(crate) struct DimDrag {
     // Angular drag (Disc): recompute angle from circle center to mouse
     pub(crate) is_angular: bool,
     pub(crate) drag_center: Vec2,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RotationDrag {
+    pub(crate) shape_id: crate::types::others::EUId,
+    pub(crate) center: Vec2,
+    pub(crate) start_angle: f64,
+    pub(crate) saved_rotation: f64,
 }
 
 pub(crate) struct NoteState {
@@ -292,6 +301,7 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         },
         selection_window: None,
         dim_drag: None,
+        rotation_drag: None,
     }));
 
     if let Some(cnc) = app_vars.borrow().machine.cnc.clone() {
