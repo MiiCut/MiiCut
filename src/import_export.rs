@@ -434,6 +434,11 @@ pub(crate) fn build_json_from_dataset(
             "      \"rotation\": {:.6},\n",
             elem.get_rotation()
         ));
+        let dim_offsets = elem.get_dim_offsets();
+        out.push_str(&format!(
+            "      \"dim_offsets\": [{:.6}, {:.6}, {:.6}, {:.6}],\n",
+            dim_offsets[0], dim_offsets[1], dim_offsets[2], dim_offsets[3]
+        ));
         if elem.is_group() {
             if let Some(children) = elem.get_group_children() {
                 out.push_str("      \"children\": [");
@@ -773,6 +778,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         text: Option<String>,
         order: i32,
         rotation: f64,
+        dim_offsets: Option<[f64; 4]>,
         children: Vec<usize>,
         constr_vertices: Option<usize>,
         voronoi_seeds: Option<usize>,
@@ -885,6 +891,14 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             fallback_order = fallback_order.max(order_val.saturating_add(1));
         }
         let rotation = get_f64(&shape_value, "rotation").unwrap_or(0.0);
+        let dim_offsets: Option<[f64; 4]> = get_prop(&shape_value, "dim_offsets").and_then(|v| {
+            let arr = js_sys::Array::from(&v);
+            let a = arr.get(0).as_f64()?;
+            let b = arr.get(1).as_f64()?;
+            let c = arr.get(2).as_f64().unwrap_or(-20.0);
+            let d = arr.get(3).as_f64().unwrap_or(-20.0);
+            Some([a, b, c, d])
+        });
         let saved_id = get_f64(&shape_value, "id").and_then(f64_to_usize);
         let mut children = Vec::new();
         if let Some(children_value) = get_prop(&shape_value, "children") {
@@ -978,6 +992,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             text,
             order: order.unwrap_or(0),
             rotation,
+            dim_offsets,
             children,
             constr_vertices,
             voronoi_seeds,
@@ -1184,6 +1199,11 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         elem.set_order(shape.order);
         if shape.rotation.abs() > f64::EPSILON {
             elem.set_rotation(shape.rotation);
+        }
+        if let Some(offsets) = shape.dim_offsets {
+            for (i, v) in offsets.iter().enumerate() {
+                elem.set_dim_offset(i, *v);
+            }
         }
         canvas.dataset.shapes.insert(new_eid, elem);
     }

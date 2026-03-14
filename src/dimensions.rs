@@ -6,6 +6,79 @@ use crate::{
 use kurbo::{BezPath, Rect, Vec2};
 use std::{f64::consts::PI, vec};
 
+/// Classic CAD-style dimension annotation (extension lines + dimension line + arrowheads + handle).
+/// p1, p2: edge endpoints; offset: perpendicular offset from edge to dim line; label: text.
+/// Returns (path, pattern, colors, texts, handle_pos).
+pub fn dim_classic(
+    p1: Vec2,
+    p2: Vec2,
+    offset: f64,
+    label: String,
+    cinfo: (Rect, f64, Vec2),
+) -> (BezPath, Pattern, Colors, Vec<CanvasText>, Vec2) {
+    let scale = cinfo.1;
+    let color = get_dimension_colors();
+    let text_color = get_text_colors().stroke_color;
+
+    let (path, handle) = dim_classic_path(p1, p2, offset, scale);
+
+    let edge = p2 - p1;
+    let len = edge.hypot();
+    let raw_angle = if len > 0.1 { edge.y.atan2(edge.x) } else { 0.0 };
+    let angle = if raw_angle > -PI / 2.0 && raw_angle <= PI / 2.0 {
+        raw_angle
+    } else {
+        raw_angle - PI
+    };
+
+    // Direction "au-dessus de la ligne de base" du texte dans le canvas y-down : (sin θ, -cos θ)
+    let above_baseline = Vec2::new(angle.sin(), -angle.cos());
+    let text_pos = handle + above_baseline * (6.0 / scale);
+
+    let text = CanvasText::new(
+        label,
+        TextPos::PosCustom(text_pos),
+        CanvasTextConfig::new(text_color, angle, TextAlign::Center, 14, 0.8),
+    );
+
+    (path, Pattern::Dim, color, vec![text], handle)
+}
+
+/// Radius dimension for a Disc shape with rotatable handle.
+/// center: circle center, radius: circle radius, angle: display angle (radians).
+/// Returns (path, pattern, colors, texts, handle_pos).
+pub fn dim_disc(
+    center: Vec2,
+    radius: f64,
+    angle: f64,
+    cinfo: (Rect, f64, Vec2),
+) -> (BezPath, Pattern, Colors, Vec<CanvasText>, Vec2) {
+    let scale = cinfo.1;
+    let color = get_dimension_colors();
+    let text_color = get_text_colors().stroke_color;
+
+    let (path, handle) = dim_radius_classic(center, radius, angle, scale);
+
+    let u = Vec2::new(angle.cos(), angle.sin());
+    let n = Vec2::new(-u.y, u.x);
+
+    // Flip angle to keep text readable (never upside-down)
+    let flipped = angle.cos() < 0.0;
+    let display_angle = if flipped { angle + std::f64::consts::PI } else { angle };
+
+    // Direction "au-dessus de la ligne de base" pour le canvas y-down : (sin θ, -cos θ)
+    let above_baseline = Vec2::new(display_angle.sin(), -display_angle.cos());
+    let text_pos = center + u * (radius * 0.55) + above_baseline * (6.0 / scale);
+
+    let text = CanvasText::new(
+        format!("{:.1}", radius),
+        TextPos::PosCustom(text_pos),
+        CanvasTextConfig::new(text_color, display_angle, TextAlign::Center, 14, 0.8),
+    );
+
+    (path, Pattern::Dim, color, vec![text], handle)
+}
+
 #[allow(dead_code)]
 const HU: Vec2 = Vec2::new(1., 0.);
 #[allow(dead_code)]

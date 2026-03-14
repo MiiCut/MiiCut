@@ -1,12 +1,12 @@
 use crate::{
     clipboard::Clipboard,
-    dimensions::{dim_hv, dim_radius},
+    dimensions::{dim_classic, dim_disc},
     helpers::{math::*, prefab::*},
     inputs::{SystemMouse, UserAction, UserUI},
     shape::{GeneralShape, ShapeType, SvgFillRule},
     shapes::DataSet,
     types::vertex::Vertex,
-    types::others::{EUId, Property, PropertyValue, SegBundle},
+    types::others::{EUId, Property, PropertyValue},
     undoredo::{DrawState, UndoRedo},
 };
 use js_sys::Array;
@@ -999,95 +999,138 @@ impl Canvas {
     }
     pub fn draw_dimensions(&mut self, e: &GeneralShape) {
         match e.get_shape_type() {
-            ShapeType::Disc | ShapeType::ConstrCircle => {
+            ShapeType::Disc => {
                 let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 if v.len() >= 2 {
-                    if let Some(seg) = SegBundle::new(v[0], v[1]) {
-                        // Draw the radius segment
-                        let (path, pattern, colors, text) =
-                            dim_radius(seg, self.get_canvas_infos(), true, true);
-                        self.draw_path(
-                            &path,
-                            pattern,
-                            colors.fill_color,
-                            colors.stroke_color,
-                            text,
-                        );
+                    let center = v[0];
+                    let radius = (v[1] - center).hypot();
+                    if radius > 0.01 {
+                        // dim_offsets[0] stores the angle; -20.0 = sentinel "use natural direction"
+                        let stored = e.get_dim_offsets()[0];
+                        let natural = (v[1] - center).y.atan2((v[1] - center).x);
+                        let angle = if (stored - (-20.0)).abs() < 1e-9 { natural } else { stored };
+                        let cinfo = self.get_canvas_infos();
+                        let (path, pattern, colors, text, _handle) =
+                            dim_disc(center, radius, angle, cinfo);
+                        self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
                     }
                 }
             }
-            ShapeType::ConstrLine => {
-                let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
-                if v.len() == 2 {
-                    if let Some(seg) = SegBundle::new(v[0], v[1]) {
-                        let (path, pattern, colors, text) =
-                            dim_hv(seg, self.get_canvas_infos(), false);
-                        self.draw_path(
-                            &path,
-                            pattern,
-                            colors.fill_color,
-                            colors.stroke_color,
-                            text,
-                        );
-                    }
-                }
-            }
+            ShapeType::ConstrCircle | ShapeType::ConstrLine => {}
             ShapeType::Square
             | ShapeType::Text
             | ShapeType::Svg
             | ShapeType::Voronoi
             | ShapeType::Group => {
                 let points: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
+                if points.len() < 4 {
+                    return;
+                }
                 let rotation = e.get_rotation();
-                for (idx, (v1, v2)) in points
-                    .iter()
-                    .zip(points.iter().cycle().skip(1))
-                    .take(2)
-                    .enumerate()
-                {
-                    if let Some(seg) = SegBundle::new(*v1, *v2) {
-                        let (path, pattern, colors, mut text) =
-                            dim_hv(seg, self.get_canvas_infos(), false);
-                        if rotation.abs() > EPSILON {
-                            let bbox = e.get_bezpath().bounding_box();
-                            let center =
-                                Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
-                            let path = rotate_bezpath_about(&path, center, rotation);
-                            text = text
-                                .into_iter()
-                                .map(|mut item| {
-                                    if let TextPos::PosCustom(pos) = item.get_pos() {
-                                        let rotated =
-                                            rotate_vector(pos - center, rotation) + center;
-                                        item.set_pos(TextPos::PosCustom(rotated));
-                                    }
-                                    let mut cfg = item.get_config().clone();
-                                    cfg.set_angle(cfg.get_angle() + rotation);
-                                    item.set_config(cfg);
-                                    item
-                                })
-                                .collect();
-                            if idx == 0 {
-                                let mut deg = rotation.to_degrees();
-                                while deg <= -180.0 {
-                                    deg += 360.0;
+                let dim_offsets = e.get_dim_offsets();
+                let cinfo = self.get_canvas_infos();
+
+                // H dimension: top edge v[0]→v[3], V dimension: right edge v[2]→v[3]
+                let dim_configs = [
+                    (points[0], points[3], dim_offsets[0], format!("{:.0}", (points[3] - points[0]).hypot())),
+                    (points[2], points[3], dim_offsets[1], format!("{:.0}", (points[3] - points[2]).hypot())),
+                ];
+
+                // Angle label (shown once, near v[0], when rotated)
+                let mut angle_text: Option<CanvasText> = if rotation.abs() > EPSILON {
+                    let mut deg = rotation.to_degrees();
+                    while deg <= -180.0 { deg += 360.0; }
+                    while deg > 180.0 { deg -= 360.0; }
+                    let angle_pos = points[0]
+                        + rotate_vector(Vec2::new(10.0, -10.0) / self.scale, rotation);
+                    Some(CanvasText::new(
+                        format!("A{deg:.1}°"),
+                        TextPos::PosCustom(angle_pos),
+                        CanvasTextConfig::new(
+                            get_text_colors().stroke_color,
+                            rotation,
+                            TextAlign::Left,
+                            14,
+                            0.8,
+                        ),
+                    ))
+                } else {
+                    None
+                };
+
+                let bbox = e.get_bezpath().bounding_box();
+                let center = Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+
+                for (p1, p2, offset, label) in dim_configs.iter() {
+                    let (mut path, pattern, colors, mut text, _handle) =
+                        dim_classic(*p1, *p2, *offset, label.clone(), cinfo);
+                    if rotation.abs() > EPSILON {
+                        path = rotate_bezpath_about(&path, center, rotation);
+                        text = text
+                            .into_iter()
+                            .map(|mut item| {
+                                if let TextPos::PosCustom(pos) = item.get_pos() {
+                                    let rotated = rotate_vector(pos - center, rotation) + center;
+                                    item.set_pos(TextPos::PosCustom(rotated));
                                 }
-                                while deg > 180.0 {
-                                    deg -= 360.0;
-                                }
-                                let angle_pos = points[0]
-                                    + rotate_vector(Vec2::new(10.0, -10.0) / self.scale, rotation);
-                                text.push(CanvasText::new(
-                                    format!("A{deg:.1}°"),
-                                    TextPos::PosCustom(angle_pos),
-                                    CanvasTextConfig::new(
-                                        get_text_colors().stroke_color,
-                                        rotation,
-                                        TextAlign::Left,
-                                        14,
-                                        0.8,
-                                    ),
-                                ));
+                                let mut cfg = item.get_config().clone();
+                                cfg.set_angle(cfg.get_angle() + rotation);
+                                item.set_config(cfg);
+                                item
+                            })
+                            .collect();
+                    }
+                    // Append angle label to first dim's text (consumed once)
+                    if let Some(atxt) = angle_text.take() {
+                        text.push(atxt);
+                    }
+                    self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
+                }
+                // Corner radii (Square only) — show one dim on first active corner
+                if e.get_shape_type() == ShapeType::Square {
+                    if let Some((i, r_f)) = e
+                        .get_vertices()
+                        .iter()
+                        .enumerate()
+                        .find_map(|(i, (_, v))| {
+                            v.get_radius()
+                                .filter(|&r| r > 0)
+                                .map(|r| (i, r as f64))
+                        })
+                    {
+                        if i < points.len() {
+                            let corner = points[i];
+                            // Arc center: inset by r along each axis toward the shape center
+                            let sx = if center.x > corner.x { 1.0 } else { -1.0 };
+                            let sy = if center.y > corner.y { 1.0 } else { -1.0 };
+                            let arc_center =
+                                corner + Vec2::new(sx * r_f, sy * r_f);
+                            let natural_angle =
+                                (corner - arc_center).y.atan2((corner - arc_center).x);
+                            let stored = e.get_dim_offsets()[2];
+                            let angle = if (stored - (-20.0)).abs() < 1e-9 {
+                                natural_angle
+                            } else {
+                                stored
+                            };
+                            let (mut path, pattern, colors, mut text, _) =
+                                dim_disc(arc_center, r_f, angle, cinfo);
+                            if rotation.abs() > EPSILON {
+                                path = rotate_bezpath_about(&path, center, rotation);
+                                text = text
+                                    .into_iter()
+                                    .map(|mut item| {
+                                        if let TextPos::PosCustom(pos) = item.get_pos() {
+                                            let rotated =
+                                                rotate_vector(pos - center, rotation) + center;
+                                            item.set_pos(TextPos::PosCustom(rotated));
+                                        }
+                                        let mut cfg = item.get_config().clone();
+                                        cfg.set_angle(cfg.get_angle() + rotation);
+                                        item.set_config(cfg);
+                                        item
+                                    })
+                                    .collect();
                             }
                             self.draw_path(
                                 &path,
@@ -1096,101 +1139,64 @@ impl Canvas {
                                 colors.stroke_color,
                                 text,
                             );
-                            continue;
                         }
-                        if idx == 0 && rotation.abs() > EPSILON {
-                            let mut deg = rotation.to_degrees();
-                            while deg <= -180.0 {
-                                deg += 360.0;
-                            }
-                            while deg > 180.0 {
-                                deg -= 360.0;
-                            }
-                            let angle_pos = points[0]
-                                + rotate_vector(Vec2::new(10.0, -10.0) / self.scale, rotation);
-                            text.push(CanvasText::new(
-                                format!("A{deg:.1}°"),
-                                TextPos::PosCustom(angle_pos),
-                                CanvasTextConfig::new(
-                                    get_text_colors().stroke_color,
-                                    0.0,
-                                    TextAlign::Left,
-                                    14,
-                                    0.8,
-                                ),
-                            ));
-                        }
-                        self.draw_path(
-                            &path,
-                            pattern,
-                            colors.fill_color,
-                            colors.stroke_color,
-                            text,
-                        );
                     }
                 }
             }
             ShapeType::Oblong => {
                 let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
-                if v.len() >= 2 {
-                    if let Some(seg1) = SegBundle::new(v[0], v[1]) {
-                        let (path, pattern, colors, text) =
-                            dim_radius(seg1, self.get_canvas_infos(), false, true);
-                        self.draw_path(
-                            &path,
-                            pattern,
-                            colors.fill_color,
-                            colors.stroke_color,
-                            text,
-                        );
-                    }
+                if v.len() < 4 {
+                    return;
                 }
-                if v.len() >= 3 {
-                    if let Some(seg2) = SegBundle::new(v[0], v[2]) {
-                        let (path, pattern, colors, text) =
-                            dim_radius(seg2, self.get_canvas_infos(), true, false);
-                        self.draw_path(
-                            &path,
-                            pattern,
-                            colors.fill_color,
-                            colors.stroke_color,
-                            text,
-                        );
-                    }
+                let cinfo = self.get_canvas_infos();
+                let dim_offset = e.get_dim_offsets()[0];
+                // Axis length: classic dim on v[0]→v[1]
+                let axis = v[1] - v[0];
+                let length_label = format!("{:.1}", axis.hypot());
+                let (path, pattern, colors, text, _) =
+                    dim_classic(v[0], v[1], dim_offset, length_label, cinfo);
+                self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
+                // Radius at v[0] (control vertex v[2]) — dim_offsets[1] stores the angle
+                {
+                    let r0 = (v[2] - v[0]).hypot();
+                    let natural0 = (v[2] - v[0]).y.atan2((v[2] - v[0]).x);
+                    let stored0 = e.get_dim_offsets()[1];
+                    let a0 = if (stored0 - (-20.0)).abs() < 1e-9 { natural0 } else { stored0 };
+                    let (path, pattern, colors, text, _) = dim_disc(v[0], r0, a0, cinfo);
+                    self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
                 }
-                if v.len() >= 4 {
-                    if let Some(seg3) = SegBundle::new(v[1], v[3]) {
-                        let (path, pattern, colors, text) =
-                            dim_radius(seg3, self.get_canvas_infos(), true, false);
-                        self.draw_path(
-                            &path,
-                            pattern,
-                            colors.fill_color,
-                            colors.stroke_color,
-                            text,
-                        );
-                    }
+                // Radius at v[1] (control vertex v[3]) — dim_offsets[2] stores the angle
+                {
+                    let r1 = (v[3] - v[1]).hypot();
+                    let natural1 = (v[3] - v[1]).y.atan2((v[3] - v[1]).x);
+                    let stored1 = e.get_dim_offsets()[2];
+                    let a1 = if (stored1 - (-20.0)).abs() < 1e-9 { natural1 } else { stored1 };
+                    let (path, pattern, colors, text, _) = dim_disc(v[1], r1, a1, cinfo);
+                    self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
                 }
             }
             ShapeType::Poly => {
-                for (v1, v2) in e
-                    .get_vertices()
-                    .iter()
-                    .zip(e.get_vertices().iter().cycle().skip(1))
-                    .map(|(v1, v2)| (v1.1.curr(), v2.1.curr()))
-                {
-                    if let Some(seg) = SegBundle::new(v1, v2) {
-                        let (path, pattern, colors, text) =
-                            dim_hv(seg, self.get_canvas_infos(), false);
-                        self.draw_path(
-                            &path,
-                            pattern,
-                            colors.fill_color,
-                            colors.stroke_color,
-                            text,
-                        );
-                    }
+                let bbox = e.get_bezpath().bounding_box();
+                if bbox.width() < 0.1 && bbox.height() < 0.1 {
+                    return;
                 }
+                let tl = Vec2::new(bbox.x0, bbox.y0);
+                let tr = Vec2::new(bbox.x1, bbox.y0);
+                let br = Vec2::new(bbox.x1, bbox.y1);
+                let dim_offsets = e.get_dim_offsets();
+                let cinfo = self.get_canvas_infos();
+                // H : arête du haut tl→tr
+                let (path, pattern, colors, text, _) = dim_classic(
+                    tl, tr, dim_offsets[0],
+                    format!("{:.0}", bbox.width()), cinfo,
+                );
+                self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
+                // V : arête droite br→tr
+                let (path, pattern, colors, text, _) = dim_classic(
+                    br, tr, dim_offsets[1],
+                    format!("{:.0}", bbox.height()), cinfo,
+                );
+                self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
             }
             ShapeType::Arrow => (),
         }

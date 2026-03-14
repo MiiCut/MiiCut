@@ -1,5 +1,5 @@
 use crate::{
-    app::{set_callback, AppVars, RefAV, SelectionWindow},
+    app::{set_callback, AppVars, DimDrag, RefAV, SelectionWindow},
     canvas::{CanvasKind, Color, Pattern},
     dimensions::dim_hv,
     dom::{
@@ -22,7 +22,7 @@ use crate::{
     view_machine::app::render_machine_view,
     view_toolpath::app::render_toolpath_view,
 };
-use kurbo::{BezPath, Point, Vec2};
+use kurbo::{BezPath, Point, Shape, Vec2};
 use std::collections::HashMap;
 use wasm_bindgen::{prelude::*, JsCast};
 use web_sys::{Document, DragEvent, Element, Event, HtmlElement, MouseEvent, WheelEvent};
@@ -1383,6 +1383,249 @@ pub(crate) fn init_shapes_panel(av: RefAV) -> Result<(), JsValue> {
     Ok(())
 }
 
+/// Hit-test result: (shape_id, dim_idx, normal, is_angular, circle_center)
+type DimHit = (EUId, usize, Vec2, bool, Vec2);
+
+/// Returns the closest dim handle within hit_radius.
+/// For rectangular shapes: dim_idx=0 → H, 1 → V (linear drag along normal).
+/// For Disc: dim_idx=0 → radius angle handle (angular drag around circle center).
+fn hit_test_dim_handle(
+    shapes: &std::collections::HashMap<EUId, crate::shape::GeneralShape>,
+    mouse_pos: Vec2,
+    hit_radius: f64,
+) -> Option<DimHit> {
+    use crate::helpers::math::rotate_vector;
+    use ShapeType::*;
+    let mut best: Option<(DimHit, f64)> = None;
+
+    for (eid, shape) in shapes.iter() {
+        match shape.get_shape_type() {
+            Disc => {
+                let pts: Vec<Vec2> =
+                    shape.get_vertices().iter().map(|(_, v)| v.curr()).collect();
+                if pts.len() < 2 {
+                    continue;
+                }
+                let center = pts[0];
+                let radius = (pts[1] - center).hypot();
+                if radius < 0.01 {
+                    continue;
+                }
+                let stored = shape.get_dim_offsets()[0];
+                let natural = (pts[1] - center).y.atan2((pts[1] - center).x);
+                let angle =
+                    if (stored - (-20.0)).abs() < 1e-9 { natural } else { stored };
+                let u = Vec2::new(angle.cos(), angle.sin());
+                let handle = center + u * (radius * 0.5);
+                let dist = (handle - mouse_pos).hypot();
+                if dist < hit_radius {
+                    if best.as_ref().map_or(true, |(_, d)| dist < *d) {
+                        best = Some(((*eid, 0, Vec2::ZERO, true, center), dist));
+                    }
+                }
+            }
+            Oblong => {
+                let pts: Vec<Vec2> =
+                    shape.get_vertices().iter().map(|(_, v)| v.curr()).collect();
+                if pts.len() < 4 {
+                    continue;
+                }
+                let offsets = shape.get_dim_offsets();
+                // Axis length handle (linear, dim_idx=0)
+                {
+                    let edge = pts[1] - pts[0];
+                    let len = edge.hypot();
+                    if len >= 0.1 {
+                        let u = edge / len;
+                        let n = Vec2::new(-u.y, u.x);
+                        let d1 = pts[0] + n * offsets[0];
+                        let d2 = pts[1] + n * offsets[0];
+                        let handle = (d1 + d2) * 0.5;
+                        let dist = (handle - mouse_pos).hypot();
+                        if dist < hit_radius {
+                            if best.as_ref().map_or(true, |(_, d)| dist < *d) {
+                                best = Some(((*eid, 0, n, false, Vec2::ZERO), dist));
+                            }
+                        }
+                    }
+                }
+                // Radius at pts[0] handle (angular, dim_idx=1)
+                {
+                    let r0 = (pts[2] - pts[0]).hypot();
+                    if r0 > 0.01 {
+                        let natural0 = (pts[2] - pts[0]).y.atan2((pts[2] - pts[0]).x);
+                        let stored0 = offsets[1];
+                        let a0 = if (stored0 - (-20.0)).abs() < 1e-9 { natural0 } else { stored0 };
+                        let u0 = Vec2::new(a0.cos(), a0.sin());
+                        let handle0 = pts[0] + u0 * (r0 * 0.5);
+                        let dist = (handle0 - mouse_pos).hypot();
+                        if dist < hit_radius {
+                            if best.as_ref().map_or(true, |(_, d)| dist < *d) {
+                                best = Some(((*eid, 1, Vec2::ZERO, true, pts[0]), dist));
+                            }
+                        }
+                    }
+                }
+                // Radius at pts[1] handle (angular, dim_idx=2)
+                {
+                    let r1 = (pts[3] - pts[1]).hypot();
+                    if r1 > 0.01 {
+                        let natural1 = (pts[3] - pts[1]).y.atan2((pts[3] - pts[1]).x);
+                        let stored1 = offsets[2];
+                        let a1 = if (stored1 - (-20.0)).abs() < 1e-9 { natural1 } else { stored1 };
+                        let u1 = Vec2::new(a1.cos(), a1.sin());
+                        let handle1 = pts[1] + u1 * (r1 * 0.5);
+                        let dist = (handle1 - mouse_pos).hypot();
+                        if dist < hit_radius {
+                            if best.as_ref().map_or(true, |(_, d)| dist < *d) {
+                                best = Some(((*eid, 2, Vec2::ZERO, true, pts[1]), dist));
+                            }
+                        }
+                    }
+                }
+            }
+            Square | Text | Svg | Voronoi | Group => {
+                let pts: Vec<Vec2> =
+                    shape.get_vertices().iter().map(|(_, v)| v.curr()).collect();
+                if pts.len() < 4 {
+                    continue;
+                }
+                let rotation = shape.get_rotation();
+                let offsets = shape.get_dim_offsets();
+                let bbox = shape.get_bezpath().bounding_box();
+                let center =
+                    Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+
+                let edge_configs = [
+                    (pts[0], pts[3], offsets[0], 0usize),
+                    (pts[2], pts[3], offsets[1], 1usize),
+                ];
+                for (p1, p2, offset, idx) in edge_configs.iter() {
+                    let edge = *p2 - *p1;
+                    let len = edge.hypot();
+                    if len < 0.1 {
+                        continue;
+                    }
+                    let u = edge / len;
+                    let n = Vec2::new(-u.y, u.x);
+                    let d1 = *p1 + n * *offset;
+                    let d2 = *p2 + n * *offset;
+                    let handle_raw = (d1 + d2) * 0.5;
+                    let handle = if rotation.abs() > 1e-9 {
+                        rotate_vector(handle_raw - center, rotation) + center
+                    } else {
+                        handle_raw
+                    };
+                    let dist = (handle - mouse_pos).hypot();
+                    if dist < hit_radius {
+                        let n_world = if rotation.abs() > 1e-9 {
+                            rotate_vector(n, rotation)
+                        } else {
+                            n
+                        };
+                        if best.as_ref().map_or(true, |(_, d)| dist < *d) {
+                            best = Some(((*eid, *idx, n_world, false, Vec2::ZERO), dist));
+                        }
+                    }
+                }
+                // Corner radius handle (Square only, first active corner, dim_idx=2)
+                if shape.get_shape_type() == Square {
+                    if let Some((i, r_f)) = shape
+                        .get_vertices()
+                        .iter()
+                        .enumerate()
+                        .find_map(|(i, (_, v))| {
+                            v.get_radius()
+                                .filter(|&r| r > 0)
+                                .map(|r| (i, r as f64))
+                        })
+                    {
+                        if i < pts.len() {
+                            let corner = pts[i];
+                            let sx = if center.x > corner.x { 1.0 } else { -1.0 };
+                            let sy = if center.y > corner.y { 1.0 } else { -1.0 };
+                            let arc_center_local =
+                                corner + Vec2::new(sx * r_f, sy * r_f);
+                            let stored = offsets[2];
+                            let natural =
+                                (corner - arc_center_local).y.atan2((corner - arc_center_local).x);
+                            let angle =
+                                if (stored - (-20.0)).abs() < 1e-9 { natural } else { stored };
+                            let u = Vec2::new(angle.cos(), angle.sin());
+                            let handle_local = arc_center_local + u * (r_f * 0.5);
+                            let handle = if rotation.abs() > 1e-9 {
+                                rotate_vector(handle_local - center, rotation) + center
+                            } else {
+                                handle_local
+                            };
+                            let dist = (handle - mouse_pos).hypot();
+                            if dist < hit_radius {
+                                // drag_center in world space
+                                let arc_center_world = if rotation.abs() > 1e-9 {
+                                    rotate_vector(arc_center_local - center, rotation) + center
+                                } else {
+                                    arc_center_local
+                                };
+                                if best.as_ref().map_or(true, |(_, d)| dist < *d) {
+                                    best = Some(((*eid, 2, Vec2::ZERO, true, arc_center_world), dist));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Poly => {
+                let bbox = shape.get_bezpath().bounding_box();
+                if bbox.width() < 0.1 && bbox.height() < 0.1 {
+                    continue;
+                }
+                let offsets = shape.get_dim_offsets();
+                let tl = Vec2::new(bbox.x0, bbox.y0);
+                let tr = Vec2::new(bbox.x1, bbox.y0);
+                let br = Vec2::new(bbox.x1, bbox.y1);
+                // H : tl→tr, dim_idx=0
+                {
+                    let edge = tr - tl;
+                    let len = edge.hypot();
+                    if len >= 0.1 {
+                        let u = edge / len;
+                        let n = Vec2::new(-u.y, u.x);
+                        let d1 = tl + n * offsets[0];
+                        let d2 = tr + n * offsets[0];
+                        let handle = (d1 + d2) * 0.5;
+                        let dist = (handle - mouse_pos).hypot();
+                        if dist < hit_radius {
+                            if best.as_ref().map_or(true, |(_, d)| dist < *d) {
+                                best = Some(((*eid, 0, n, false, Vec2::ZERO), dist));
+                            }
+                        }
+                    }
+                }
+                // V : br→tr, dim_idx=1
+                {
+                    let edge = tr - br;
+                    let len = edge.hypot();
+                    if len >= 0.1 {
+                        let u = edge / len;
+                        let n = Vec2::new(-u.y, u.x);
+                        let d1 = br + n * offsets[1];
+                        let d2 = tr + n * offsets[1];
+                        let handle = (d1 + d2) * 0.5;
+                        let dist = (handle - mouse_pos).hypot();
+                        if dist < hit_radius {
+                            if best.as_ref().map_or(true, |(_, d)| dist < *d) {
+                                best = Some(((*eid, 1, n, false, Vec2::ZERO), dist));
+                            }
+                        }
+                    }
+                }
+            }
+            _ => continue,
+        }
+    }
+    best.map(|(hit, _)| hit)
+}
+
 pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> {
     use ShapeType::*;
     let mut avb = av.borrow_mut();
@@ -1404,7 +1647,21 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                     if !is_draw_view {
                         return Ok(());
                     }
-                    if avb.update_selection_window_current() {
+                    if let Some(dd) = avb.dim_drag {
+                        let mouse_pos = avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
+                        let new_offset = if dd.is_angular {
+                            // Angle from circle center to current mouse position
+                            let v = mouse_pos - dd.drag_center;
+                            v.y.atan2(v.x)
+                        } else {
+                            let delta = mouse_pos - dd.start_mouse;
+                            dd.start_offset + delta.x * dd.normal.x + delta.y * dd.normal.y
+                        };
+                        if let Some(shape) = avb.canvases[CanvasKind::Draw.idx()].dataset.shapes.get_mut(&dd.shape_id) {
+                            shape.set_dim_offset(dd.dim_idx, new_offset);
+                        }
+                        do_render = true;
+                    } else if avb.update_selection_window_current() {
                         do_render = true;
                     } else if avb.set_move_vertices_selected().is_some() || avb.set_move_elements()
                     {
@@ -1419,6 +1676,70 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
             UserAction::ClickDown(button, _) => {
                 if button == MouseButton::Left {
                     if !is_draw_view {
+                        return Ok(());
+                    }
+
+                    // Check if clicking on a dim handle
+                    let draw_pos = avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
+                    let hit_radius = 8.0 / avb.canvases[CanvasKind::Draw.idx()].get_scale().max(0.001);
+                    let shapes = &avb.canvases[CanvasKind::Draw.idx()].dataset.shapes;
+                    if let Some((shape_id, dim_idx, normal, is_angular, drag_center)) =
+                        hit_test_dim_handle(shapes, draw_pos, hit_radius)
+                    {
+                        let stored = shapes
+                            .get(&shape_id)
+                            .map(|s| s.get_dim_offsets()[dim_idx])
+                            .unwrap_or(0.0);
+                        // For angular drag, resolve the sentinel into the actual angle
+                        let start_offset = if is_angular && (stored - (-20.0)).abs() < 1e-9 {
+                            let pts: Vec<Vec2> = shapes
+                                .get(&shape_id)
+                                .map(|s| s.get_vertices().iter().map(|(_, v)| v.curr()).collect())
+                                .unwrap_or_default();
+                            let shape_type = shapes.get(&shape_id).map(|s| s.get_shape_type());
+                            match (shape_type, dim_idx) {
+                                (Some(ShapeType::Oblong), 1) if pts.len() >= 3 =>
+                                    (pts[2] - pts[0]).y.atan2((pts[2] - pts[0]).x),
+                                (Some(ShapeType::Oblong), 2) if pts.len() >= 4 =>
+                                    (pts[3] - pts[1]).y.atan2((pts[3] - pts[1]).x),
+                                // Square corner radius: natural angle = outward from arc_center
+                                // drag_center IS the arc_center in world space;
+                                // the outward direction is the same as arc_center → bbox_center
+                                // mirrored (i.e., center → arc_center direction)
+                                (Some(ShapeType::Square), 2) => {
+                                    let bbox = shapes
+                                        .get(&shape_id)
+                                        .map(|s| s.get_bezpath().bounding_box())
+                                        .unwrap_or_default();
+                                    let shape_center = Vec2::new(
+                                        (bbox.x0 + bbox.x1) * 0.5,
+                                        (bbox.y0 + bbox.y1) * 0.5,
+                                    );
+                                    // arc_center is between shape_center and corner;
+                                    // outward = from shape_center through arc_center
+                                    (drag_center - shape_center).y.atan2((drag_center - shape_center).x)
+                                }
+                                _ if pts.len() >= 2 =>
+                                    (pts[1] - pts[0]).y.atan2((pts[1] - pts[0]).x),
+                                _ => 0.0,
+                            }
+                        } else {
+                            stored
+                        };
+                        avb.dim_drag = Some(DimDrag {
+                            shape_id,
+                            dim_idx,
+                            start_mouse: draw_pos,
+                            start_offset,
+                            normal,
+                            is_angular,
+                            drag_center,
+                        });
+                        do_render = true;
+                        drop(avb);
+                        if do_render {
+                            render_active_view(av.clone());
+                        }
                         return Ok(());
                     }
 
@@ -1463,6 +1784,14 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
             }
             UserAction::ClickUp(button, _) => {
                 if button == MouseButton::Left && is_draw_view {
+                    if avb.dim_drag.take().is_some() {
+                        do_render = true;
+                        drop(avb);
+                        if do_render {
+                            render_active_view(av.clone());
+                        }
+                        return Ok(());
+                    }
                     if let Some(selection_window) = avb.selection_window.take() {
                         let end = avb.get_active_canvas().get_user_ui().draw_pos();
                         let delta = end - selection_window.start;
@@ -1774,9 +2103,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
         if !canvas_draw.get_user_ui().keys_states.alt_pressed {
             canvas_draw.draw_paths_sets_with_svg_bbox(svg_bbox_only);
 
-            canvas_draw.may_be_draw_radiuses();
-
-            canvas_draw.draw_vertices();
+canvas_draw.draw_vertices();
         }
 
         if let Some((cs, mut vs)) = element_on_creation {

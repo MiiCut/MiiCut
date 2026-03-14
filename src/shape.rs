@@ -214,6 +214,7 @@ pub struct GeneralShape {
     polygon: MultiPolygon<f64>,
 
     rotation: ShapeRotation,
+    dim_offsets: [f64; 4],
 }
 impl Clone for GeneralShape {
     fn clone(&self) -> Self {
@@ -236,6 +237,7 @@ impl Clone for GeneralShape {
             bezpath: self.bezpath.clone(),
             polygon: self.polygon.clone(),
             rotation: self.rotation.clone(),
+            dim_offsets: self.dim_offsets,
         }
     }
 }
@@ -1150,6 +1152,7 @@ impl GeneralShape {
             polygon: MultiPolygon::new(vec![]),
 
             rotation: ShapeRotation::new(),
+            dim_offsets: [-20.0, 20.0, -20.0, -20.0],
         };
         shape.set_bezpath();
         Some(shape)
@@ -1920,6 +1923,15 @@ impl GeneralShape {
         self.rotation.set(rotation);
         self.rotation.save();
         self.set_bezpath();
+    }
+
+    pub fn get_dim_offsets(&self) -> [f64; 4] {
+        self.dim_offsets
+    }
+    pub fn set_dim_offset(&mut self, idx: usize, val: f64) {
+        if idx < 4 {
+            self.dim_offsets[idx] = val;
+        }
     }
 
     pub fn set_bezpath(&mut self) {

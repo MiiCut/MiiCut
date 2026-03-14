@@ -129,6 +129,104 @@ pub fn dim_path(seg: &SegBundle, _scale: f64) -> BezPath {
     path
 }
 
+/// Classic CAD-style dimension annotation geometry.
+/// p1, p2: shape edge endpoints (world coords)
+/// offset: signed offset along left-hand normal from edge to dimension line
+/// scale: canvas pixels per world unit (for sizing arrows/gaps)
+/// Returns (path, handle_pos) where handle_pos is the midpoint of the dim line.
+pub fn dim_classic_path(p1: Vec2, p2: Vec2, offset: f64, scale: f64) -> (BezPath, Vec2) {
+    let mut path = BezPath::new();
+    let edge = p2 - p1;
+    let len = edge.hypot();
+    if len < 0.1 {
+        let mid = (p1 + p2) * 0.5;
+        return (path, mid);
+    }
+    let u = edge / len;
+    let n = Vec2::new(-u.y, u.x); // left-hand normal
+
+    let d1 = p1 + n * offset;
+    let d2 = p2 + n * offset;
+    let handle = (d1 + d2) * 0.5;
+
+    let ext_dir = if offset >= 0.0 { 1.0 } else { -1.0 };
+    let arrow_len = 8.0 / scale;
+    let arrow_w = 3.0 / scale;
+    let gap_in = 2.0 / scale;
+    let gap_out = 4.0 / scale;
+    let hs = 3.0 / scale; // handle half-size
+
+    // Extension lines (with gap at shape edge, overshoot past dim line)
+    path.move_to((p1 + n * ext_dir * gap_in).to_point());
+    path.line_to((d1 + n * ext_dir * gap_out).to_point());
+    path.move_to((p2 + n * ext_dir * gap_in).to_point());
+    path.line_to((d2 + n * ext_dir * gap_out).to_point());
+
+    // Dimension line
+    path.move_to(d1.to_point());
+    path.line_to(d2.to_point());
+
+    // Arrowhead at d1 (pointing toward d2)
+    let base1 = d1 + u * arrow_len;
+    path.move_to(d1.to_point());
+    path.line_to((base1 + n * arrow_w).to_point());
+    path.line_to((base1 - n * arrow_w).to_point());
+    path.close_path();
+
+    // Arrowhead at d2 (pointing toward d1)
+    let base2 = d2 - u * arrow_len;
+    path.move_to(d2.to_point());
+    path.line_to((base2 + n * arrow_w).to_point());
+    path.line_to((base2 - n * arrow_w).to_point());
+    path.close_path();
+
+    // Handle square at midpoint of dimension line
+    path.move_to((handle + Vec2::new(-hs, -hs)).to_point());
+    path.line_to((handle + Vec2::new(hs, -hs)).to_point());
+    path.line_to((handle + Vec2::new(hs, hs)).to_point());
+    path.line_to((handle + Vec2::new(-hs, hs)).to_point());
+    path.close_path();
+
+    (path, handle)
+}
+
+/// Classic radius dimension for a circle.
+/// Arrow always outside (tip at circumference, body beyond), line extends past the arrow.
+/// Label stays inside the circle.
+pub fn dim_radius_classic(center: Vec2, radius: f64, angle: f64, scale: f64) -> (BezPath, Vec2) {
+    let mut path = BezPath::new();
+    let u = Vec2::new(angle.cos(), angle.sin());
+    let n = Vec2::new(-u.y, u.x);
+    let circ_pt = center + u * radius;
+    let arrow_len = 8.0 / scale;
+    let arrow_w = 3.0 / scale;
+    let tail = 6.0 / scale; // short overshoot past the arrowhead
+    let hs = 3.0 / scale;
+
+    let arrow_base = circ_pt + u * arrow_len;
+    let line_end = arrow_base + u * tail;
+    let handle = center + u * (radius * 0.5); // mid-radius, on the line
+
+    // Line from center through circumference, ending just past the arrow
+    path.move_to(center.to_point());
+    path.line_to(line_end.to_point());
+
+    // Arrowhead: tip at circ_pt, body outside the circle
+    path.move_to(circ_pt.to_point());
+    path.line_to((arrow_base + n * arrow_w).to_point());
+    path.line_to((arrow_base - n * arrow_w).to_point());
+    path.close_path();
+
+    // Draggable handle square at mid-radius
+    path.move_to((handle + Vec2::new(-hs, -hs)).to_point());
+    path.line_to((handle + Vec2::new(hs, -hs)).to_point());
+    path.line_to((handle + Vec2::new(hs, hs)).to_point());
+    path.line_to((handle + Vec2::new(-hs, hs)).to_point());
+    path.close_path();
+
+    (path, handle)
+}
+
 pub fn get_stroke_color(selected: bool, highlighted: bool) -> Color {
     match (selected, highlighted) {
         (false, false) => Color::Gray,

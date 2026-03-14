@@ -68,6 +68,7 @@ pub(crate) struct AppVars {
     pub(crate) shapes_drag_from: Option<usize>,
     pub(crate) notes: NoteState,
     pub(crate) selection_window: Option<SelectionWindow>,
+    pub(crate) dim_drag: Option<DimDrag>,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +81,19 @@ pub(crate) struct NoteDraft {
 pub(crate) struct NoteDrag {
     pub(crate) id: usize,
     pub(crate) offset: Vec2,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DimDrag {
+    pub(crate) shape_id: crate::types::others::EUId,
+    pub(crate) dim_idx: usize,
+    pub(crate) start_mouse: Vec2,
+    pub(crate) start_offset: f64,
+    // Linear drag: project mouse delta onto this normal
+    pub(crate) normal: Vec2,
+    // Angular drag (Disc): recompute angle from circle center to mouse
+    pub(crate) is_angular: bool,
+    pub(crate) drag_center: Vec2,
 }
 
 pub(crate) struct NoteState {
@@ -277,6 +291,7 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
             resize_observers: HashMap::new(),
         },
         selection_window: None,
+        dim_drag: None,
     }));
 
     if let Some(cnc) = app_vars.borrow().machine.cnc.clone() {
