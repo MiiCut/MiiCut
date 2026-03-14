@@ -1407,8 +1407,7 @@ fn hit_test_dim_handle(
     for (eid, shape) in shapes.iter() {
         match shape.get_shape_type() {
             Disc => {
-                let pts: Vec<Vec2> =
-                    shape.get_vertices().iter().map(|(_, v)| v.curr()).collect();
+                let pts: Vec<Vec2> = shape.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 if pts.len() < 2 {
                     continue;
                 }
@@ -1419,8 +1418,11 @@ fn hit_test_dim_handle(
                 }
                 let stored = shape.get_dim_offsets()[0];
                 let natural = (pts[1] - center).y.atan2((pts[1] - center).x);
-                let angle =
-                    if (stored - (-20.0)).abs() < 1e-9 { natural } else { stored };
+                let angle = if (stored - (-20.0)).abs() < 1e-9 {
+                    natural
+                } else {
+                    stored
+                };
                 let u = Vec2::new(angle.cos(), angle.sin());
                 let handle = center + u * radius;
                 let dist = (handle - mouse_pos).hypot();
@@ -1431,8 +1433,7 @@ fn hit_test_dim_handle(
                 }
             }
             Oblong => {
-                let pts: Vec<Vec2> =
-                    shape.get_vertices().iter().map(|(_, v)| v.curr()).collect();
+                let pts: Vec<Vec2> = shape.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 if pts.len() < 4 {
                     continue;
                 }
@@ -1461,7 +1462,11 @@ fn hit_test_dim_handle(
                     if r0 > 0.01 {
                         let natural0 = (pts[2] - pts[0]).y.atan2((pts[2] - pts[0]).x);
                         let stored0 = offsets[1];
-                        let a0 = if (stored0 - (-20.0)).abs() < 1e-9 { natural0 } else { stored0 };
+                        let a0 = if (stored0 - (-20.0)).abs() < 1e-9 {
+                            natural0
+                        } else {
+                            stored0
+                        };
                         let u0 = Vec2::new(a0.cos(), a0.sin());
                         let handle0 = pts[0] + u0 * r0;
                         let dist = (handle0 - mouse_pos).hypot();
@@ -1478,7 +1483,11 @@ fn hit_test_dim_handle(
                     if r1 > 0.01 {
                         let natural1 = (pts[3] - pts[1]).y.atan2((pts[3] - pts[1]).x);
                         let stored1 = offsets[2];
-                        let a1 = if (stored1 - (-20.0)).abs() < 1e-9 { natural1 } else { stored1 };
+                        let a1 = if (stored1 - (-20.0)).abs() < 1e-9 {
+                            natural1
+                        } else {
+                            stored1
+                        };
                         let u1 = Vec2::new(a1.cos(), a1.sin());
                         let handle1 = pts[1] + u1 * r1;
                         let dist = (handle1 - mouse_pos).hypot();
@@ -1491,16 +1500,14 @@ fn hit_test_dim_handle(
                 }
             }
             Square | Text | Svg | Voronoi | Group => {
-                let pts: Vec<Vec2> =
-                    shape.get_vertices().iter().map(|(_, v)| v.curr()).collect();
+                let pts: Vec<Vec2> = shape.get_vertices().iter().map(|(_, v)| v.curr()).collect();
                 if pts.len() < 4 {
                     continue;
                 }
                 let rotation = shape.get_rotation();
                 let offsets = shape.get_dim_offsets();
                 let bbox = shape.get_bezpath().bounding_box();
-                let center =
-                    Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+                let center = Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
 
                 let edge_configs = [
                     (pts[0], pts[3], offsets[0], 0usize),
@@ -1536,27 +1543,29 @@ fn hit_test_dim_handle(
                 }
                 // Corner radius handle (Square only, first active corner, dim_idx=2)
                 if shape.get_shape_type() == Square {
-                    if let Some((i, r_f)) = shape
-                        .get_vertices()
-                        .iter()
-                        .enumerate()
-                        .find_map(|(i, (_, v))| {
-                            v.get_radius()
-                                .filter(|&r| r > 0)
-                                .map(|r| (i, r as f64))
-                        })
+                    if let Some((i, r_f)) =
+                        shape
+                            .get_vertices()
+                            .iter()
+                            .enumerate()
+                            .find_map(|(i, (_, v))| {
+                                v.get_radius().filter(|&r| r > 0).map(|r| (i, r as f64))
+                            })
                     {
                         if i < pts.len() {
                             let corner = pts[i];
                             let sx = if center.x > corner.x { 1.0 } else { -1.0 };
                             let sy = if center.y > corner.y { 1.0 } else { -1.0 };
-                            let arc_center_local =
-                                corner + Vec2::new(sx * r_f, sy * r_f);
+                            let arc_center_local = corner + Vec2::new(sx * r_f, sy * r_f);
                             let stored = offsets[2];
-                            let natural =
-                                (corner - arc_center_local).y.atan2((corner - arc_center_local).x);
-                            let angle =
-                                if (stored - (-20.0)).abs() < 1e-9 { natural } else { stored };
+                            let natural = (corner - arc_center_local)
+                                .y
+                                .atan2((corner - arc_center_local).x);
+                            let angle = if (stored - (-20.0)).abs() < 1e-9 {
+                                natural
+                            } else {
+                                stored
+                            };
                             let u = Vec2::new(angle.cos(), angle.sin());
                             let handle_local = arc_center_local + u * r_f;
                             let handle = if rotation.abs() > 1e-9 {
@@ -1573,7 +1582,8 @@ fn hit_test_dim_handle(
                                     arc_center_local
                                 };
                                 if best.as_ref().map_or(true, |(_, d)| dist < *d) {
-                                    best = Some(((*eid, 2, Vec2::ZERO, true, arc_center_world), dist));
+                                    best =
+                                        Some(((*eid, 2, Vec2::ZERO, true, arc_center_world), dist));
                                 }
                             }
                         }
@@ -1636,8 +1646,11 @@ fn hit_test_dim_handle(
                         if radius > 0.01 {
                             let natural = (*s - *c).y.atan2((*s - *c).x);
                             let stored = offsets[2];
-                            let angle =
-                                if (stored - (-20.0)).abs() < 1e-9 { natural } else { stored };
+                            let angle = if (stored - (-20.0)).abs() < 1e-9 {
+                                natural
+                            } else {
+                                stored
+                            };
                             let u = Vec2::new(angle.cos(), angle.sin());
                             let handle = *c + u * radius;
                             let dist = (handle - mouse_pos).hypot();
@@ -1687,14 +1700,17 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                             let delta = mouse_pos - dd.start_mouse;
                             dd.start_offset + delta.x * dd.normal.x + delta.y * dd.normal.y
                         };
-                        if let Some(shape) = avb.canvases[CanvasKind::Draw.idx()].dataset.shapes.get_mut(&dd.shape_id) {
+                        if let Some(shape) = avb.canvases[CanvasKind::Draw.idx()]
+                            .dataset
+                            .shapes
+                            .get_mut(&dd.shape_id)
+                        {
                             shape.set_dim_offset(dd.dim_idx, new_offset);
                         }
                         do_render = true;
                     } else if let Some(rd) = avb.rotation_drag {
                         use crate::helpers::math::snap_angle;
-                        let mouse_pos =
-                            avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
+                        let mouse_pos = avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
                         let snap = avb.canvases[CanvasKind::Draw.idx()].get_user_ui().snap;
                         let v = mouse_pos - rd.center;
                         let curr_angle = v.y.atan2(v.x);
@@ -1728,7 +1744,8 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
 
                     // Check if clicking on a dim handle
                     let draw_pos = avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
-                    let hit_radius = 8.0 / avb.canvases[CanvasKind::Draw.idx()].get_scale().max(0.001);
+                    let hit_radius =
+                        8.0 / avb.canvases[CanvasKind::Draw.idx()].get_scale().max(0.001);
                     let shapes = &avb.canvases[CanvasKind::Draw.idx()].dataset.shapes;
                     if let Some((shape_id, dim_idx, normal, is_angular, drag_center)) =
                         hit_test_dim_handle(shapes, draw_pos, hit_radius)
@@ -1745,10 +1762,12 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                                 .unwrap_or_default();
                             let shape_type = shapes.get(&shape_id).map(|s| s.get_shape_type());
                             match (shape_type, dim_idx) {
-                                (Some(ShapeType::Oblong), 1) if pts.len() >= 3 =>
-                                    (pts[2] - pts[0]).y.atan2((pts[2] - pts[0]).x),
-                                (Some(ShapeType::Oblong), 2) if pts.len() >= 4 =>
-                                    (pts[3] - pts[1]).y.atan2((pts[3] - pts[1]).x),
+                                (Some(ShapeType::Oblong), 1) if pts.len() >= 3 => {
+                                    (pts[2] - pts[0]).y.atan2((pts[2] - pts[0]).x)
+                                }
+                                (Some(ShapeType::Oblong), 2) if pts.len() >= 4 => {
+                                    (pts[3] - pts[1]).y.atan2((pts[3] - pts[1]).x)
+                                }
                                 // Square corner radius: natural angle = outward from arc_center
                                 // drag_center IS the arc_center in world space;
                                 // the outward direction is the same as arc_center → bbox_center
@@ -1762,7 +1781,9 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                                         (bbox.x0 + bbox.x1) * 0.5,
                                         (bbox.y0 + bbox.y1) * 0.5,
                                     );
-                                    (drag_center - shape_center).y.atan2((drag_center - shape_center).x)
+                                    (drag_center - shape_center)
+                                        .y
+                                        .atan2((drag_center - shape_center).x)
                                 }
                                 (Some(ShapeType::Poly), 2) => {
                                     use crate::helpers::math::ApexType;
@@ -1784,8 +1805,9 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                                         })
                                         .unwrap_or(0.0)
                                 }
-                                _ if pts.len() >= 2 =>
-                                    (pts[1] - pts[0]).y.atan2((pts[1] - pts[0]).x),
+                                _ if pts.len() >= 2 => {
+                                    (pts[1] - pts[0]).y.atan2((pts[1] - pts[0]).x)
+                                }
                                 _ => 0.0,
                             }
                         } else {
@@ -1814,8 +1836,7 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                     // Check rotation handle before vertex selection
                     {
                         use crate::helpers::math::snap_angle;
-                        let draw_pos =
-                            avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
+                        let draw_pos = avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
                         let scale = avb.canvases[CanvasKind::Draw.idx()].get_scale();
                         let hit_radius = 6.0 / scale.max(0.001);
                         let found = avb.canvases[CanvasKind::Draw.idx()]
@@ -1842,7 +1863,6 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         if let Some(rd) = found {
                             avb.rotation_drag = Some(rd);
                             avb.selection_window = None;
-                            do_render = true;
                             drop(avb);
                             render_active_view(av.clone());
                             return Ok(());
@@ -1903,7 +1923,6 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         }
                         avb.refresh_toolpath_cache();
                         avb.refresh_gcode_cache();
-                        do_render = true;
                         drop(avb);
                         render_active_view(av.clone());
                         return Ok(());
@@ -2219,7 +2238,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
         if !canvas_draw.get_user_ui().keys_states.alt_pressed {
             canvas_draw.draw_paths_sets_with_svg_bbox(svg_bbox_only);
 
-canvas_draw.draw_vertices();
+            canvas_draw.draw_vertices();
         }
 
         if let Some((cs, mut vs)) = element_on_creation {
@@ -2443,6 +2462,7 @@ fn render_active_view(av: RefAV) {
         Tabs::Gcode => render_gcode_view(av),
         Tabs::Toolpath => render_toolpath_view(av),
         Tabs::Machine => render_machine_view(av),
+        Tabs::Play => crate::view_play::app::render_play_view(av),
     }
 }
 

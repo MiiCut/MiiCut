@@ -59,6 +59,19 @@ pub(crate) fn update_status_bar(av: RefAV) {
             }
             parts.join(" | ")
         }
+        Tabs::Play => {
+            let mut parts = vec![avb.machine.ws_status.clone()];
+            if let Some(state) = avb.play.grbl_state.as_ref() {
+                parts.push(state.clone());
+            }
+            if let Some(pos) = avb.play.mpos {
+                parts.push(format!(
+                    "MPos: ({:.3}, {:.3}, {:.3})",
+                    pos[0], pos[1], pos[2]
+                ));
+            }
+            parts.join(" | ")
+        }
         _ => String::new(),
     };
     if let Ok(el) = text_el.dyn_into::<HtmlElement>() {

@@ -60,11 +60,15 @@ pub fn dim_disc(
     let (path, handle) = dim_radius_classic(center, radius, angle, scale);
 
     let u = Vec2::new(angle.cos(), angle.sin());
-    let n = Vec2::new(-u.y, u.x);
+    let _n = Vec2::new(-u.y, u.x);
 
     // Flip angle to keep text readable (never upside-down)
     let flipped = angle.cos() < 0.0;
-    let display_angle = if flipped { angle + std::f64::consts::PI } else { angle };
+    let display_angle = if flipped {
+        angle + std::f64::consts::PI
+    } else {
+        angle
+    };
 
     // Direction "au-dessus de la ligne de base" pour le canvas y-down : (sin θ, -cos θ)
     let above_baseline = Vec2::new(display_angle.sin(), -display_angle.cos());

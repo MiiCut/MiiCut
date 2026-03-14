@@ -70,6 +70,7 @@ pub(crate) struct AppVars {
     pub(crate) selection_window: Option<SelectionWindow>,
     pub(crate) dim_drag: Option<DimDrag>,
     pub(crate) rotation_drag: Option<RotationDrag>,
+    pub(crate) play: PlayState,
 }
 
 #[derive(Debug, Clone)]
@@ -147,6 +148,12 @@ pub(crate) struct MachineState {
     pub(crate) last_ws_error: Option<String>,
     pub(crate) last_http_error: Option<String>,
     pub(crate) cnc: Option<Rc<CncLink>>,
+}
+
+pub(crate) struct PlayState {
+    pub(crate) view_built: bool,
+    pub(crate) mpos: Option<[f64; 3]>,
+    pub(crate) grbl_state: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -302,6 +309,11 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         selection_window: None,
         dim_drag: None,
         rotation_drag: None,
+        play: PlayState {
+            view_built: false,
+            mpos: None,
+            grbl_state: None,
+        },
     }));
 
     if let Some(cnc) = app_vars.borrow().machine.cnc.clone() {

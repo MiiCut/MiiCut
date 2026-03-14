@@ -22,7 +22,7 @@
 
     <!-- Top Menu -->
     <div id="top-menu" class="top-menu">
-      <div id="menuTitle">&nbsp;MiiCut 0.4.2 (Tab on the right)</div>
+      <div id="menuTitle">&nbsp;MiiCut 0.4.3 (Play Machine)</div>
       <div id="file-menu" class="dropdown">
         <button class="dropbtn">File</button>
         <div class="dropdown-content">
@@ -222,6 +222,167 @@
             </div>
             <div id="machine-container"></div>
           </div>
+
+          <div id="view-play" class="view">
+            <div id="play-container">
+              <!-- Position display -->
+              <div class="play-card" id="play-card-position">
+                <div class="play-card-title">Position (mm)</div>
+                <div class="play-pos-grid">
+                  <span class="play-axis-label">X</span>
+                  <span class="play-axis-val" id="play-pos-x">--</span>
+                  <span class="play-axis-label">Y</span>
+                  <span class="play-axis-val" id="play-pos-y">--</span>
+                  <span class="play-axis-label">Z</span>
+                  <span class="play-axis-val" id="play-pos-z">--</span>
+                </div>
+                <div class="play-state-row">
+                  <span class="play-state-label">State:</span>
+                  <span class="play-state-val" id="play-state">---</span>
+                </div>
+                <button id="play-refresh-pos" class="play-btn play-btn-small">
+                  Refresh
+                </button>
+              </div>
+
+              <!-- Jog XY + Z -->
+              <div class="play-card" id="play-card-jog">
+                <div class="play-card-title">Jog</div>
+                <div class="play-jog-layout">
+                  <div class="play-jog-xy">
+                    <div class="play-jog-grid">
+                      <div></div>
+                      <button id="jog-y-plus" class="jog-btn">▲</button>
+                      <div></div>
+                      <button id="jog-x-minus" class="jog-btn">◀</button>
+                      <button
+                        id="jog-home-xy"
+                        class="jog-btn jog-home-btn"
+                        title="Go to machine zero XY"
+                      >
+                        ⌂
+                      </button>
+                      <button id="jog-x-plus" class="jog-btn">▶</button>
+                      <div></div>
+                      <button id="jog-y-minus" class="jog-btn">▼</button>
+                      <div></div>
+                    </div>
+                  </div>
+                  <div class="play-jog-z">
+                    <button id="jog-z-plus" class="jog-btn jog-z-btn">
+                      Z▲
+                    </button>
+                    <button id="jog-z-minus" class="jog-btn jog-z-btn">
+                      Z▼
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Step sizes -->
+                <div class="play-step-row">
+                  <span class="play-step-label">Step (mm):</span>
+                  <div class="play-step-group">
+                    <label class="play-step-opt"
+                      ><input
+                        type="radio"
+                        name="jog-step"
+                        value="0.1"
+                      />0.1</label
+                    >
+                    <label class="play-step-opt"
+                      ><input
+                        type="radio"
+                        name="jog-step"
+                        value="1"
+                        checked
+                      />1</label
+                    >
+                    <label class="play-step-opt"
+                      ><input
+                        type="radio"
+                        name="jog-step"
+                        value="10"
+                      />10</label
+                    >
+                    <label class="play-step-opt"
+                      ><input
+                        type="radio"
+                        name="jog-step"
+                        value="50"
+                      />50</label
+                    >
+                    <label class="play-step-opt"
+                      ><input
+                        type="radio"
+                        name="jog-step"
+                        value="100"
+                      />100</label
+                    >
+                  </div>
+                </div>
+
+                <!-- Feed -->
+                <div class="play-feed-row">
+                  <label class="play-feed-label" for="play-feed"
+                    >Feed (mm/min):</label
+                  >
+                  <input
+                    type="number"
+                    id="play-feed"
+                    class="play-feed-input"
+                    value="1000"
+                    step="100"
+                    min="1"
+                  />
+                </div>
+              </div>
+
+              <!-- Actions -->
+              <div class="play-card" id="play-card-actions">
+                <div class="play-card-title">Actions</div>
+                <div class="play-actions-grid">
+                  <button id="play-home" class="play-btn">Home ($H)</button>
+                  <button id="play-zero-xyz" class="play-btn">Zero XYZ</button>
+                  <button id="play-zero-xy" class="play-btn">Zero XY</button>
+                  <button id="play-zero-z" class="play-btn">Zero Z</button>
+                  <button id="play-cancel-jog" class="play-btn">
+                    Cancel Jog
+                  </button>
+                  <button id="play-estop" class="play-btn play-estop-btn">
+                    ⚠ E-STOP
+                  </button>
+                </div>
+              </div>
+
+              <!-- Manual command -->
+              <div class="play-card" id="play-card-manual">
+                <div class="play-card-title">Manual Command</div>
+                <div class="play-manual-row">
+                  <input
+                    type="text"
+                    id="play-cmd-input"
+                    class="play-cmd-input"
+                    placeholder="e.g. G0 X10 Y10"
+                  />
+                  <button id="play-cmd-send" class="play-btn">Send</button>
+                </div>
+              </div>
+
+              <!-- Console -->
+              <div class="play-card play-card-console" id="play-card-console">
+                <div class="play-card-title-row">
+                  <span class="play-card-title">Console</span>
+                  <button
+                    id="play-console-clear"
+                    class="play-btn play-btn-small"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div id="play-console" class="play-console"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -231,7 +392,8 @@
           <button id="tab-draw" class="tab active">Draw</button>
           <button id="tab-toolpath" class="tab">Toolpath</button>
           <button id="tab-gcode" class="tab">G-code</button>
-          <button id="tab-machine" class="tab">Machine</button>
+          <button id="tab-machine" class="tab">Machine params</button>
+          <button id="tab-play" class="tab">Play machine</button>
         </div>
       </div>
     </div>

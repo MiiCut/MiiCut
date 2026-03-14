@@ -189,6 +189,17 @@ impl AppVars {
     pub(crate) fn handle_ws_text(&mut self, msg: &str) {
         let mut updated = 0;
         for line in msg.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            // grblHAL real-time status report
+            if line.starts_with('<') {
+                self.handle_ws_grbl_status(line);
+                continue;
+            }
+            // Forward all other lines to the play console
+            self.console_recv(line);
             if let Some((id, value)) = parse_grbl_setting_line(line) {
                 if update_machine_value(&mut self.machine.groups, &id, &value) {
                     self.update_machine_input(&id, &value);

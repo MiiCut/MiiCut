@@ -1,13 +1,14 @@
-use crate::app::{with_av_mut, with_av_try_mut, set_callback, RefAV};
+use crate::app::{set_callback, with_av_mut, with_av_try_mut, RefAV};
 use crate::canvas::CanvasKind;
 use crate::dom::{get_element_height, get_element_width, Tabs};
+use crate::view_draw::app::render_draw_view;
 use crate::view_draw::notes::delete_note_if_selected;
 use crate::view_draw::notes_dom::{
     is_typing_in_input, note_id_from_element, on_window_click, update_notes_view,
 };
-use crate::view_draw::app::render_draw_view;
 use crate::view_gcode::app::render_gcode_view;
 use crate::view_machine::app::render_machine_view;
+use crate::view_play::app::render_play_view;
 use crate::view_toolpath::app::render_toolpath_view;
 use std::collections::HashSet;
 use wasm_bindgen::prelude::*;
@@ -239,9 +240,15 @@ pub(crate) fn on_window_keyup(av: RefAV, event: Event) {
 }
 
 pub(crate) fn init_tabs(av: RefAV) -> Result<(), JsValue> {
-    let tabs: HashSet<Tabs> = [Tabs::Draw, Tabs::Toolpath, Tabs::Gcode, Tabs::Machine]
-        .into_iter()
-        .collect();
+    let tabs: HashSet<Tabs> = [
+        Tabs::Draw,
+        Tabs::Toolpath,
+        Tabs::Gcode,
+        Tabs::Machine,
+        Tabs::Play,
+    ]
+    .into_iter()
+    .collect();
 
     for tab in tabs.iter() {
         let el = tab
@@ -267,10 +274,12 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
     let tab_toolpath = avb.document.get_element_by_id("tab-toolpath");
     let tab_gcode = avb.document.get_element_by_id("tab-gcode");
     let tab_machine = avb.document.get_element_by_id("tab-machine");
+    let tab_play = avb.document.get_element_by_id("tab-play");
     let draw = avb.document.get_element_by_id("view-draw");
     let toolpath = avb.document.get_element_by_id("view-toolpath");
     let gcode = avb.document.get_element_by_id("view-gcode");
     let machine = avb.document.get_element_by_id("view-machine");
+    let play = avb.document.get_element_by_id("view-play");
     let left_panel = avb.document.get_element_by_id("left-panel");
     let shapes_panel = avb.document.get_element_by_id("shapes-panel");
     let file_menu = avb.document.get_element_by_id("file-menu");
@@ -292,10 +301,12 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
     set_active(&tab_toolpath, selected == Tabs::Toolpath);
     set_active(&tab_gcode, selected == Tabs::Gcode);
     set_active(&tab_machine, selected == Tabs::Machine);
+    set_active(&tab_play, selected == Tabs::Play);
     set_active(&draw, selected == Tabs::Draw);
     set_active(&toolpath, selected == Tabs::Toolpath);
     set_active(&gcode, selected == Tabs::Gcode);
     set_active(&machine, selected == Tabs::Machine);
+    set_active(&play, selected == Tabs::Play);
 
     if let Some(panel) = left_panel.as_ref() {
         let classes = panel.class_list();
@@ -312,7 +323,7 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
             Tabs::Gcode => {
                 let _ = classes.add_1("gcode-mode");
             }
-            Tabs::Machine => {}
+            Tabs::Machine | Tabs::Play => {}
         }
         if let Ok(panel) = panel.clone().dyn_into::<web_sys::HtmlElement>() {
             if matches!(selected, Tabs::Draw) {
@@ -373,12 +384,12 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
         }
     }
 
-    if !matches!(selected, Tabs::Machine) {
+    if !matches!(selected, Tabs::Machine | Tabs::Play) {
         avb.active_canvas = match selected {
             Tabs::Draw => CanvasKind::Draw,
             Tabs::Toolpath => CanvasKind::Toolpath,
             Tabs::Gcode => CanvasKind::Gcode,
-            Tabs::Machine => avb.active_canvas,
+            Tabs::Machine | Tabs::Play => avb.active_canvas,
         };
     }
 
@@ -396,6 +407,10 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
         let _ = avb.ensure_machine_view(av.clone());
         avb.request_machine_settings(av.clone());
     }
+    if matches!(selected, Tabs::Play) {
+        let _ = avb.ensure_play_view(av.clone());
+        avb.request_play_position(av.clone());
+    }
 
     drop(avb);
     resize_canvases(av.clone());
@@ -405,5 +420,6 @@ pub(crate) fn on_tab_click(av: RefAV, selected: Tabs) {
         Tabs::Toolpath => render_toolpath_view(av),
         Tabs::Gcode => render_gcode_view(av),
         Tabs::Machine => render_machine_view(av),
+        Tabs::Play => render_play_view(av),
     }
 }

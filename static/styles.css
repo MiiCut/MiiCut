@@ -390,6 +390,7 @@ html {
   margin: 0;
 }
 .shape-prop-input[type="number"] {
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 .shape-prop-empty {
@@ -642,7 +643,6 @@ html {
   min-width: 0;
 }
 
-
 #views-container {
   width: 100%;
   height: 100%;
@@ -885,7 +885,10 @@ html {
   background: transparent;
   color: #a0a0a0;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
   text-align: center;
 }
 
@@ -898,6 +901,357 @@ html {
   background: rgba(255, 207, 46, 0.12);
   color: #ffcf2e;
   border-left-color: #ffcf2e;
+}
+
+/* ── Play machine view ────────────────────────────────────────────────────── */
+
+#view-play {
+  overflow-y: auto;
+}
+
+#play-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 20px;
+  align-items: flex-start;
+}
+
+.play-card {
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 200px;
+  color: #e0e0e0;
+}
+
+.play-card-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #ffcf2e;
+  margin-bottom: 12px;
+}
+
+/* Position display */
+.play-pos-grid {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 4px 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.play-axis-label {
+  font-weight: 700;
+  color: #a0a0a0;
+  font-size: 13px;
+}
+
+.play-axis-val {
+  font-family: monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.04em;
+}
+
+.play-state-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.play-state-label {
+  color: #a0a0a0;
+}
+
+.play-state-val {
+  font-weight: 700;
+  color: #a0a0a0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #2a2a2a;
+}
+
+.play-state-val.play-state-idle {
+  color: #7adf70;
+  background: rgba(122, 223, 112, 0.1);
+}
+
+.play-state-val.play-state-run {
+  color: #ffcf2e;
+  background: rgba(255, 207, 46, 0.1);
+}
+
+.play-state-val.play-state-alarm {
+  color: #ff6060;
+  background: rgba(255, 96, 96, 0.15);
+}
+
+/* Jog layout */
+.play-jog-layout {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.play-jog-xy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.play-jog-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 44px);
+  grid-template-rows: repeat(3, 44px);
+  gap: 4px;
+}
+
+.jog-btn {
+  width: 44px;
+  height: 44px;
+  font-size: 18px;
+  font-weight: 700;
+  background: #2c2c2c;
+  color: #e0e0e0;
+  border: 1px solid #4a4a4a;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    color 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.jog-btn:hover {
+  background: #3d3d3d;
+  color: #ffffff;
+  border-color: #ffcf2e;
+}
+
+.jog-btn:active {
+  background: #ffcf2e;
+  color: #1a1a1a;
+}
+
+.jog-home-btn {
+  background: #2a3a2a;
+  color: #7adf70;
+  border-color: #3a5a3a;
+}
+
+.play-jog-z {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.jog-z-btn {
+  width: 52px;
+  height: 44px;
+  font-size: 13px;
+}
+
+/* Step sizes */
+.play-step-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.play-step-label {
+  font-size: 11px;
+  color: #a0a0a0;
+  white-space: nowrap;
+}
+
+.play-step-group {
+  display: flex;
+  gap: 4px;
+}
+
+.play-step-opt {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid #3a3a3a;
+  background: #2a2a2a;
+  color: #c0c0c0;
+  transition:
+    background 0.1s,
+    color 0.1s;
+}
+
+.play-step-opt:has(input:checked) {
+  background: rgba(255, 207, 46, 0.15);
+  border-color: #ffcf2e;
+  color: #ffcf2e;
+}
+
+.play-step-opt input[type="radio"] {
+  display: none;
+}
+
+/* Feed input */
+.play-feed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.play-feed-label {
+  font-size: 11px;
+  color: #a0a0a0;
+  white-space: nowrap;
+}
+
+.play-feed-input {
+  width: 80px;
+  background: #2a2a2a;
+  border: 1px solid #4a4a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 13px;
+  padding: 4px 6px;
+}
+
+/* Action buttons */
+.play-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.play-btn {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #2c2c2c;
+  color: #e0e0e0;
+  border: 1px solid #4a4a4a;
+  border-radius: 5px;
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    color 0.1s;
+  white-space: nowrap;
+}
+
+.play-btn:hover {
+  background: #3d3d3d;
+  color: #ffffff;
+  border-color: #888;
+}
+
+.play-btn-small {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.play-estop-btn {
+  grid-column: 1 / -1;
+  background: #5a1515;
+  color: #ff8080;
+  border-color: #8a2222;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 10px;
+}
+
+.play-estop-btn:hover {
+  background: #8a1515;
+  color: #ff4040;
+  border-color: #cc2222;
+}
+
+/* Manual command */
+.play-manual-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.play-cmd-input {
+  flex: 1;
+  background: #2a2a2a;
+  border: 1px solid #4a4a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 13px;
+  font-family: monospace;
+  padding: 6px 8px;
+}
+
+/* Console card spans full width */
+.play-card-console {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.play-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.play-card-title-row .play-card-title {
+  margin-bottom: 0;
+}
+
+.play-console {
+  font-family: "Courier New", Courier, monospace;
+  font-size: 12px;
+  background: #0d0d0d;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  padding: 8px 10px;
+  height: 220px;
+  overflow-y: auto;
+  color: #c0c0c0;
+  scroll-behavior: smooth;
+}
+
+.console-line {
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Outgoing commands — yellow */
+.console-line.console-send {
+  color: #ffcf2e;
+}
+
+/* Incoming responses — light green */
+.console-line.console-recv {
+  color: #7adf70;
+}
+
+/* grblHAL status reports <...> — dim gray */
+.console-line.console-status {
+  color: #5a5a5a;
+}
+
+/* Errors — red */
+.console-line.console-err {
+  color: #ff6060;
 }
 
 /* G-code split layout */

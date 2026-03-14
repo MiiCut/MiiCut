@@ -16,6 +16,7 @@ pub enum Tabs {
     Gcode,
     Toolpath,
     Machine,
+    Play,
 }
 impl Tabs {
     pub fn id(&self) -> &'static str {
@@ -24,6 +25,7 @@ impl Tabs {
             Tabs::Gcode => "tab-gcode",
             Tabs::Toolpath => "tab-toolpath",
             Tabs::Machine => "tab-machine",
+            Tabs::Play => "tab-play",
         }
     }
 
@@ -33,6 +35,7 @@ impl Tabs {
             Tabs::Gcode => "view-gcode",
             Tabs::Toolpath => "view-toolpath",
             Tabs::Machine => "view-machine",
+            Tabs::Play => "view-play",
         }
     }
 
@@ -229,8 +232,7 @@ fn init_splitter(
     splitter_id: &str,
     canvas_kind: CanvasKind,
 ) -> Result<(), JsValue> {
-    let window: Window =
-        web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
+    let window: Window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
     let document = window
         .document()
         .ok_or_else(|| JsValue::from_str("no document"))?;
