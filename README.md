@@ -38,12 +38,12 @@ It runs fully client-side (Rust + WebAssembly) and can be **served directly from
 
 ## 🔧 Supported Machines
 
-| Type | Controller |
-|---|---|
-| Plasma cutting | grblHAL (tested on RP2350) |
-| Laser cutting | grblHAL |
-| Waterjet cutting | grblHAL |
-| Drag knife / stencil | grblHAL |
+| Type                 | Controller                 |
+| -------------------- | -------------------------- |
+| Plasma cutting       | grblHAL (tested on RP2350) |
+| Laser cutting        | grblHAL                    |
+| Waterjet cutting     | grblHAL                    |
+| Drag knife / stencil | grblHAL                    |
 
 > Always verify toolpaths and G-code before running on real machines.
 
@@ -138,7 +138,3 @@ The machine IP is configured at the top of `deploy_to_grblhal.py` (`FTP_HOST`).
 - [ ] Play / machine control view (jog interface, position display)
 
 ---
-
-<p align="center">
-  <sub>Built with 🧡 by Olivier (Mool)</sub>
-</p>
