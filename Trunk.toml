@@ -2,6 +2,7 @@
 target = "index.html"
 dist = "target/trunk-dist"
 minify = "never"
+release = true
 
 [serve]
 no_autoreload = true
