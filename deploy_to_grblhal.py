@@ -336,9 +336,24 @@ if __name__ == "__main__":
     parser.add_argument(
         "--clean", action="store_true", help="Delete www/ contents before deploying"
     )
+    parser.add_argument(
+        "--bundle", action="store_true",
+        help="Bundle only — save index.html.gz locally, do not upload"
+    )
     args = parser.parse_args()
 
     if args.list:
         cmd_list(args.host, args.port)
+    elif args.bundle:
+        if not DIST_DIR.exists():
+            print(f"ERROR: {DIST_DIR} not found — run 'trunk build' first.")
+            sys.exit(1)
+        print("Bundling assets into single index.html …")
+        html_bytes = bundle_single_html(DIST_DIR)
+        out = Path("index.html.gz")
+        gz_path = compress_bytes(html_bytes)
+        import shutil
+        shutil.move(str(gz_path), str(out))
+        print(f"  Saved: {out}  ({out.stat().st_size / 1024:.0f} KB)")
     else:
         cmd_deploy(args.host, args.port, clean=args.clean)
