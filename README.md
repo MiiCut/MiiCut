@@ -1,122 +1,144 @@
-# MiiCut
-
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Status](https://img.shields.io/badge/status-WIP-orange.svg)
-![Platform](https://img.shields.io/badge/platform-Web%20%7C%20WASM-lightgrey.svg)
-
-**Work in progress — expect breaking changes and incomplete features.**
-
----
-
-## Overview
-
-**MiiCut** is an **open-source 2D CAD/CAM web application** focused on **cutting workflows** such as **laser, plasma, waterjet, and stencil cutting**.
-
-It provides parametric shape drawing, SVG interoperability, robust boolean geometry operations, toolpath and G-code previews, and direct machine control for compatible CNC controllers.
-
-MiiCut is designed to reliably generate **closed contours**, which are essential for CNC cutting operations.
+<p align="center">
+  <h1 align="center">✂️ MiiCut</h1>
+  <p align="center">
+    <strong>Open-source 2D CAD/CAM for CNC cutting machines</strong><br/>
+    Draw · Boolean ops · Toolpath · G-code · Machine control
+  </p>
+  <p align="center">
+    <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT"/>
+    <img src="https://img.shields.io/badge/status-WIP-orange?style=flat-square" alt="WIP"/>
+    <img src="https://img.shields.io/badge/Rust-WASM-B7410E?style=flat-square&logo=rust&logoColor=white" alt="Rust"/>
+    <img src="https://img.shields.io/badge/grblHAL-RP2350-6e3b9c?style=flat-square" alt="grblHAL"/>
+  </p>
+</p>
 
 ---
 
-## Key Features
+## 🗺️ Overview
+
+**MiiCut** is a browser-based 2D CAD/CAM application focused on **cutting workflows** — plasma, laser, waterjet, and drag knife.
+
+It runs fully client-side (Rust + WebAssembly) and can be **served directly from the machine** via the grblHAL embedded HTTP server — no PC needed at the machine side.
+
+---
+
+## ✨ Key Features
 
 - Parametric 2D drawing with editable vertices and live dimension handles
-- Rotation handles per shape, snapping support
-- SVG import/export
+- Rotation handles per shape, angle snapping
+- SVG import / export
 - Boolean operations (union / difference)
-- Toolpath preview with correct hole-before-outer-contour ordering
+- Toolpath preview — holes cut before outer contours
 - G-code preview
-- Machine configuration and parameter management
-- Direct machine control via grblHAL WebSocket (jog, home, zero, e-stop)
-- Native support for **grblHAL-based machines**
-- Embeddable on the machine itself — served directly from the grblHAL SD card
+- Machine parameters configuration
+- Direct machine control via grblHAL WebSocket — jog, home, zero, e-stop
+- **Embeds on the machine** — single `index.html.gz` served from grblHAL SD card
 
 ---
 
-## Supported Use Cases
+## 🔧 Supported Machines
 
-- Plasma cutting
-- Laser cutting
-- Waterjet cutting
-- Drag knife and stencil cutting
-- Rapid 2D CAM prototyping in the browser
-
----
-
-## Typical Workflow
-
-1. Draw or import geometry
-2. Adjust parameters and boolean operations
-3. Preview toolpaths
-4. Inspect generated G-code
-5. Configure machine parameters
-6. Jog, home, zero, then execute the job
-
----
-
-## Technology Stack
-
-- **Rust** for core geometry, CAM, and application logic
-- **WebAssembly (WASM)** compiled with `wasm-bindgen` and bundled by **Trunk**
-- Zero JavaScript framework — pure Rust + `web-sys` DOM manipulation
-- Runs fully client-side in a modern browser
-
----
-
-## Compatibility
-
-- CNC controllers: **grblHAL** (tested on RP2350 with networking plugin)
-- Machine types: plasma, laser, waterjet, drag knife
-- Browsers: modern Chromium / Firefox with WebAssembly support
+| Type | Controller |
+|---|---|
+| Plasma cutting | grblHAL (tested on RP2350) |
+| Laser cutting | grblHAL |
+| Waterjet cutting | grblHAL |
+| Drag knife / stencil | grblHAL |
 
 > Always verify toolpaths and G-code before running on real machines.
 
 ---
 
-## Project Status
+## 🔄 Typical Workflow
 
-- Active development
-- APIs and UI subject to change
-- Not yet production-ready
-
----
-
-## Roadmap
-
-- [ ] Additional parametric shapes
-- [ ] Improved post-processors
-- [ ] Advanced toolpath strategies
-- [ ] Machine feedback and job monitoring
-- [ ] Project save/load improvements
-- [ ] Play / machine control view (jog interface, position display)
+1. Draw or import geometry
+2. Apply boolean operations
+3. Preview toolpaths
+4. Inspect G-code
+5. Configure machine parameters
+6. Jog · Home · Zero · Cut
 
 ---
 
-## Development
+## 🧱 Technology Stack
+
+- **Rust** — geometry, CAM logic, application state
+- **WebAssembly** — compiled with `wasm-bindgen`, bundled by [Trunk](https://trunkrs.dev/)
+- **No JS framework** — pure `web-sys` DOM manipulation
+- Runs fully client-side in any modern browser
+
+---
+
+## ⬇️ Quick Install — grblHAL
+
+No build required. Download the latest pre-built bundle from the [Releases](https://github.com/MiiCut/MiiCut/releases/latest) page and upload it to your machine.
+
+### Requirements
+
+- grblHAL controller with the **networking plugin** and an **SD card**
+- FTP client (FileZilla, or any anonymous FTP)
+
+### Steps
+
+1. Download `index.html.gz` from the latest release
+2. Connect to your machine via FTP (anonymous, no password):
+   ```
+   Host:  <your-machine-ip>
+   Port:  21
+   User:  anonymous
+   Pass:  (leave blank)
+   ```
+3. Navigate to the `www/` folder (create it if it doesn't exist)
+4. Upload `index.html.gz` into `www/`
+5. Open `http://<your-machine-ip>/` in a browser
+
+---
+
+## 🚀 Development
 
 ### Requirements
 
 - Rust (stable)
 - [Trunk](https://trunkrs.dev/)
-- Python 3 (for deployment to grblHAL)
+- Python 3 (deployment only)
 
-### Local development
+### Local dev server
 
 ```bash
 trunk serve
 ```
 
-Trunk is configured to always build in release mode (`Trunk.toml`).
+Trunk always builds in release mode (configured in `Trunk.toml`).
 
-### Deploy to grblHAL embedded server
+---
 
-The grblHAL networking plugin HTTP server only serves a single `index.html.gz` from the SD card `www/` folder. The deploy script bundles everything (WASM, JS, CSS, fonts, SVG icons) into that one file and uploads it via anonymous FTP.
+## 📦 Deploy to grblHAL
+
+The grblHAL networking plugin HTTP server only serves a **single `index.html.gz`** from the SD card `www/` folder. The deploy script bundles everything — WASM, JS, CSS, fonts, SVG icons — into that one file and uploads it via anonymous FTP.
 
 ```bash
 trunk build
-python3 deploy_to_grblhal.py            # bundle + upload
+python3 deploy_to_grblhal.py            # bundle + upload to machine
 python3 deploy_to_grblhal.py --clean    # wipe www/ first, then upload
+python3 deploy_to_grblhal.py --bundle   # bundle only → index.html.gz (no upload)
 python3 deploy_to_grblhal.py --list     # inspect server contents
 ```
 
-The target IP is configured at the top of `deploy_to_grblhal.py` (`FTP_HOST`).
+The machine IP is configured at the top of `deploy_to_grblhal.py` (`FTP_HOST`).
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Additional parametric shapes
+- [ ] Improved post-processors
+- [ ] Advanced toolpath strategies
+- [ ] Machine feedback and job monitoring
+- [ ] Project save / load
+- [ ] Play / machine control view (jog interface, position display)
+
+---
+
+<p align="center">
+  <sub>Built with 🧡 by Olivier (Mool)</sub>
+</p>
