@@ -185,7 +185,7 @@ impl AppVars {
                 .unwrap_or(false)
         });
         if on_rotation_handle {
-            canvas.set_cursor("url(\"assets/cursor_rotate_16.png\") 8 8, auto");
+            canvas.set_cursor("url(\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAARGVYSWZNTQAqAAAACAABh2kABAAAAAEAAAAaAAAAAAADoAEAAwAAAAEAAQAAoAIABAAAAAEAAAAQoAMABAAAAAEAAAAQAAAAADRVcfIAAAHJaVRYdFhNTDpjb20uYWRvYmUueG1wAAAAAAA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIiB4OnhtcHRrPSJYTVAgQ29yZSA2LjAuMCI+CiAgIDxyZGY6UkRGIHhtbG5zOnJkZj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+CiAgICAgIDxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiCiAgICAgICAgICAgIHhtbG5zOmV4aWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20vZXhpZi8xLjAvIj4KICAgICAgICAgPGV4aWY6Q29sb3JTcGFjZT4xPC9leGlmOkNvbG9yU3BhY2U+CiAgICAgICAgIDxleGlmOlBpeGVsWERpbWVuc2lvbj4yNDwvZXhpZjpQaXhlbFhEaW1lbnNpb24+CiAgICAgICAgIDxleGlmOlBpeGVsWURpbWVuc2lvbj4yNDwvZXhpZjpQaXhlbFlEaW1lbnNpb24+CiAgICAgIDwvcmRmOkRlc2NyaXB0aW9uPgogICA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgoHMv/IAAABPklEQVQ4Ea2Tyy4EQRSGa0gIOyxJXBYWNhJLCysi8QZDrMVY8QTzBCy8AQ/BG2AjIqwtRCQkJBYucf2+7prJzKhOJ+JPvj5V55w+1VV1OoQQKvBndSfenMU3ByPwBY8wDlNwDaXaIOMdnmA5Zm9hn2EXBqIvaWp4H8ACZzAEahJ24BsOIVlkgcAHHMAiVKFTLvAJ9c5AP44TuIDhGEwdrr59uIPRmJeZeZ5vsNbqLBgv4X+FVeNdPtA0WODUSYluiL+At9Qs0MPYvVmkTOZ6/Vlu4wus2geN/TMs1AyRXjhvzRhjcg97UHR4hLIFLrHH4MG3qc7Mbay3efNJFePV2gP2iFf+SzaHCTbLNtg8ymayqXzRJkstgDuXRWxX23Yzd4UVrG1tgVr0NU1qvwb9oW7hCibArxmM8yPsv6nyA/j9OLxiC3kLAAAAAElFTkSuQmCC\") 8 8, auto");
         } else {
             canvas.set_cursor("default");
         }
@@ -257,14 +257,14 @@ pub(crate) fn update_context_help(av: &RefAV) -> Option<()> {
         if let Some((shape_type, _)) = avb.element_on_creation.as_ref() {
             if matches!(shape_type, ShapeType::Poly) {
                 title = "Shape: Polygon".to_string();
-                lines.push("Polygon: press Space to finish.".to_string());
+                lines.push("Polygon: right-click to finish.".to_string());
             } else {
                 title = "Shape".to_string();
                 lines.push("Creation: click to place the second point.".to_string());
             }
         } else if matches!(avb.icon_selected, ShapeType::Poly) {
             title = "Shape: Polygon".to_string();
-            lines.push("Polygon: click to add points, press Space to finish.".to_string());
+            lines.push("Polygon: click to add points, right-click to finish.".to_string());
         } else if matches!(avb.icon_selected, ShapeType::Arrow) {
             if canvas.dataset.vertex_selected.is_some() {
                 title = "Vertex".to_string();
@@ -2202,8 +2202,12 @@ pub(crate) fn on_draw_mouse_leave(av: RefAV, _event: Event) {
     render_draw_view(av);
 }
 
-pub(crate) fn on_draw_context_menu(_av: RefAV, event: Event) {
+pub(crate) fn on_draw_context_menu(av: RefAV, event: Event) {
     event.prevent_default();
+    let finalized = av.try_borrow_mut().ok().map_or(false, |mut avb| avb.finalize_poly());
+    if finalized {
+        render_draw_view(av);
+    }
 }
 
 pub(crate) fn draw_reset_origin(av: RefAV) {

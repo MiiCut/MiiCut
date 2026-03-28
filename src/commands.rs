@@ -234,7 +234,21 @@ impl AppVars {
                         .create_vertices_between(eid1, vid1, eid2, vid2);
                 }
             }
-        } else if let ShapeType::Poly = self.icon_selected {
+        } else {
+            self.finalize_poly();
+        }
+    }
+
+    pub(crate) fn finalize_poly(&mut self) -> bool {
+        if let ShapeType::Poly = self.icon_selected {
+            if let Some((_, ref vs)) = self.element_on_creation {
+                if vs.len() < 3 {
+                    // Less than 3 points — cancel like Esc
+                    self.element_on_creation = None;
+                    self.go_to_arrow_tool();
+                    return true;
+                }
+            }
             let el_on_creation = self.element_on_creation.clone();
             let canvas_user = self.get_active_canvas_mut();
             if let Some((_, vs)) = el_on_creation {
@@ -245,9 +259,11 @@ impl AppVars {
                     canvas_user.dataset.calc_final_polygon();
                     self.element_on_creation = None;
                     self.go_to_arrow_tool();
+                    return true;
                 }
             }
         }
+        false
     }
 
     pub(crate) fn space_pressed(&mut self) {
@@ -303,19 +319,8 @@ impl AppVars {
                     }
                 }
             }
-        } else if let ShapeType::Poly = self.icon_selected {
-            let el_on_creation = self.element_on_creation.clone();
-            let canvas_user = self.get_active_canvas_mut();
-            if let Some((_, vs)) = el_on_creation {
-                if let Some(e) = GeneralShape::new_shape_poly(vs, 0) {
-                    let eid = canvas_user.dataset.push_element(e);
-                    canvas_user.dataset.select_only(eid);
-                    canvas_user.dataset.mark_final_polygon_dirty();
-                    canvas_user.dataset.calc_final_polygon();
-                    self.element_on_creation = None;
-                    self.go_to_arrow_tool();
-                }
-            }
+        } else {
+            self.finalize_poly();
         }
     }
 
