@@ -239,87 +239,69 @@ impl AppVars {
 
 pub(crate) fn update_context_help(av: &RefAV) -> Option<()> {
     let document = av.borrow().document.clone();
-    let body_el: Element = document.get_element_by_id("context-help")?;
-    let el: HtmlElement = body_el.dyn_into::<HtmlElement>().ok()?;
+    let bar_el: Element = document.get_element_by_id("context-bar")?;
+    let bar: HtmlElement = bar_el.dyn_into::<HtmlElement>().ok()?;
 
     if !matches!(av.borrow().active_view, Tabs::Draw) {
-        el.set_inner_html("");
-        let _ = el.style().set_property("display", "none");
+        bar.set_inner_html("");
         return Some(());
     }
 
-    let (title_label, lines): (String, Vec<String>) = {
+    let lines: Vec<String> = {
         let avb = av.borrow();
         let canvas = &avb.canvases[CanvasKind::Draw.idx()];
         let mut lines = Vec::new();
-        let mut title = String::new();
 
         if let Some((shape_type, _)) = avb.element_on_creation.as_ref() {
             if matches!(shape_type, ShapeType::Poly) {
-                title = "Shape: Polygon".to_string();
-                lines.push("Polygon: right-click to finish.".to_string());
+                lines.push("Right-click to finish".to_string());
             } else {
-                title = "Shape".to_string();
-                lines.push("Creation: click to place the second point.".to_string());
+                lines.push("Click to place the second point".to_string());
             }
         } else if matches!(avb.icon_selected, ShapeType::Poly) {
-            title = "Shape: Polygon".to_string();
-            lines.push("Polygon: click to add points, right-click to finish.".to_string());
+            lines.push("Click to add points".to_string());
+            lines.push("Right-click to finish".to_string());
         } else if matches!(avb.icon_selected, ShapeType::Arrow) {
             if canvas.dataset.vertex_selected.is_some() {
-                title = "Vertex".to_string();
-                lines.push("Vertex: ↑ / ↓ to change radius.".to_string());
-                lines.push("Vertex: Space to change apex type.".to_string());
+                lines.push("Space: change apex type".to_string());
+                lines.push("↑/↓ change radius".to_string());
             } else if canvas.dataset.shapes_selected.len() > 1 {
-                title = "Group".to_string();
-                lines.push("Group: Enter to group selection.".to_string());
+                lines.push("Enter: group".to_string());
             } else if canvas.dataset.shapes_selected.len() == 1 {
                 if let Some(eid) = canvas.dataset.shapes_selected.iter().next() {
                     if let Some(shape) = canvas.dataset.shapes.get(eid) {
                         if shape.is_group() {
-                            title = "Group".to_string();
-                            lines.push("Group: Enter to ungroup.".to_string());
+                            lines.push("Enter: ungroup".to_string());
                         } else {
-                            title = "Shape".to_string();
-                            lines.push("Shape: Space to toggle Union/Diff.".to_string());
-                            lines.push("Shape: ↑ / ↓ to change order.".to_string());
+                            lines.push("Space: toggle Union/Diff".to_string());
+                            lines.push("↑/↓ change order".to_string());
                         }
                     }
                 }
             }
         }
 
-        if title.is_empty() && !lines.is_empty() {
-            title = "Aide".to_string();
+        if lines.is_empty() {
+            lines.push("Alt: preview".to_string());
         }
-        (title, lines)
+
+        lines
     };
 
-    let (title_label, lines) = if lines.is_empty() {
-        let lines = vec![
-            "Option/Alt: preview.".to_string(),
-            "".to_string(),
-            "Enter: group / ungroup selection.".to_string(),
-            "".to_string(),
-            "↑ / ↓: shape order or vertex radius.".to_string(),
-        ];
-        ("Shortcuts".to_string(), lines)
-    } else {
-        (title_label, lines)
-    };
-
-    el.set_inner_html("");
-    let title = document.create_element("div").ok()?;
-    title.set_class_name("context-help-title");
-    title.set_text_content(Some(&title_label));
-    let _ = el.append_child(&title);
-    for line in lines {
-        let row = document.create_element("div").ok()?;
-        row.set_class_name("context-help-line");
-        row.set_text_content(Some(&line));
-        let _ = el.append_child(&row);
+    bar.set_inner_html("");
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 {
+            let sep = document.create_element("span").ok()?;
+            sep.set_class_name("context-bar-sep");
+            sep.set_text_content(Some("|"));
+            let _ = bar.append_child(&sep);
+        }
+        let item = document.create_element("span").ok()?;
+        item.set_class_name("context-bar-line");
+        item.set_text_content(Some(line));
+        let _ = bar.append_child(&item);
     }
-    let _ = el.style().set_property("display", "block");
+
     Some(())
 }
 
@@ -2204,7 +2186,10 @@ pub(crate) fn on_draw_mouse_leave(av: RefAV, _event: Event) {
 
 pub(crate) fn on_draw_context_menu(av: RefAV, event: Event) {
     event.prevent_default();
-    let finalized = av.try_borrow_mut().ok().map_or(false, |mut avb| avb.finalize_poly());
+    let finalized = av
+        .try_borrow_mut()
+        .ok()
+        .map_or(false, |mut avb| avb.finalize_poly());
     if finalized {
         render_draw_view(av);
     }

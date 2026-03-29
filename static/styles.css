@@ -269,8 +269,7 @@ html {
   display: flex;
   flex: 1;
   margin-top: 50px; /* Offset for top menu */
-  height: calc(100% - 50px - 28px);
-  padding-bottom: 28px;
+  height: calc(100% - 50px - 28px - 52px);
   box-sizing: border-box;
 }
 
@@ -326,7 +325,7 @@ html {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px 10px;
+  padding: 8px 10px 60px 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -397,30 +396,36 @@ html {
   font-size: 12px;
   color: #666;
 }
-.context-help {
-  position: absolute;
-  right: 12px;
-  top: 12px;
-  max-width: 260px;
-  padding: 8px 10px;
-  font-size: 12px;
-  color: #222;
-  background-color: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+.context-bar {
+  position: fixed;
+  left: 50px;
+  right: 36px;
+  bottom: 28px;
+  height: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 12px;
+  gap: 16px;
+  background: rgba(30, 30, 30, 0);
+  /* backdrop-filter: blur(6px); */
+  color: #ddd;
+  font-size: 30px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 1000;
+  user-select: none;
   pointer-events: none;
-  z-index: 10;
-  display: none;
 }
-.context-help-title {
+.context-bar-title {
   font-weight: 600;
-  margin-bottom: 4px;
-  color: #333;
+  color: #ffcf2e;
 }
-.context-help-line {
-  line-height: 1.2;
-  color: #222;
+.context-bar-sep {
+  color: #555;
+}
+.context-bar-line {
+  font-weight: 600;
+  color: hsl(350, 69%, 52%);
 }
 .shape-row {
   display: flex;

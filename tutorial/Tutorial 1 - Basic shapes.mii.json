@@ -2,7 +2,7 @@
   "version": 1,
   "meta": {
     "title": "MiiCut",
-    "timestamp": "20260208-070901",
+    "timestamp": "20260329-092636",
     "canvas": {
       "size": [3000.000000, 1500.000000],
       "scale": 1.000000,
@@ -11,62 +11,12 @@
   },
   "shapes": [
     {
-      "id": 8,
-      "type": "text",
-      "operation": "union",
-      "order": 3,
-      "rotation": 0.000000,
-      "vertices": [
-        {"x": -270.000000, "y": -350.000000, "rounded": null},
-        {"x": -270.000000, "y": -210.000000, "rounded": null},
-        {"x": 170.000000, "y": -210.000000, "rounded": null},
-        {"x": 170.000000, "y": -350.000000, "rounded": null}
-      ],
-      "text": "TEXT"
-    },
-    {
-      "id": 7,
-      "type": "disc",
-      "operation": "union",
-      "order": 0,
-      "rotation": 0.000000,
-      "vertices": [
-        {"x": -480.000000, "y": -270.000000, "rounded": null},
-        {"x": -386.030738, "y": -235.797986, "rounded": null}
-      ]
-    },
-    {
-      "id": 10,
-      "type": "oblong",
-      "operation": "union",
-      "order": 6,
-      "rotation": 0.000000,
-      "vertices": [
-        {"x": -430.000000, "y": -80.000000, "rounded": null},
-        {"x": -140.000000, "y": -130.000000, "rounded": null},
-        {"x": -430.000000, "y": -40.000000, "rounded": null},
-        {"x": -100.000000, "y": -60.000000, "rounded": null}
-      ]
-    },
-    {
-      "id": 4,
-      "type": "square",
-      "operation": "union",
-      "order": 5,
-      "rotation": 0.000000,
-      "vertices": [
-        {"x": 210.000000, "y": -270.000000, "rounded": null},
-        {"x": 210.000000, "y": -70.000000, "rounded": null},
-        {"x": 440.000000, "y": -70.000000, "rounded": null},
-        {"x": 440.000000, "y": -270.000000, "rounded": 80}
-      ]
-    },
-    {
-      "id": 6,
+      "id": 11,
       "type": "poly",
       "operation": "union",
       "order": 1,
       "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
       "vertices": [
         {"x": -440.000000, "y": 200.000000, "rounded": null},
         {"x": -540.000000, "y": 340.000000, "rounded": null},
@@ -76,11 +26,41 @@
       ]
     },
     {
-      "id": 5,
+      "id": 10,
+      "type": "square",
+      "operation": "union",
+      "order": 5,
+      "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "vertices": [
+        {"x": 210.000000, "y": -270.000000, "rounded": null},
+        {"x": 210.000000, "y": -70.000000, "rounded": null},
+        {"x": 440.000000, "y": -70.000000, "rounded": null},
+        {"x": 440.000000, "y": -270.000000, "rounded": 80}
+      ]
+    },
+    {
+      "id": 8,
+      "type": "disc",
+      "operation": "union",
+      "order": 0,
+      "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "vertices": [
+        {"x": -480.000000, "y": -270.000000, "rounded": null},
+        {"x": -386.030738, "y": -235.797986, "rounded": null}
+      ]
+    },
+    {
+      "id": 12,
       "type": "voronoi",
       "operation": "union",
       "order": 2,
       "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "voronoi_seeds": 40,
+      "voronoi_gap": 0.200000,
+      "voronoi_relaxation": 1,
       "vertices": [
         {"x": -580.000000, "y": 0.000000, "rounded": null},
         {"x": -580.000000, "y": 160.000000, "rounded": null},
@@ -132,9 +112,38 @@
           [[-689.542281, -188.462339], [-691.173963, -188.114287], [-692.833346, -188.287409], [-694.358047, -188.964765], [-695.598861, -190.080071], [-696.434364, -191.524183], [-696.782796, -193.155783], [-699.249436, -239.359951], [-699.256708, -239.701922], [-699.242045, -240.043656], [-699.205506, -240.383747], [-699.147242, -240.720797], [-699.067493, -241.053418], [-698.966586, -241.380244], [-695.634936, -251.058486], [-695.352311, -251.727553], [-694.981404, -252.352016], [-694.529091, -252.920294], [-694.003763, -253.421849], [-693.415161, -253.847378], [-692.774201, -254.188989], [-633.492425, -280.771385], [-632.797750, -281.026608], [-632.074434, -281.183211], [-631.336402, -281.238177], [-630.597868, -281.190448], [-629.873051, -281.040944], [-629.175908, -280.792544], [-588.932032, -263.218690], [-588.192167, -262.823638], [-587.523384, -262.317480], [-586.942224, -261.712732], [-586.463060, -261.024350], [-586.097742, -260.269361], [-585.855304, -259.466434], [-580.573385, -235.223896], [-580.452402, -233.972122], [-580.627893, -232.726820], [-581.090101, -231.557232], [-581.813327, -230.528388], [-582.757356, -229.697495], [-583.869700, -229.110753]]
         ]
       }
+    },
+    {
+      "id": 7,
+      "type": "text",
+      "operation": "union",
+      "order": 3,
+      "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "vertices": [
+        {"x": -270.000000, "y": -350.000000, "rounded": null},
+        {"x": -270.000000, "y": -210.000000, "rounded": null},
+        {"x": 170.000000, "y": -210.000000, "rounded": null},
+        {"x": 170.000000, "y": -350.000000, "rounded": null}
+      ],
+      "text": "TEXT"
+    },
+    {
+      "id": 9,
+      "type": "oblong",
+      "operation": "union",
+      "order": 6,
+      "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "vertices": [
+        {"x": -430.000000, "y": -80.000000, "rounded": null},
+        {"x": -140.000000, "y": -130.000000, "rounded": null},
+        {"x": -430.000000, "y": -40.000000, "rounded": null},
+        {"x": -100.000000, "y": -60.000000, "rounded": null}
+      ]
     }
   ],
   "notes": [
-    {"id": 0, "pos": [-216.716392, -38.774777], "size": [669.462196, 498.427620], "text": "# Tutorial 1 – Basic Shapes\n\n## Drawing shapes\n- Use the left panel to select the shape you want to draw.\n- For polygon shapes, press **SPACE** to finish the shape.\n- To add a note, click the **Note** icon, then click anywhere in the drawing area.\n\n## Selecting shapes\n- Click on a shape to select it.\n- If shapes overlap, clicking the overlapping area will cycle through the overlapping shapes.\n\n## Boolean operations\n- When a shape is selected, press **SPACE** to toggle its boolean operation.\n\n## Shape panel controls\nIn the **Shapes** panel, you can:\n- Reorganize the drawing order (top shapes are drawn first)\n- Select a shape from the list\n- Toggle a shape’s boolean operation directly from the panel\n\n## Selecting polygon or rectangle vertices\n- Select a vertex (small circle) of a polygon or rectangle.\n- Press **SPACE** to toggle between a sharp corner and a rounded corner.\n- When a corner is rounded, use **ARROW UP / ARROW DOWN** to adjust the corner radius.\n\n"}
+    {"id": 0, "pos": [-216.716392, -38.774777], "size": [668.622097, 487.913422], "text": "# Tutorial 1 – Basic Shapes\n\n## Drawing shapes\n- Use the left panel to select the shape you want to draw.\n- To add a note, click the **Note** icon, then click anywhere in the drawing area.\n\n## Selecting shapes\n- Click on a shape to select it.\n- If shapes overlap, clicking the overlapping area will cycle through the overlapping shapes.\n\n## Boolean operations\n- When a shape is selected, press **SPACE** to toggle its boolean operation.\n\n## Shape panel controls\nIn the **Shapes** panel, you can:\n- Reorganize the drawing order (top shapes are drawn first)\n- Select a shape from the list\n- Toggle a shape’s boolean operation directly from the panel\n\n## Selecting polygon or rectangle vertices\n- Select a vertex (small circle) of a polygon or rectangle.\n- Press **SPACE** to toggle between a sharp corner and a rounded corner.\n- When a corner is rounded, use **ARROW UP / ARROW DOWN** to adjust the corner radius.\n\n"}
   ]
 }

@@ -2,7 +2,7 @@
   "version": 1,
   "meta": {
     "title": "MiiCut",
-    "timestamp": "20260208-071312",
+    "timestamp": "20260329-093632",
     "canvas": {
       "size": [3000.000000, 1500.000000],
       "scale": 1.000000,
@@ -11,26 +11,13 @@
   },
   "shapes": [
     {
-      "id": 25,
-      "type": "group",
-      "operation": "union",
-      "order": 1,
-      "rotation": 0.000000,
-      "children": [20, 24, 15],
-      "vertices": [
-        {"x": -860.000000, "y": -1200.001616, "rounded": null},
-        {"x": -860.000000, "y": -1083.869456, "rounded": null},
-        {"x": -560.000000, "y": -1083.869456, "rounded": null},
-        {"x": -560.000000, "y": -1200.001616, "rounded": null}
-      ]
-    },
-    {
-      "id": 12,
+      "id": 14,
       "type": "group",
       "operation": "union",
       "order": 0,
       "rotation": 0.000000,
-      "children": [19, 21, 22, 18, 17],
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "children": [24, 20, 18, 19, 16],
       "vertices": [
         {"x": -915.000000, "y": -925.000000, "rounded": null},
         {"x": -915.000000, "y": -615.000000, "rounded": null},
@@ -39,103 +26,69 @@
       ]
     },
     {
-      "id": 13,
+      "id": 15,
       "type": "group",
       "operation": "union",
       "order": 3,
       "rotation": 0.000000,
-      "children": [23, 16],
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "children": [23, 17],
       "vertices": [
-        {"x": -450.000000, "y": -1270.000000, "rounded": null},
-        {"x": -450.000000, "y": -930.000000, "rounded": null},
-        {"x": 90.000000, "y": -930.000000, "rounded": null},
-        {"x": 90.000000, "y": -1270.000000, "rounded": null}
+        {"x": -450.000000, "y": -1280.000000, "rounded": null},
+        {"x": -450.000000, "y": -940.000000, "rounded": null},
+        {"x": 90.000000, "y": -940.000000, "rounded": null},
+        {"x": 90.000000, "y": -1280.000000, "rounded": null}
       ]
     },
     {
-      "id": 17,
+      "id": 32,
+      "type": "group",
+      "operation": "union",
+      "order": 5,
+      "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "children": [28, 31, 27],
+      "vertices": [
+        {"x": -880.000000, "y": -1189.722436, "rounded": null},
+        {"x": -880.000000, "y": -1060.000000, "rounded": null},
+        {"x": -560.000000, "y": -1060.000000, "rounded": null},
+        {"x": -560.000000, "y": -1189.722436, "rounded": null}
+      ]
+    },
+    {
+      "id": 27,
       "type": "disc",
       "operation": "difference",
-      "order": 19,
+      "order": 6,
       "rotation": 0.000000,
+      "dim_offsets": [-0.436111, 20.000000, -20.000000, -20.000000],
       "vertices": [
-        {"x": -895.000000, "y": -905.000000, "rounded": null},
-        {"x": -885.000000, "y": -905.000000, "rounded": null}
+        {"x": -850.000000, "y": -1090.000000, "rounded": null},
+        {"x": -830.000000, "y": -1090.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 24,
+      "type": "disc",
+      "operation": "difference",
+      "order": 22,
+      "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "vertices": [
+        {"x": -505.000000, "y": -905.000000, "rounded": null},
+        {"x": -495.000000, "y": -905.000000, "rounded": null}
       ]
     },
     {
       "id": 16,
-      "type": "poly",
-      "operation": "union",
-      "order": 27,
-      "rotation": 0.000000,
-      "vertices": [
-        {"x": -435.000000, "y": -1080.000000, "rounded": null},
-        {"x": -335.000000, "y": -1235.000000, "rounded": null},
-        {"x": -180.000000, "y": -1180.000000, "rounded": null},
-        {"x": 0.000000, "y": -1205.000000, "rounded": null},
-        {"x": 10.000000, "y": -940.000000, "rounded": null},
-        {"x": -175.000000, "y": -1030.000000, "rounded": null},
-        {"x": -390.000000, "y": -960.000000, "rounded": null}
-      ]
-    },
-    {
-      "id": 22,
-      "type": "square",
-      "operation": "union",
-      "order": 18,
-      "rotation": 0.000000,
-      "vertices": [
-        {"x": -915.000000, "y": -925.000000, "rounded": 10},
-        {"x": -915.000000, "y": -615.000000, "rounded": 10},
-        {"x": -485.000000, "y": -615.000000, "rounded": 10},
-        {"x": -485.000000, "y": -925.000000, "rounded": 10}
-      ]
-    },
-    {
-      "id": 18,
       "type": "disc",
       "operation": "difference",
-      "order": 20,
+      "order": 19,
       "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
       "vertices": [
-        {"x": -895.000000, "y": -635.000000, "rounded": null},
-        {"x": -885.000000, "y": -635.000000, "rounded": null}
-      ]
-    },
-    {
-      "id": 21,
-      "type": "disc",
-      "operation": "difference",
-      "order": 21,
-      "rotation": 0.000000,
-      "vertices": [
-        {"x": -505.000000, "y": -635.000000, "rounded": null},
-        {"x": -495.000000, "y": -635.000000, "rounded": null}
-      ]
-    },
-    {
-      "id": 20,
-      "type": "disc",
-      "operation": "difference",
-      "order": 2,
-      "rotation": 0.000000,
-      "vertices": [
-        {"x": -618.064516, "y": -1141.935536, "rounded": null},
-        {"x": -579.354839, "y": -1141.935536, "rounded": null}
-      ]
-    },
-    {
-      "id": 15,
-      "type": "oblong",
-      "operation": "union",
-      "order": 1,
-      "rotation": 0.000000,
-      "vertices": [
-        {"x": -618.064516, "y": -1141.935536, "rounded": null},
-        {"x": -830.967742, "y": -1141.935536, "rounded": null},
-        {"x": -618.064516, "y": -1200.000052, "rounded": null},
-        {"x": -830.967742, "y": -1170.967794, "rounded": null}
+        {"x": -895.000000, "y": -905.000000, "rounded": null},
+        {"x": -885.000000, "y": -905.000000, "rounded": null}
       ]
     },
     {
@@ -144,11 +97,15 @@
       "operation": "difference",
       "order": 28,
       "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "voronoi_seeds": 40,
+      "voronoi_gap": 0.200000,
+      "voronoi_relaxation": 1,
       "vertices": [
-        {"x": -450.000000, "y": -1270.000000, "rounded": null},
-        {"x": -450.000000, "y": -930.000000, "rounded": null},
-        {"x": 90.000000, "y": -930.000000, "rounded": null},
-        {"x": 90.000000, "y": -1270.000000, "rounded": null}
+        {"x": -450.000000, "y": -1280.000000, "rounded": null},
+        {"x": -450.000000, "y": -940.000000, "rounded": null},
+        {"x": 90.000000, "y": -940.000000, "rounded": null},
+        {"x": 90.000000, "y": -1280.000000, "rounded": null}
       ],
       "voronoi": {
         "fill_rule": "nonzero",
@@ -197,29 +154,94 @@
       }
     },
     {
-      "id": 19,
+      "id": 28,
       "type": "disc",
       "operation": "difference",
-      "order": 22,
+      "order": 9,
       "rotation": 0.000000,
+      "dim_offsets": [-0.262014, 20.000000, -20.000000, -20.000000],
       "vertices": [
-        {"x": -505.000000, "y": -905.000000, "rounded": null},
-        {"x": -495.000000, "y": -905.000000, "rounded": null}
+        {"x": -590.000000, "y": -1090.000000, "rounded": null},
+        {"x": -570.000000, "y": -1090.000000, "rounded": null}
       ]
     },
     {
-      "id": 24,
+      "id": 19,
       "type": "disc",
       "operation": "difference",
-      "order": 4,
+      "order": 20,
       "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
       "vertices": [
-        {"x": -830.967742, "y": -1141.935536, "rounded": null},
-        {"x": -811.612903, "y": -1141.935536, "rounded": null}
+        {"x": -895.000000, "y": -635.000000, "rounded": null},
+        {"x": -885.000000, "y": -635.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 31,
+      "type": "poly",
+      "operation": "union",
+      "order": 5,
+      "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, 0.709981, -20.000000],
+      "vertices": [
+        {"x": -880.000000, "y": -1120.000000, "rounded": 30},
+        {"x": -820.000000, "y": -1120.000000, "rounded": 50},
+        {"x": -720.000000, "y": -1270.000000, "rounded": 100},
+        {"x": -620.000000, "y": -1120.000000, "rounded": 50},
+        {"x": -560.000000, "y": -1120.000000, "rounded": 30},
+        {"x": -560.000000, "y": -1060.000000, "rounded": 30},
+        {"x": -620.000000, "y": -1060.000000, "rounded": 70},
+        {"x": -720.000000, "y": -1150.000000, "rounded": 50},
+        {"x": -820.000000, "y": -1060.000000, "rounded": 70},
+        {"x": -880.000000, "y": -1060.000000, "rounded": 30}
+      ]
+    },
+    {
+      "id": 18,
+      "type": "square",
+      "operation": "union",
+      "order": 18,
+      "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "vertices": [
+        {"x": -915.000000, "y": -925.000000, "rounded": 10},
+        {"x": -915.000000, "y": -615.000000, "rounded": 10},
+        {"x": -485.000000, "y": -615.000000, "rounded": 10},
+        {"x": -485.000000, "y": -925.000000, "rounded": 10}
+      ]
+    },
+    {
+      "id": 17,
+      "type": "poly",
+      "operation": "union",
+      "order": 27,
+      "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "vertices": [
+        {"x": -435.000000, "y": -1090.000000, "rounded": null},
+        {"x": -335.000000, "y": -1245.000000, "rounded": null},
+        {"x": -180.000000, "y": -1190.000000, "rounded": null},
+        {"x": 0.000000, "y": -1215.000000, "rounded": null},
+        {"x": 10.000000, "y": -950.000000, "rounded": null},
+        {"x": -175.000000, "y": -1040.000000, "rounded": null},
+        {"x": -390.000000, "y": -970.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 20,
+      "type": "disc",
+      "operation": "difference",
+      "order": 21,
+      "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000],
+      "vertices": [
+        {"x": -505.000000, "y": -635.000000, "rounded": null},
+        {"x": -495.000000, "y": -635.000000, "rounded": null}
       ]
     }
   ],
   "notes": [
-    {"id": 0, "pos": [-380.386907, -852.757786], "size": [449.088644, 165.548781], "text": "# Tutorial 3 – Grouping\n\n- Select multiple shapes using **SHIFT + click**\n- Press **ENTER** to group the selected shapes\n- Select a group and press **ENTER** to ungroup the shapes\n- Boolean operations also work with groups"}
+    {"id": 0, "pos": [-380.386907, -852.757786], "size": [447.720551, 163.873933], "text": "# Tutorial 3 – Grouping\n\n- Select multiple shapes using **SHIFT + click** or with selection rectangle\n- Press **ENTER** to group the selected shapes\n- Select a group and press **ENTER** to ungroup the shapes\n- Boolean operations also work with groups"}
   ]
 }
