@@ -175,22 +175,15 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
         let save = save.dyn_into::<HtmlElement>()?;
         let on_save = Closure::wrap(Box::new(move |event: Event| {
             event.prevent_default();
-            let (document, json, filename) = {
-                let avb = av_clone.borrow();
-                let canvas = &avb.canvases[CanvasKind::Draw.idx()];
-                let meta = make_export_info(&avb.document);
-                let json = build_json_from_dataset(&canvas.dataset, &canvas.notes, &meta);
-                let Some(json) = json else {
-                    return;
-                };
-                let file_base = meta
-                    .title.as_deref()
-                    .filter(|title| !title.trim().is_empty())
-                    .unwrap_or("miicut");
-                let timestamp = timestamp_string();
-                let filename = format!("{file_base}-{timestamp}.mii.json");
-                (avb.document.clone(), json, filename)
-            };
+            let Ok(mut avb) = av_clone.try_borrow_mut() else { return };
+            let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+            let meta = make_export_info(&avb.document);
+            let json = build_json_from_dataset(&canvas.dataset, &canvas.notes, &meta);
+            let Some(json) = json else { return };
+            let document = avb.document.clone();
+            let filename = avb.save_filename.clone().unwrap_or_else(|| "cutdraw.json".to_string());
+            avb.save_filename = Some(filename.clone());
+            drop(avb);
             trigger_download(&document, &filename, &json, "application/json");
         }) as Box<dyn FnMut(_)>);
         save.add_event_listener_with_callback("click", on_save.as_ref().unchecked_ref())?;
@@ -205,7 +198,7 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
             if let Ok(input) = document_clone.create_element("input") {
                 if let Ok(input) = input.dyn_into::<HtmlInputElement>() {
                     input.set_type("file");
-                    input.set_accept(".mii.json,application/json");
+                    input.set_accept(".json,application/json");
                     let av_inner = av_clone.clone();
                     let input_clone = input.clone();
                     let on_change = Closure::wrap(Box::new(move |_event: Event| {
@@ -228,6 +221,18 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
                             if let Some(result) = result {
                                 load_json_to_dataset(av_inner.clone(), result);
                                 update_notes_view(av_inner.clone());
+                                // Reset save state so next Ctrl+S opens dialog
+                                if let Ok(mut avb) = av_inner.try_borrow_mut() {
+                                    avb.save_filename = None;
+                                }
+                                // Clear stored file handle
+                                if let Some(w) = web_sys::window() {
+                                    let _ = js_sys::Reflect::set(
+                                        &w,
+                                        &JsValue::from_str("__miicut_save_handle"),
+                                        &JsValue::NULL,
+                                    );
+                                }
                             }
                         })
                             as Box<dyn FnMut(_)>);
@@ -436,9 +441,22 @@ pub(crate) fn build_json_from_dataset(
         ));
         let dim_offsets = elem.get_dim_offsets();
         out.push_str(&format!(
-            "      \"dim_offsets\": [{:.6}, {:.6}, {:.6}, {:.6}],\n",
-            dim_offsets[0], dim_offsets[1], dim_offsets[2], dim_offsets[3]
+            "      \"dim_offsets\": [{:.6}, {:.6}, {:.6}, {:.6}, {:.6}, {:.6}],\n",
+            dim_offsets[0], dim_offsets[1], dim_offsets[2], dim_offsets[3], dim_offsets[4], dim_offsets[5]
         ));
+        // Ghost fields
+        if elem.get_ghosts() > 0 {
+            out.push_str(&format!(
+                "      \"ghosts\": {},\n      \"ghosts_trans_x\": {:.6},\n      \"ghosts_trans_y\": {:.6},\n      \"ghosts_rot\": {},\n      \"ghosts_self_rot\": {},\n      \"ghosts_rot_center_x\": {:.6},\n      \"ghosts_rot_center_y\": {:.6},\n",
+                elem.get_ghosts(),
+                elem.get_ghosts_trans_x(),
+                elem.get_ghosts_trans_y(),
+                elem.get_ghosts_rot() as u8,
+                elem.get_ghosts_self_rot() as u8,
+                elem.get_ghosts_rot_center().x,
+                elem.get_ghosts_rot_center().y,
+            ));
+        }
         if elem.is_group() {
             if let Some(children) = elem.get_group_children() {
                 out.push_str("      \"children\": [");
@@ -778,7 +796,7 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         text: Option<String>,
         order: i32,
         rotation: f64,
-        dim_offsets: Option<[f64; 4]>,
+        dim_offsets: Option<[f64; 6]>,
         children: Vec<usize>,
         constr_vertices: Option<usize>,
         voronoi_seeds: Option<usize>,
@@ -787,6 +805,12 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         vertices: Vec<LoadedVertex>,
         svg_data: Option<SvgData>,
         voronoi_data: Option<SvgData>,
+        ghosts: usize,
+        ghosts_trans_x: f64,
+        ghosts_trans_y: f64,
+        ghosts_rot: bool,
+        ghosts_self_rot: bool,
+        ghosts_rot_center: Vec2,
     }
 
     fn f64_to_usize(value: f64) -> Option<usize> {
@@ -891,13 +915,15 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             fallback_order = fallback_order.max(order_val.saturating_add(1));
         }
         let rotation = get_f64(&shape_value, "rotation").unwrap_or(0.0);
-        let dim_offsets: Option<[f64; 4]> = get_prop(&shape_value, "dim_offsets").and_then(|v| {
+        let dim_offsets: Option<[f64; 6]> = get_prop(&shape_value, "dim_offsets").and_then(|v| {
             let arr = js_sys::Array::from(&v);
             let a = arr.get(0).as_f64()?;
             let b = arr.get(1).as_f64()?;
             let c = arr.get(2).as_f64().unwrap_or(-20.0);
             let d = arr.get(3).as_f64().unwrap_or(-20.0);
-            Some([a, b, c, d])
+            let e = arr.get(4).as_f64().unwrap_or(0.0);
+            let f = arr.get(5).as_f64().unwrap_or(0.0);
+            Some([a, b, c, d, e, f])
         });
         let saved_id = get_f64(&shape_value, "id").and_then(f64_to_usize);
         let mut children = Vec::new();
@@ -984,6 +1010,15 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         } else {
             (svg_data, None)
         };
+        let ghosts = get_f64(&shape_value, "ghosts").and_then(f64_to_usize).unwrap_or(0);
+        let ghosts_trans_x = get_f64(&shape_value, "ghosts_trans_x").unwrap_or(100.0);
+        let ghosts_trans_y = get_f64(&shape_value, "ghosts_trans_y").unwrap_or(0.0);
+        let ghosts_rot = get_f64(&shape_value, "ghosts_rot").map(|v| v != 0.0).unwrap_or(false);
+        let ghosts_self_rot = get_f64(&shape_value, "ghosts_self_rot").map(|v| v != 0.0).unwrap_or(false);
+        let ghosts_rot_center = Vec2::new(
+            get_f64(&shape_value, "ghosts_rot_center_x").unwrap_or(0.0),
+            get_f64(&shape_value, "ghosts_rot_center_y").unwrap_or(0.0),
+        );
         loaded_shapes.push(LoadedShape {
             saved_id,
             icon,
@@ -1001,6 +1036,12 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             vertices,
             svg_data,
             voronoi_data,
+            ghosts,
+            ghosts_trans_x,
+            ghosts_trans_y,
+            ghosts_rot,
+            ghosts_self_rot,
+            ghosts_rot_center,
         });
     }
 
@@ -1204,6 +1245,14 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             for (i, v) in offsets.iter().enumerate() {
                 elem.set_dim_offset(i, *v);
             }
+        }
+        if shape.ghosts > 0 {
+            elem.set_ghosts(shape.ghosts);
+            elem.set_ghosts_trans_x(shape.ghosts_trans_x);
+            elem.set_ghosts_trans_y(shape.ghosts_trans_y);
+            elem.set_ghosts_rot(shape.ghosts_rot);
+            elem.set_ghosts_self_rot(shape.ghosts_self_rot);
+            elem.set_ghosts_rot_center(shape.ghosts_rot_center);
         }
         canvas.dataset.shapes.insert(new_eid, elem);
     }

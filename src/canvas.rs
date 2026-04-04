@@ -981,7 +981,7 @@ impl Canvas {
         for e in self.dataset.shapes.values() {
             match e.get_shape_type() {
                 ShapeType::Square | ShapeType::Poly => {
-                    for apex_type in e.get_vertices().get_apices().iter() {
+                    for apex_type in e.get_vertices().get_apices_n(e.get_n_corners()).iter() {
                         if let ApexType::Arc { s, c, e: _e } = apex_type {
                             let r = (*s - *c).length();
                             let text2 = CanvasText::new(
@@ -1086,60 +1086,52 @@ impl Canvas {
                     }
                     self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
                 }
-                // Corner radii (Square only) — show one dim on first active corner
+                // Corner radii (Square only) — show dim for each active corner
                 if e.get_shape_type() == ShapeType::Square {
-                    if let Some((i, r_f)) = e
-                        .get_vertices()
-                        .iter()
-                        .enumerate()
-                        .find_map(|(i, (_, v))| {
-                            v.get_radius()
-                                .filter(|&r| r > 0)
-                                .map(|r| (i, r as f64))
-                        })
-                    {
-                        if i < points.len() {
-                            let corner = points[i];
-                            // Arc center: inset by r along each axis toward the shape center
-                            let sx = if center.x > corner.x { 1.0 } else { -1.0 };
-                            let sy = if center.y > corner.y { 1.0 } else { -1.0 };
-                            let arc_center =
-                                corner + Vec2::new(sx * r_f, sy * r_f);
-                            let natural_angle =
-                                (corner - arc_center).y.atan2((corner - arc_center).x);
-                            let stored = e.get_dim_offsets()[2];
-                            let angle = if (stored - (-20.0)).abs() < 1e-9 {
-                                natural_angle
-                            } else {
-                                stored
-                            };
-                            let (mut path, pattern, colors, mut text, _) =
-                                dim_disc(arc_center, r_f, angle, cinfo);
-                            if rotation.abs() > EPSILON {
-                                path = rotate_bezpath_about(&path, center, rotation);
-                                text = text
-                                    .into_iter()
-                                    .map(|mut item| {
-                                        if let TextPos::PosCustom(pos) = item.get_pos() {
-                                            let rotated =
-                                                rotate_vector(pos - center, rotation) + center;
-                                            item.set_pos(TextPos::PosCustom(rotated));
-                                        }
-                                        let mut cfg = item.get_config().clone();
-                                        cfg.set_angle(cfg.get_angle() + rotation);
-                                        item.set_config(cfg);
-                                        item
-                                    })
-                                    .collect();
-                            }
-                            self.draw_path(
-                                &path,
-                                pattern,
-                                colors.fill_color,
-                                colors.stroke_color,
-                                text,
-                            );
+                    let nc = e.get_n_corners();
+                    for (i, (_, v)) in e.get_vertices().iter().enumerate() {
+                        if i >= nc { break; }
+                        let Some(r_val) = v.get_radius().filter(|&r| r > 0) else { continue };
+                        let r_f = r_val as f64;
+                        if i >= points.len() { continue; }
+                        let corner = points[i];
+                        let sx = if center.x > corner.x { 1.0 } else { -1.0 };
+                        let sy = if center.y > corner.y { 1.0 } else { -1.0 };
+                        let arc_center = corner + Vec2::new(sx * r_f, sy * r_f);
+                        let natural_angle =
+                            (corner - arc_center).y.atan2((corner - arc_center).x);
+                        let stored = e.get_dim_offsets()[2];
+                        let angle = if (stored - (-20.0)).abs() < 1e-9 {
+                            natural_angle
+                        } else {
+                            stored
+                        };
+                        let (mut path, pattern, colors, mut text, _) =
+                            dim_disc(arc_center, r_f, angle, cinfo);
+                        if rotation.abs() > EPSILON {
+                            path = rotate_bezpath_about(&path, center, rotation);
+                            text = text
+                                .into_iter()
+                                .map(|mut item| {
+                                    if let TextPos::PosCustom(pos) = item.get_pos() {
+                                        let rotated =
+                                            rotate_vector(pos - center, rotation) + center;
+                                        item.set_pos(TextPos::PosCustom(rotated));
+                                    }
+                                    let mut cfg = item.get_config().clone();
+                                    cfg.set_angle(cfg.get_angle() + rotation);
+                                    item.set_config(cfg);
+                                    item
+                                })
+                                .collect();
                         }
+                        self.draw_path(
+                            &path,
+                            pattern,
+                            colors.fill_color,
+                            colors.stroke_color,
+                            text,
+                        );
                     }
                 }
             }
@@ -1202,7 +1194,7 @@ impl Canvas {
                 );
                 self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
                 // Rayons des apex arrondis
-                let apices = verts.get_apices();
+                let apices = verts.get_apices_n(e.get_n_corners());
                 let mut first_arc = true;
                 for apex in apices.iter() {
                     if let ApexType::Arc { s, c, .. } = apex {
@@ -1283,14 +1275,27 @@ impl Canvas {
         }
         // Rotation handle (outside v[2]) for rotatable shapes
         if let Some(h) = e.rotation_handle_world_pos(scale) {
-            let ring = point_path(h, scale * 0.8);
+            let ring = point_path(h, scale);
             self.draw_path(
                 &ring,
-                Pattern::Composed(false),
-                Color::Transparent,
-                Color::OnCreation,
+                Pattern::Point,
+                Color::Ocre,
+                Color::Black,
                 vec![],
             );
+        }
+        // Ghost rotation center handle (crosshair)
+        if e.get_ghosts_rot() && e.get_ghosts() > 0 {
+            let c = e.get_ghosts_rot_center();
+            let sz = 6.0 / scale;
+            let mut cross = BezPath::new();
+            cross.move_to(kurbo::Point::new(c.x - sz, c.y));
+            cross.line_to(kurbo::Point::new(c.x + sz, c.y));
+            cross.move_to(kurbo::Point::new(c.x, c.y - sz));
+            cross.line_to(kurbo::Point::new(c.x, c.y + sz));
+            self.draw_path(&cross, Pattern::Composed(false), Color::Transparent, Color::Red30, vec![]);
+            let ring = point_path(c, scale);
+            self.draw_path(&ring, Pattern::Point, Color::Ocre, Color::Black, vec![]);
         }
     }
     pub fn draw_vertices(&mut self) {
@@ -1383,6 +1388,25 @@ impl Canvas {
         }
         let path = shape.get_bezpath_rotated();
         self.draw_path(&path, pattern, fill_color, stroke_color, vec![]);
+        // Draw ghost copies (apply shape rotation for display)
+        let ghost_paths = shape.get_ghost_bezpaths();
+        if !ghost_paths.is_empty() {
+            let rotation = shape.get_rotation();
+            let needs_rot = rotation.abs() > 1e-9 && matches!(
+                shape.get_shape_type(),
+                ShapeType::Square | ShapeType::Text | ShapeType::Svg | ShapeType::Voronoi | ShapeType::Group
+            );
+            for ghost in ghost_paths {
+                let ghost = if needs_rot {
+                    let bbox = shape.get_bezpath().bounding_box();
+                    let center = Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+                    crate::shape::rotate_bezpath_pub(&ghost, center, rotation)
+                } else {
+                    ghost
+                };
+                self.draw_path(&ghost, Pattern::Composed(false), Color::Gray20, Color::Gray20, vec![]);
+            }
+        }
     }
     fn draw_group_paths(
         &mut self,
@@ -1472,6 +1496,7 @@ pub enum Color {
     Black65,
     Black,
     Red,
+    Ocre,
 }
 impl Color {
     pub fn get(self) -> &'static str {
@@ -1500,6 +1525,7 @@ impl Color {
             Black65 => "rgba(0,0,0,0.65)",
             Black => "rgba(0,0,0,1)",
             Red => "rgba(255,0,0,1)",
+            Ocre => "rgba(204,153,0,1)",
         }
     }
 }

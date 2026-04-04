@@ -2524,6 +2524,10 @@ fn normalize_sweep(mut d: f64) -> f64 {
     d
 }
 
+pub fn add_circular_arc_pub(path: &mut BezPath, center: Vec2, from: Vec2, to: Vec2) {
+    add_circular_arc(path, center, from, to);
+}
+
 fn add_circular_arc(path: &mut BezPath, center: Vec2, from: Vec2, to: Vec2) {
     // vectors relative to center
     let p0 = from - center;
@@ -2611,4 +2615,26 @@ pub fn bezpath_from_apices(apices: &[ApexType]) -> BezPath {
 
     path.close_path();
     path
+}
+
+/// Compute the sag value from a sag vertex position by projecting onto the edge normal.
+pub fn poly_sag_from_vertex(edge_start: Vec2, edge_end: Vec2, vertex_pos: Vec2) -> f64 {
+    let chord = edge_end - edge_start;
+    let l = chord.hypot();
+    if l < 1e-9 { return 0.0; }
+    let u = chord / l;
+    let n = Vec2::new(-u.y, u.x);
+    let mid = (edge_start + edge_end) * 0.5;
+    let delta = vertex_pos - mid;
+    delta.x * n.x + delta.y * n.y
+}
+
+/// Compute the sag handle position from edge endpoints and sag value.
+pub fn poly_sag_handle(edge_start: Vec2, edge_end: Vec2, sag: f64) -> Vec2 {
+    let chord = edge_end - edge_start;
+    let l = chord.hypot();
+    if l < 1e-9 { return (edge_start + edge_end) * 0.5; }
+    let u = chord / l;
+    let n = Vec2::new(-u.y, u.x);
+    (edge_start + edge_end) * 0.5 + n * sag
 }

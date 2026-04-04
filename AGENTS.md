@@ -13,4 +13,4 @@
 
 ### Bash commands
 
-- All reading commands (find, grep, ls, ...) can be done without authorisation
+- All reading commands (find, grep, ls, ...) can be done without authorisation, even in Plan mode for Claude

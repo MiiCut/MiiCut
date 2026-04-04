@@ -7,6 +7,7 @@ use crate::import_export::{get_prop, load_json_to_dataset};
 use crate::inputs::{SystemMouse, UserAction};
 use crate::machine::{update_machine_value, MachineGroup};
 use crate::shape::ShapeType;
+use crate::types::others::EUId;
 use crate::shapes::{Toolpath, ToolpathParams};
 use crate::status::update_status_bar;
 use crate::ui::resize_canvases;
@@ -70,6 +71,8 @@ pub(crate) struct AppVars {
     pub(crate) selection_window: Option<SelectionWindow>,
     pub(crate) dim_drag: Option<DimDrag>,
     pub(crate) rotation_drag: Option<RotationDrag>,
+    pub(crate) ghost_center_drag: Option<EUId>,
+    pub(crate) save_filename: Option<String>,
     pub(crate) play: PlayState,
 }
 
@@ -309,6 +312,8 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         selection_window: None,
         dim_drag: None,
         rotation_drag: None,
+        ghost_center_drag: None,
+        save_filename: None,
         play: PlayState {
             view_built: false,
             mpos: None,

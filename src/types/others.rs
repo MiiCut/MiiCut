@@ -570,7 +570,11 @@ impl<K: PartialEq + Clone + Debug> VecRing<K> {
         self.vec.iter_mut()
     }
     pub fn get_apices(&self) -> Vec<ApexType> {
-        let n = self.vec.len();
+        self.get_apices_n(self.vec.len())
+    }
+
+    /// Like get_apices() but only considers the first `n` vertices as corners.
+    pub fn get_apices_n(&self, n: usize) -> Vec<ApexType> {
         assert!(n >= 3);
         let mut out = Vec::with_capacity(n);
 

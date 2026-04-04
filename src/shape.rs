@@ -12,8 +12,8 @@ use crate::{
 use geo::algorithm::contains::Contains;
 use geo::algorithm::orient::Orient;
 use geo::algorithm::translate::Translate;
-use geo::{orient::Direction, Coord, LineString, MultiPolygon, Point, Polygon};
-use js_sys::Math;
+use geo::{orient::Direction, BooleanOps, Coord, LineString, MultiPolygon, Point, Polygon};
+use js_sys::Math::{self};
 use kurbo::{flatten, Arc, BezPath, Circle, PathEl, Shape, Vec2};
 use std::hash::Hash;
 use std::{
@@ -214,7 +214,15 @@ pub struct GeneralShape {
     polygon: MultiPolygon<f64>,
 
     rotation: ShapeRotation,
-    dim_offsets: [f64; 4],
+    dim_offsets: [f64; 6],
+
+    ghosts: usize,
+    ghosts_trans_x: f64,
+    ghosts_trans_y: f64,
+    ghosts_rot_center: Vec2,
+    ghosts_rot_center_saved: Vec2,
+    ghosts_rot: bool,
+    ghosts_self_rot: bool,
 }
 impl Clone for GeneralShape {
     fn clone(&self) -> Self {
@@ -238,6 +246,13 @@ impl Clone for GeneralShape {
             polygon: self.polygon.clone(),
             rotation: self.rotation.clone(),
             dim_offsets: self.dim_offsets,
+            ghosts: self.ghosts,
+            ghosts_trans_x: self.ghosts_trans_x,
+            ghosts_trans_y: self.ghosts_trans_y,
+            ghosts_rot_center: self.ghosts_rot_center,
+            ghosts_rot_center_saved: self.ghosts_rot_center_saved,
+            ghosts_rot: self.ghosts_rot,
+            ghosts_self_rot: self.ghosts_self_rot,
         }
     }
 }
@@ -245,10 +260,11 @@ impl Clone for GeneralShape {
 #[derive(Debug, Clone)]
 pub struct GroupShape {
     children: Vec<EUId>,
+    pub(crate) cached_polygon: Option<MultiPolygon<f64>>,
 }
 impl GroupShape {
     pub fn new(children: Vec<EUId>) -> Self {
-        Self { children }
+        Self { children, cached_polygon: None }
     }
     pub fn children(&self) -> &[EUId] {
         &self.children
@@ -303,7 +319,10 @@ impl GeneralShape {
         if v1 == v2 {
             return None;
         }
-        let vs = vec![Vertex::new(v1), Vertex::new(v2)];
+        // Place radius handle horizontally to the right
+        let radius = (v2 - v1).hypot();
+        let v2_horiz = Vec2::new(v1.x + radius, v1.y);
+        let vs = vec![Vertex::new(v1), Vertex::new(v2_horiz)];
 
         let mut properties = Properties::new();
         use PropertyValue::*;
@@ -327,7 +346,7 @@ impl GeneralShape {
             },
         );
 
-        GeneralShape::new(
+        let mut shape = GeneralShape::new(
             ShapeType::Disc,
             vs,
             properties,
@@ -338,7 +357,10 @@ impl GeneralShape {
             None,
             Operation::Union,
             None,
-        )
+        )?;
+        // Dimension on the opposite side (left) of the radius handle (right)
+        shape.set_dim_offset(0, PI);
+        Some(shape)
     }
     pub fn new_shape_rectangle(v1: Vec2, v2: Vec2, order: i32) -> Option<Self> {
         if v1 == v2 {
@@ -392,7 +414,7 @@ impl GeneralShape {
             },
         );
 
-        let values: Vec<Vertex> = vs
+        let mut values: Vec<Vertex> = vs
             .into_iter()
             .map(|v| {
                 let mut vertex = v;
@@ -400,6 +422,12 @@ impl GeneralShape {
                 vertex
             })
             .collect();
+        // Add 4 sag vertices at edge midpoints
+        for i in 0..4 {
+            let j = (i + 1) % 4;
+            let mid = (values[i].curr() + values[j].curr()) * 0.5;
+            values.push(Vertex::new(mid));
+        }
 
         GeneralShape::new(
             ShapeType::Square,
@@ -428,16 +456,53 @@ impl GeneralShape {
             return None;
         }
         let dir = (v2 - v1).normalize();
-        let perp = Vec2::new(-dir.y, dir.x);
-        let default_r1 = v1 + perp * 20.0;
-        let default_r2 = v2 + perp * 20.0;
+        // Place radius handles on the horizontal, pointing outward from the axis
+        let mid = (v1 + v2) * 0.5;
+        let outward1 = if v1.x < mid.x {
+            Vec2::new(-1.0, 0.0)
+        } else {
+            Vec2::new(1.0, 0.0)
+        };
+        let outward2 = if v2.x < mid.x {
+            Vec2::new(-1.0, 0.0)
+        } else {
+            Vec2::new(1.0, 0.0)
+        };
+        // If oblong is vertical, fallback to perpendicular
+        let default_r1 = if (v2.x - v1.x).abs() < 1e-6 {
+            let perp = Vec2::new(-dir.y, dir.x);
+            v1 + perp * 20.0
+        } else {
+            v1 + outward1 * 20.0
+        };
+        let default_r2 = if (v2.x - v1.x).abs() < 1e-6 {
+            let perp = Vec2::new(-dir.y, dir.x);
+            v2 + perp * 20.0
+        } else {
+            v2 + outward2 * 20.0
+        };
         let r1 = r1.unwrap_or(default_r1);
         let r2 = r2.unwrap_or(default_r2);
+        // Compute sag vertex positions at chord midpoints (sag=0)
+        let r1_radius = (r1 - v1).hypot();
+        let r2_radius = (r2 - v2).hypot();
+        let (sag1_pos, sag2_pos) =
+            if let Some((a1_s, a2_s)) = oblong_straight_angles(v1, v2, r1_radius, r2_radius) {
+                (
+                    oblong_side_handle(v1, v2, r1_radius, r2_radius, a2_s, 0.0, true),
+                    oblong_side_handle(v1, v2, r1_radius, r2_radius, a1_s, 0.0, false),
+                )
+            } else {
+                let mid = (v1 + v2) * 0.5;
+                (mid, mid)
+            };
         let vs = vec![
-            Vertex::new(v1),
-            Vertex::new(v2),
-            Vertex::new(r1),
-            Vertex::new(r2),
+            Vertex::new(v1),       // v[0] = c1
+            Vertex::new(v2),       // v[1] = c2
+            Vertex::new(r1),       // v[2] = r1 control
+            Vertex::new(r2),       // v[3] = r2 control
+            Vertex::new(sag1_pos), // v[4] = sag1 handle (side at a2)
+            Vertex::new(sag2_pos), // v[5] = sag2 handle (side at a1)
         ];
 
         use PropertyValue::*;
@@ -456,7 +521,7 @@ impl GeneralShape {
             },
         );
 
-        GeneralShape::new(
+        let mut shape = GeneralShape::new(
             ShapeType::Oblong,
             vs,
             properties,
@@ -467,7 +532,15 @@ impl GeneralShape {
             None,
             Operation::Union,
             None,
-        )
+        )?;
+        // Axis dimension on the segment O1O2
+        shape.set_dim_offset(0, 0.0);
+        // Radius dimensions on the opposite side of the radius handles
+        let natural1 = (r1 - v1).y.atan2((r1 - v1).x);
+        let natural2 = (r2 - v2).y.atan2((r2 - v2).x);
+        shape.set_dim_offset(1, natural1 + PI);
+        shape.set_dim_offset(2, natural2 + PI);
+        Some(shape)
     }
     pub fn new_shape_text(v1: Vec2, v2: Vec2, order: i32) -> Option<Self> {
         const DEFAULT_TEXT: &str = "TEXT";
@@ -578,7 +651,8 @@ impl GeneralShape {
                 ),
             },
         );
-        let values: Vec<Vertex> = vs
+        let n = vs.len();
+        let mut values: Vec<Vertex> = vs
             .into_iter()
             .map(|v| {
                 let mut vertex = Vertex::new(v);
@@ -586,6 +660,12 @@ impl GeneralShape {
                 vertex
             })
             .collect();
+        // Add N sag vertices at edge midpoints
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let mid = (values[i].curr() + values[j].curr()) * 0.5;
+            values.push(Vertex::new(mid));
+        }
 
         GeneralShape::new(
             ShapeType::Poly,
@@ -1152,8 +1232,27 @@ impl GeneralShape {
             polygon: MultiPolygon::new(vec![]),
 
             rotation: ShapeRotation::new(),
-            dim_offsets: [-20.0, 20.0, -20.0, -20.0],
+            dim_offsets: [-20.0, 20.0, -20.0, -20.0, 0.0, 0.0],
+
+            ghosts: 0,
+            ghosts_trans_x: 100.0,
+            ghosts_trans_y: 0.0,
+            ghosts_rot: false,
+            ghosts_rot_center: Vec2::ZERO,
+            ghosts_rot_center_saved: Vec2::ZERO,
+            ghosts_self_rot: false,
         };
+        // Compute default rot center as vertex centroid
+        let n = shape.vertices.len() as f64;
+        if n > 0.0 {
+            let sum: Vec2 = shape
+                .vertices
+                .iter()
+                .map(|(_, v)| v.curr())
+                .fold(Vec2::ZERO, |a, b| a + b);
+            shape.ghosts_rot_center = sum / n;
+            shape.ghosts_rot_center_saved = shape.ghosts_rot_center;
+        }
         shape.set_bezpath();
         Some(shape)
     }
@@ -1263,15 +1362,14 @@ impl GeneralShape {
                         return false;
                     }
                     self.vertices.val_mut(1).add(delta);
-                    if let Some(seg) =
-                        SegBundle::new(self.vertices.val(0).saved(), self.vertices.val(1).curr())
-                    {
-                        let r = snap_val(seg.len, snap);
-                        let a = snap_angle(seg.a, snap);
-                        self.vertices
-                            .val_mut(1)
-                            .set_curr(seg.s + Vec2::new(r * a.cos(), r * a.sin()));
-                    }
+                    let center = self.vertices.val(0).curr();
+                    let curr = self.vertices.val(1).curr();
+                    // Constrain to horizontal: keep same Y as center, radius = |dx|
+                    let r = snap_val((curr - center).hypot(), snap);
+                    let sign = if curr.x >= center.x { 1.0 } else { -1.0 };
+                    self.vertices
+                        .val_mut(1)
+                        .set_curr(Vec2::new(center.x + sign * r, center.y));
                     self.set_bezpath();
                     true
                 } else {
@@ -1292,46 +1390,43 @@ impl GeneralShape {
                 true
             }
             ShapeType::Oblong => {
-                if self.vertices.len() != 4 {
+                if self.vertices.len() != 6 {
                     return false;
                 }
-                log!("Moving oblong vertex {:?}", value_uid);
                 let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
                     Some(i) => i,
                     None => return false,
                 };
                 if idx == 0 || idx == 1 {
+                    // Moving a center: also move radius handle + recompute sag vertices
                     let radius_idx = if idx == 0 { 2 } else { 3 };
                     let saved_center = self.vertices.val(idx as i64).saved();
-                    if user_ui.keys_states.shift_pressed {
-                        self.vertices.val_mut(idx as i64).add(delta);
-                        let other_idx = if idx == 0 { 1 } else { 0 };
-                        if let Some(seg) = SegBundle::new(
-                            self.vertices.val(other_idx).saved(),
-                            self.vertices.val(idx as i64).curr(),
-                        ) {
-                            let r = snap_val(seg.len, snap);
-                            let a = snap_angle(seg.a, snap);
-                            self.vertices
-                                .val_mut(idx as i64)
-                                .set_curr(seg.e - Vec2::new(r * a.cos(), r * a.sin()));
-                        }
-                    } else {
-                        let tmp = self.vertices.val(idx as i64).clone();
-                        self.vertices
-                            .val_mut(idx as i64)
-                            .set_saved(snap_vertex(tmp.saved(), snap));
-                        self.vertices.val_mut(idx as i64).add(delta);
-                        let tmp = self.vertices.val(idx as i64).clone();
-                        self.vertices
-                            .val_mut(idx as i64)
-                            .set_curr(snap_vertex(tmp.curr(), snap));
-                    }
-                    let center_delta = self.vertices.val(idx as i64).curr() - saved_center;
-                    if center_delta.hypot() > EPSILON {
-                        self.vertices.val_mut(radius_idx as i64).add(center_delta);
-                    }
-                } else {
+                    // Compute old sag values before the move
+                    let old_c1 = self.vertices.val(0).curr();
+                    let old_c2 = self.vertices.val(1).curr();
+                    let old_r1 = (self.vertices.val(2).curr() - old_c1).hypot();
+                    let old_r2 = (self.vertices.val(3).curr() - old_c2).hypot();
+                    let old_sags =
+                        oblong_straight_angles(old_c1, old_c2, old_r1, old_r2).map(|(a1, a2)| {
+                            let s1 = sag_from_vertex(
+                                old_c1,
+                                old_c2,
+                                old_r1,
+                                old_r2,
+                                a2,
+                                self.vertices.val(4).curr(),
+                            );
+                            let s2 = sag_from_vertex(
+                                old_c1,
+                                old_c2,
+                                old_r1,
+                                old_r2,
+                                a1,
+                                self.vertices.val(5).curr(),
+                            );
+                            (s1, s2)
+                        });
+
                     let tmp = self.vertices.val(idx as i64).clone();
                     self.vertices
                         .val_mut(idx as i64)
@@ -1341,13 +1436,152 @@ impl GeneralShape {
                     self.vertices
                         .val_mut(idx as i64)
                         .set_curr(snap_vertex(tmp.curr(), snap));
+
+                    let center_delta = self.vertices.val(idx as i64).curr() - saved_center;
+                    if center_delta.hypot() > EPSILON {
+                        self.vertices.val_mut(radius_idx as i64).add(center_delta);
+                    }
+
+                    // Recompute sag vertices with preserved sag values
+                    if let Some((old_s1, old_s2)) = old_sags {
+                        let new_c1 = self.vertices.val(0).curr();
+                        let new_c2 = self.vertices.val(1).curr();
+                        let new_r1 = (self.vertices.val(2).curr() - new_c1).hypot();
+                        let new_r2 = (self.vertices.val(3).curr() - new_c2).hypot();
+                        if let Some((na1, na2)) =
+                            oblong_straight_angles(new_c1, new_c2, new_r1, new_r2)
+                        {
+                            let pos4 = oblong_side_handle(
+                                new_c1, new_c2, new_r1, new_r2, na2, old_s1, true,
+                            );
+                            let pos5 = oblong_side_handle(
+                                new_c1, new_c2, new_r1, new_r2, na1, old_s2, false,
+                            );
+                            self.vertices.val_mut(4).set_curr(pos4);
+                            self.vertices.val_mut(5).set_curr(pos5);
+                        }
+                    }
+                } else if idx == 2 || idx == 3 {
+                    // Radius handle: constrain to horizontal + recompute sag vertices
+                    let center_idx = if idx == 2 { 0 } else { 1 };
+                    // Old sag values
+                    let old_c1 = self.vertices.val(0).curr();
+                    let old_c2 = self.vertices.val(1).curr();
+                    let old_r1 = (self.vertices.val(2).curr() - old_c1).hypot();
+                    let old_r2 = (self.vertices.val(3).curr() - old_c2).hypot();
+                    let old_sags =
+                        oblong_straight_angles(old_c1, old_c2, old_r1, old_r2).map(|(a1, a2)| {
+                            let s1 = sag_from_vertex(
+                                old_c1,
+                                old_c2,
+                                old_r1,
+                                old_r2,
+                                a2,
+                                self.vertices.val(4).curr(),
+                            );
+                            let s2 = sag_from_vertex(
+                                old_c1,
+                                old_c2,
+                                old_r1,
+                                old_r2,
+                                a1,
+                                self.vertices.val(5).curr(),
+                            );
+                            (s1, s2)
+                        });
+
+                    self.vertices.val_mut(idx as i64).add(delta);
+                    let center = self.vertices.val(center_idx).curr();
+                    let curr = self.vertices.val(idx as i64).curr();
+                    let r = snap_val((curr - center).hypot(), snap);
+                    let sign = if curr.x >= center.x { 1.0 } else { -1.0 };
+                    self.vertices
+                        .val_mut(idx as i64)
+                        .set_curr(Vec2::new(center.x + sign * r, center.y));
+
+                    // Recompute sag vertices
+                    if let Some((old_s1, old_s2)) = old_sags {
+                        let new_c1 = self.vertices.val(0).curr();
+                        let new_c2 = self.vertices.val(1).curr();
+                        let new_r1 = (self.vertices.val(2).curr() - new_c1).hypot();
+                        let new_r2 = (self.vertices.val(3).curr() - new_c2).hypot();
+                        if let Some((na1, na2)) =
+                            oblong_straight_angles(new_c1, new_c2, new_r1, new_r2)
+                        {
+                            let pos4 = oblong_side_handle(
+                                new_c1, new_c2, new_r1, new_r2, na2, old_s1, true,
+                            );
+                            let pos5 = oblong_side_handle(
+                                new_c1, new_c2, new_r1, new_r2, na1, old_s2, false,
+                            );
+                            self.vertices.val_mut(4).set_curr(pos4);
+                            self.vertices.val_mut(5).set_curr(pos5);
+                        }
+                    }
+                } else if idx == 4 || idx == 5 {
+                    // Sag handle: use raw draw_pos (bypasses grid snap on pointer)
+                    self.vertices.val_mut(idx as i64).set_curr(user_ui.draw_pos);
+                    let c1 = self.vertices.val(0).curr();
+                    let c2 = self.vertices.val(1).curr();
+                    let r1 = (self.vertices.val(2).curr() - c1).hypot();
+                    let r2 = (self.vertices.val(3).curr() - c2).hypot();
+                    if let Some((a1_s, a2_s)) = oblong_straight_angles(c1, c2, r1, r2) {
+                        let angle = if idx == 4 { a2_s } else { a1_s };
+                        let mut sag = sag_from_vertex(
+                            c1,
+                            c2,
+                            r1,
+                            r2,
+                            angle,
+                            self.vertices.val(idx as i64).curr(),
+                        );
+                        // Magnet: snap to 0 (straight line)
+                        if sag.abs() < 5.0 {
+                            sag = 0.0;
+                        } else {
+                            // Magnet: snap when inter-handle distance ≈ average diameter
+                            let other_idx = if idx == 4 { 5 } else { 4 };
+                            let other_pos = self.vertices.val(other_idx).curr();
+                            let target = r1 + r2;
+                            let p1 = c1 + Vec2::new(r1 * angle.cos(), r1 * angle.sin());
+                            let p2 = c2 + Vec2::new(r2 * angle.cos(), r2 * angle.sin());
+                            let chord = p2 - p1;
+                            let l = chord.hypot();
+                            if l > 1e-9 {
+                                let u = chord / l;
+                                let n = Vec2::new(-u.y, u.x);
+                                let mid = (p1 + p2) * 0.5;
+                                let p = mid - other_pos;
+                                let pn = p.x * n.x + p.y * n.y;
+                                let pp = p.x * p.x + p.y * p.y;
+                                let disc = 4.0 * pn * pn - 4.0 * (pp - target * target);
+                                if disc >= 0.0 {
+                                    let sq = disc.sqrt();
+                                    let s1 = (-2.0 * pn + sq) / 2.0;
+                                    let s2 = (-2.0 * pn - sq) / 2.0;
+                                    let snap_sag = if (s1 - sag).abs() < (s2 - sag).abs() {
+                                        s1
+                                    } else {
+                                        s2
+                                    };
+                                    if (sag - snap_sag).abs() < 5.0 {
+                                        sag = snap_sag;
+                                    }
+                                }
+                            }
+                        }
+
+                        let new_pos = oblong_side_handle(c1, c2, r1, r2, angle, sag, idx == 4);
+                        self.vertices.val_mut(idx as i64).set_curr(new_pos);
+                    }
                 }
                 self.set_bezpath();
                 true
             }
             ShapeType::Square | ShapeType::Text | ShapeType::Svg | ShapeType::Voronoi => {
                 let len = self.vertices.len();
-                if len != 4 {
+                let nc = self.get_n_corners();
+                if len != 4 && len != 8 {
                     return false;
                 }
                 if let Some(text_data) = &mut self.text_shape_data {
@@ -1364,6 +1598,20 @@ impl GeneralShape {
                     Some(i) => i as i64,
                     None => return false,
                 };
+                // Sag vertex drag (idx >= nc): constrain to edge normal, no grid snap
+                if (i as usize) >= nc && nc == 4 && len == 8 {
+                    use crate::helpers::math::{poly_sag_from_vertex, poly_sag_handle};
+                    let edge_idx = (i as usize) - nc;
+                    let edge_start = self.vertices.val(edge_idx as i64).curr();
+                    let edge_end = self.vertices.val(((edge_idx + 1) % nc) as i64).curr();
+                    self.vertices.val_mut(i).set_curr(user_ui.draw_pos);
+                    let mut sag = poly_sag_from_vertex(edge_start, edge_end, user_ui.draw_pos);
+                    if sag.abs() < 5.0 { sag = 0.0; }
+                    let new_pos = poly_sag_handle(edge_start, edge_end, sag);
+                    self.vertices.val_mut(i).set_curr(new_pos);
+                    self.set_bezpath();
+                    return true;
+                }
                 let rotation = self.rotation.get();
                 if rotation.abs() > EPSILON {
                     // Vertices are stored in local (unrotated) space.
@@ -1407,7 +1655,8 @@ impl GeneralShape {
                             .set_curr(right_saved + Vec2::new(local_delta.x, 0.));
                     }
                     // Opposite vertex (opp_idx) stays implicitly at saved() — not modified.
-                    let _ = i_usize; // suppress unused warning
+                    let _ = i_usize;
+                    self.recompute_sag_vertices(nc);
                     self.set_bezpath();
                     return true;
                 }
@@ -1441,26 +1690,38 @@ impl GeneralShape {
                         .val_mut(i + 1)
                         .add(Vec2::new(local_delta.x, 0.));
                 }
+                self.recompute_sag_vertices(nc);
                 self.set_bezpath();
                 true
             }
             ShapeType::Poly => {
+                let nc = self.get_n_corners();
                 let idx = match self.vertices.iter().position(|(uid, _)| *uid == value_uid) {
-                    Some(i) => i as i64,
+                    Some(i) => i,
                     None => return false,
                 };
-                let tmp = self.vertices.val_mut(idx).saved();
-                self.vertices.val_mut(idx).set_saved(snap_vertex(tmp, snap));
-                self.vertices.val_mut(idx).add(delta);
+                if idx >= nc && self.vertices.len() > nc {
+                    // Sag vertex drag
+                    use crate::helpers::math::{poly_sag_from_vertex, poly_sag_handle};
+                    let edge_idx = idx - nc;
+                    let edge_start = self.vertices.val(edge_idx as i64).curr();
+                    let edge_end = self.vertices.val(((edge_idx + 1) % nc) as i64).curr();
+                    let mut sag = poly_sag_from_vertex(edge_start, edge_end, user_ui.draw_pos);
+                    if sag.abs() < 5.0 { sag = 0.0; }
+                    let new_pos = poly_sag_handle(edge_start, edge_end, sag);
+                    self.vertices.val_mut(idx as i64).set_curr(new_pos);
+                } else {
+                    // Corner vertex drag
+                    let idx = idx as i64;
+                    let tmp = self.vertices.val_mut(idx).saved();
+                    self.vertices.val_mut(idx).set_saved(snap_vertex(tmp, snap));
+                    self.vertices.val_mut(idx).add(delta);
+                    self.recompute_sag_vertices(nc);
+                }
                 self.set_bezpath();
                 true
             }
-            ShapeType::Group => false,
-
-            ShapeType::Arrow => {
-                // Arrow is not a closed shape, so we don't move it
-                false
-            }
+            ShapeType::Group | ShapeType::Arrow => false,
         }
     }
     pub fn move_vertex_by_mouse(&mut self, value_uid: VUId, user_ui: &UserUI) -> Option<()> {
@@ -1498,11 +1759,18 @@ impl GeneralShape {
         }
     }
     pub fn move_shape(&mut self, delta: Vec2) {
+        // Compute incremental delta from previous position
+        let prev_pos = self.vertices.val(0).curr();
         for (_, value) in self.vertices.iter_mut() {
             value.add(delta);
         }
+        let new_pos = self.vertices.val(0).curr();
+        let incr_delta = new_pos - prev_pos;
+        self.ghosts_rot_center = self.ghosts_rot_center_saved + delta;
         self.update_properties();
-        self.set_bezpath();
+        // Translate bezpath + polygon directly (skip expensive rebuild)
+        self.bezpath = translate_bezpath(&self.bezpath, incr_delta.x, incr_delta.y);
+        self.polygon = self.polygon.translate(incr_delta.x, incr_delta.y);
     }
 
     pub fn update_from_property(&mut self, prop: &Property) -> Option<()> {
@@ -1613,6 +1881,7 @@ impl GeneralShape {
             value.save();
         }
         self.rotation.save();
+        self.ghosts_rot_center_saved = self.ghosts_rot_center;
     }
     pub fn get_properties(&self) -> &Properties {
         &self.properties
@@ -1779,6 +2048,14 @@ impl GeneralShape {
             group.set_children(children);
         }
     }
+    pub fn set_group_polygon(&mut self, poly: MultiPolygon<f64>) {
+        if let Some(group) = self.group_shape_data.as_mut() {
+            group.cached_polygon = Some(poly);
+        }
+    }
+    pub fn get_group_polygon(&self) -> Option<&MultiPolygon<f64>> {
+        self.group_shape_data.as_ref()?.cached_polygon.as_ref()
+    }
 
     pub fn get_text(&self) -> Option<String> {
         if let Some(PropertyValue::Text { value }) = self.properties.get(&Property::Text) {
@@ -1917,6 +2194,125 @@ impl GeneralShape {
         self.set_bezpath();
     }
 
+    // ── Ghost getters / setters ──────────────────────────────────────────
+    pub fn get_ghosts(&self) -> usize {
+        self.ghosts
+    }
+    pub fn get_ghosts_trans_x(&self) -> f64 {
+        self.ghosts_trans_x
+    }
+    pub fn get_ghosts_trans_y(&self) -> f64 {
+        self.ghosts_trans_y
+    }
+    pub fn get_ghosts_rot(&self) -> bool {
+        self.ghosts_rot
+    }
+    pub fn get_ghosts_self_rot(&self) -> bool {
+        self.ghosts_self_rot
+    }
+    pub fn get_ghosts_rot_center(&self) -> Vec2 {
+        self.ghosts_rot_center
+    }
+    pub fn set_ghosts(&mut self, v: usize) {
+        self.ghosts = v;
+    }
+    pub fn set_ghosts_trans_x(&mut self, v: f64) {
+        self.ghosts_trans_x = v;
+    }
+    pub fn set_ghosts_trans_y(&mut self, v: f64) {
+        self.ghosts_trans_y = v;
+    }
+    pub fn set_ghosts_rot(&mut self, v: bool) {
+        self.ghosts_rot = v;
+    }
+    pub fn set_ghosts_self_rot(&mut self, v: bool) {
+        self.ghosts_self_rot = v;
+    }
+    pub fn set_ghosts_rot_center(&mut self, v: Vec2) {
+        self.ghosts_rot_center = v;
+    }
+
+    /// Recompute sag vertex positions preserving their sag values after corners move.
+    fn recompute_sag_vertices(&mut self, nc: usize) {
+        use crate::helpers::math::{poly_sag_from_vertex, poly_sag_handle};
+        if self.vertices.len() <= nc { return; }
+        for i in 0..nc {
+            let j = (i + 1) % nc;
+            let sag_idx = (nc + i) as i64;
+            let old_start = self.vertices.val(i as i64).saved();
+            let old_end = self.vertices.val(j as i64).saved();
+            let old_sag = poly_sag_from_vertex(old_start, old_end, self.vertices.val(sag_idx).saved());
+            let new_start = self.vertices.val(i as i64).curr();
+            let new_end = self.vertices.val(j as i64).curr();
+            let new_pos = poly_sag_handle(new_start, new_end, old_sag);
+            self.vertices.val_mut(sag_idx).set_curr(new_pos);
+        }
+    }
+
+    /// Number of corner vertices (excluding sag vertices).
+    pub fn get_n_corners(&self) -> usize {
+        match self.shape_type {
+            ShapeType::Square => {
+                if self.vertices.len() == 8 { 4 } else { self.vertices.len() }
+            }
+            ShapeType::Poly => {
+                let n = self.vertices.len();
+                if n >= 6 && n % 2 == 0 { n / 2 } else { n }
+            }
+            _ => self.vertices.len(),
+        }
+    }
+
+    /// Compute the ghost copies of the current bezpath.
+    pub fn get_ghost_bezpaths(&self) -> Vec<BezPath> {
+        if self.ghosts == 0 {
+            return vec![];
+        }
+        // Use the actual shape paths, not just the bounding box bezpath
+        let base_paths: Vec<BezPath> = if self.shape_type == ShapeType::Group {
+            if let Some(poly) = self.get_group_polygon() {
+                geo_multipolygon_to_bez_paths(poly)
+            } else {
+                return vec![];
+            }
+        } else if let Some(paths) = self.get_text_paths() {
+            paths.clone()
+        } else if let Some(paths) = self.get_svg_paths() {
+            paths.clone()
+        } else {
+            vec![self.bezpath.clone()]
+        };
+        let mut result = Vec::new();
+        if self.ghosts_rot {
+            let total = self.ghosts + 1;
+            let center = self.ghosts_rot_center;
+            for i in 1..=self.ghosts {
+                let angle = 2.0 * PI * (i as f64) / (total as f64);
+                for base in &base_paths {
+                    if self.ghosts_self_rot {
+                        result.push(_rotate_bezpath(base, center, angle));
+                    } else {
+                        let bbox = base.bounding_box();
+                        let shape_center =
+                            Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+                        let rotated_pos = rotate_vector(shape_center - center, angle) + center;
+                        let delta = rotated_pos - shape_center;
+                        result.push(translate_bezpath(base, delta.x, delta.y));
+                    }
+                }
+            }
+        } else {
+            for i in 1..=self.ghosts {
+                let dx = self.ghosts_trans_x * (i as f64);
+                let dy = self.ghosts_trans_y * (i as f64);
+                for base in &base_paths {
+                    result.push(translate_bezpath(base, dx, dy));
+                }
+            }
+        }
+        result
+    }
+
     /// World-space position of the rotation handle (14 px outside v[2] from center).
     /// Returns `None` for shape types that do not support rotation via the handle.
     pub fn rotation_handle_world_pos(&self, scale: f64) -> Option<Vec2> {
@@ -1940,11 +2336,11 @@ impl GeneralShape {
         Some(v2_world + outward / dist * (OFFSET_PX / scale))
     }
 
-    pub fn get_dim_offsets(&self) -> [f64; 4] {
+    pub fn get_dim_offsets(&self) -> [f64; 6] {
         self.dim_offsets
     }
     pub fn set_dim_offset(&mut self, idx: usize, val: f64) {
-        if idx < 4 {
+        if idx < 6 {
             self.dim_offsets[idx] = val;
         }
     }
@@ -1968,7 +2364,7 @@ impl GeneralShape {
             }
             ShapeType::Oblong => {
                 let mut path = BezPath::new();
-                if self.vertices.len() >= 4 {
+                if self.vertices.len() >= 6 {
                     let c1 = self.vertices.val(0).curr();
                     let c2 = self.vertices.val(1).curr();
                     let r1 = (self.vertices.val(2).curr() - c1).hypot();
@@ -1981,80 +2377,67 @@ impl GeneralShape {
                             Circle::new(center.to_point(), radius).path_elements(Self::TOLERANCE),
                         );
                     } else {
-                        let base = (c2 - c1).atan2();
-                        let ratio = ((r1 - r2) / d).clamp(-1.0, 1.0);
-                        let offset = ratio.acos();
-                        let sweep1 = 2.0 * (PI - offset);
-                        let sweep2 = 2.0 * offset;
-                        let a1 = base + offset;
-                        let a2 = base - offset;
-
-                        let t1_a = c1 + Vec2::new(r1 * a1.cos(), r1 * a1.sin());
-                        let t2_b = c2 + Vec2::new(r2 * a2.cos(), r2 * a2.sin());
-
-                        path.extend(
-                            Arc::new(c1.to_point(), Vec2::new(r1, r1), a1, sweep1, 0.0)
-                                .path_elements(Self::TOLERANCE),
-                        );
-                        path.push(PathEl::LineTo(t2_b.to_point()));
-                        let mut arc2 = Arc::new(c2.to_point(), Vec2::new(r2, r2), a2, sweep2, 0.0)
-                            .path_elements(Self::TOLERANCE);
-                        arc2.next();
-                        path.extend(arc2);
-                        path.push(PathEl::LineTo(t1_a.to_point()));
-                        path.push(PathEl::ClosePath);
-                    }
-                } else if self.vertices.len() == 3 {
-                    let e1 = self.vertices.val(0).curr();
-                    let e2 = self.vertices.val(1).curr();
-                    let side = self.vertices.val(2).curr();
-                    let m = (e1 + e2) * 0.5;
-                    let radius = (side - m).hypot();
-                    let angle = (e2 - e1).atan2();
-                    let mut dir = e2 - e1;
-                    if dir.hypot() >= EPSILON {
-                        dir = dir.normalize();
-                        let perp = Vec2::new(-dir.y, dir.x);
-                        let pt2 = e1 - perp * radius;
-                        let pt3 = e2 + perp * radius;
-                        path.extend(
-                            Arc::new(
-                                e1.to_point(),
-                                Vec2::new(radius, radius),
-                                3.0 * PI / 2.0,
-                                -PI,
-                                angle,
-                            )
-                            .path_elements(Self::TOLERANCE),
-                        );
-                        path.push(PathEl::LineTo(pt3.to_point()));
-                        let mut arc2 = Arc::new(
-                            e2.to_point(),
-                            Vec2::new(radius, radius),
-                            PI / 2.0,
-                            -PI,
-                            angle,
-                        )
-                        .path_elements(Self::TOLERANCE);
-                        arc2.next();
-                        path.extend(arc2);
-                        path.push(PathEl::LineTo(pt2.to_point()));
-                        path.push(PathEl::ClosePath);
-                    } else {
-                        path.extend(
-                            Circle::new(e2.to_point(), radius).path_elements(Self::TOLERANCE),
-                        );
+                        let v4 = self.vertices.val(4).curr();
+                        let v5 = self.vertices.val(5).curr();
+                        // Check if sag vertices are at chord midpoints (sag ≈ 0)
+                        let vs1 = if let Some((_, a2_s)) = oblong_straight_angles(c1, c2, r1, r2) {
+                            let sag = sag_from_vertex(c1, c2, r1, r2, a2_s, v4);
+                            if sag.abs() < 1e-6 {
+                                None
+                            } else {
+                                Some(v4)
+                            }
+                        } else {
+                            None
+                        };
+                        let vs2 = if let Some((a1_s, _)) = oblong_straight_angles(c1, c2, r1, r2) {
+                            let sag = sag_from_vertex(c1, c2, r1, r2, a1_s, v5);
+                            if sag.abs() < 1e-6 {
+                                None
+                            } else {
+                                Some(v5)
+                            }
+                        } else {
+                            None
+                        };
+                        if let Some(p) =
+                            oblong_build_path(c1, c2, r1, r2, vs1, vs2, Self::TOLERANCE)
+                        {
+                            path = p;
+                        }
                     }
                 }
                 self.bezpath = path;
             }
-            ShapeType::Square | ShapeType::Group => {
+            ShapeType::Group => {
                 let apices = self.vertices.get_apices();
                 self.bezpath = bezpath_from_apices(&apices);
             }
+            ShapeType::Square => {
+                let nc = self.get_n_corners();
+                let apices = self.vertices.get_apices_n(nc);
+                let has_sag = self.vertices.len() > nc;
+                if has_sag {
+                    let sag_verts: Vec<Option<Vec2>> = (0..nc)
+                        .map(|i| Some(self.vertices.val((nc + i) as i64).curr()))
+                        .collect();
+                    self.bezpath = build_polygon_path_with_sag(&apices, &sag_verts, Self::TOLERANCE);
+                } else {
+                    self.bezpath = bezpath_from_apices(&apices);
+                }
+            }
             ShapeType::Poly => {
-                let apices = self.vertices.get_apices();
-                self.bezpath = bezpath_from_apices(&apices);
+                let nc = self.get_n_corners();
+                let apices = self.vertices.get_apices_n(nc);
+                let has_sag = self.vertices.len() > nc;
+                if has_sag {
+                    let sag_verts: Vec<Option<Vec2>> = (0..nc)
+                        .map(|i| Some(self.vertices.val((nc + i) as i64).curr()))
+                        .collect();
+                    self.bezpath = build_polygon_path_with_sag(&apices, &sag_verts, Self::TOLERANCE);
+                } else {
+                    self.bezpath = bezpath_from_apices(&apices);
+                }
             }
             ShapeType::Text => {
                 let apices = self.vertices.get_apices();
@@ -2132,8 +2515,60 @@ impl GeneralShape {
     }
 
     fn update_polygon(&mut self) {
-        let poly = bez_path_to_geo_polygon(&self.bezpath);
-        self.polygon = MultiPolygon::new(vec![poly]);
+        if self.shape_type == ShapeType::Group {
+            // For Groups, translate/rotate the cached MultiPolygon directly
+            // (preserves holes from Difference operations)
+            if let Some(base) = self.get_group_polygon().cloned() {
+                let mut result = base.clone();
+                if self.ghosts > 0 {
+                    let ghost_polys = self.group_ghost_multipolygons(&base);
+                    for gp in ghost_polys {
+                        result = result.boolean_op(&gp, geo::OpType::Union);
+                    }
+                }
+                self.polygon = result;
+            }
+            return;
+        }
+        let base_poly = bez_path_to_geo_polygon(&self.bezpath);
+        let mut result = MultiPolygon::new(vec![base_poly]);
+        for ghost_path in self.get_ghost_bezpaths() {
+            let ghost_poly = MultiPolygon::new(vec![bez_path_to_geo_polygon(&ghost_path)]);
+            result = result.boolean_op(&ghost_poly, geo::OpType::Union);
+        }
+        self.polygon = result;
+    }
+
+    /// Generate ghost MultiPolygons for a Group (translated/rotated copies of base).
+    fn group_ghost_multipolygons(&self, base: &MultiPolygon<f64>) -> Vec<MultiPolygon<f64>> {
+        let mut ghosts = Vec::new();
+        if self.ghosts_rot {
+            let total = self.ghosts + 1;
+            let center = self.ghosts_rot_center;
+            for i in 1..=self.ghosts {
+                let angle = 2.0 * PI * (i as f64) / (total as f64);
+                let polys: Vec<geo::Polygon<f64>> = if self.ghosts_self_rot {
+                    base.0.iter().map(|p| rotate_geo_polygon(p, center, angle)).collect()
+                } else {
+                    let bbox = self.bezpath.bounding_box();
+                    let sc = Vec2::new((bbox.x0+bbox.x1)*0.5, (bbox.y0+bbox.y1)*0.5);
+                    let rp = rotate_vector(sc - center, angle) + center;
+                    let delta = rp - sc;
+                    base.0.iter().map(|p| translate_geo_polygon(p, delta.x, delta.y)).collect()
+                };
+                ghosts.push(MultiPolygon::new(polys));
+            }
+        } else {
+            for i in 1..=self.ghosts {
+                let dx = self.ghosts_trans_x * (i as f64);
+                let dy = self.ghosts_trans_y * (i as f64);
+                let polys: Vec<geo::Polygon<f64>> = base.0.iter()
+                    .map(|p| translate_geo_polygon(p, dx, dy))
+                    .collect();
+                ghosts.push(MultiPolygon::new(polys));
+            }
+        }
+        ghosts
     }
 
     fn update_text_polygon(&mut self) -> Option<()> {
@@ -2162,6 +2597,14 @@ impl GeneralShape {
         self.polygon = poly.clone();
         text_data.polygon = Some(poly.clone());
         text_data.cached_paths = Some(geo_multipolygon_to_bez_paths(&poly));
+        // Add ghost copies to the polygon
+        if self.ghosts > 0 {
+            let mut all_polys: Vec<geo::Polygon<f64>> = self.polygon.0.clone();
+            for ghost_path in self.get_ghost_bezpaths() {
+                all_polys.push(bez_path_to_geo_polygon(&ghost_path));
+            }
+            self.polygon = MultiPolygon::new(all_polys);
+        }
         Some(())
     }
 
@@ -2275,6 +2718,14 @@ impl GeneralShape {
         svg.cached_paths = Some(raw_paths);
         svg.cached_bbox_min = bbox_min;
         svg.cached_bbox_max = bbox_max;
+        // Add ghost copies to the polygon
+        if self.ghosts > 0 {
+            let mut all_polys: Vec<geo::Polygon<f64>> = self.polygon.0.clone();
+            for ghost_path in self.get_ghost_bezpaths() {
+                all_polys.push(bez_path_to_geo_polygon(&ghost_path));
+            }
+            self.polygon = MultiPolygon::new(all_polys);
+        }
     }
 }
 
@@ -2285,6 +2736,415 @@ struct ParsedSvgShape {
     _fill_rule: SvgFillRule,
     bbox_min: Vec2,
     bbox_max: Vec2,
+}
+
+fn translate_geo_polygon(poly: &geo::Polygon<f64>, dx: f64, dy: f64) -> geo::Polygon<f64> {
+    use geo::{Coord, LineString, Polygon};
+    let translate_ls = |ls: &LineString<f64>| -> LineString<f64> {
+        LineString(ls.0.iter().map(|c| Coord { x: c.x + dx, y: c.y + dy }).collect())
+    };
+    Polygon::new(translate_ls(poly.exterior()), poly.interiors().iter().map(translate_ls).collect())
+}
+
+fn rotate_geo_polygon(poly: &geo::Polygon<f64>, center: Vec2, angle: f64) -> geo::Polygon<f64> {
+    use geo::{Coord, LineString, Polygon};
+    let rotate_ls = |ls: &LineString<f64>| -> LineString<f64> {
+        LineString(ls.0.iter().map(|c| {
+            let v = rotate_vector(Vec2::new(c.x, c.y) - center, angle) + center;
+            Coord { x: v.x, y: v.y }
+        }).collect())
+    };
+    Polygon::new(rotate_ls(poly.exterior()), poly.interiors().iter().map(rotate_ls).collect())
+}
+
+/// Compute the straight-tangent geometry of a 4-vertex oblong (sag=0 case).
+/// Returns (a1, a2) angles or None if degenerate.
+pub(crate) fn oblong_straight_angles(c1: Vec2, c2: Vec2, r1: f64, r2: f64) -> Option<(f64, f64)> {
+    let d = (c2 - c1).hypot();
+    if d < EPSILON || d <= (r1 - r2).abs() {
+        return None;
+    }
+    let base = (c2 - c1).atan2();
+    let ratio = ((r1 - r2) / d).clamp(-1.0, 1.0);
+    let offset = ratio.acos();
+    Some((base + offset, base - offset))
+}
+
+/// Compute the handle position for a side arc.
+/// Uses midpoint of the straight chord + normal * sag for monotonic tracking.
+pub(crate) fn oblong_side_handle(
+    c1: Vec2,
+    c2: Vec2,
+    r1: f64,
+    r2: f64,
+    straight_angle: f64,
+    sag: f64,
+    _is_side1: bool,
+) -> Vec2 {
+    let p1 = c1 + Vec2::new(r1 * straight_angle.cos(), r1 * straight_angle.sin());
+    let p2 = c2 + Vec2::new(r2 * straight_angle.cos(), r2 * straight_angle.sin());
+    let chord = p2 - p1;
+    let l = chord.hypot();
+    if l < 1e-9 {
+        return (p1 + p2) * 0.5;
+    }
+    let u = chord / l;
+    let n = Vec2::new(-u.y, u.x);
+    (p1 + p2) * 0.5 + n * sag
+}
+
+/// Compute the sag value from a sag vertex position by projecting onto the chord normal.
+fn sag_from_vertex(
+    c1: Vec2,
+    c2: Vec2,
+    r1: f64,
+    r2: f64,
+    straight_angle: f64,
+    vertex_pos: Vec2,
+) -> f64 {
+    let p1 = c1 + Vec2::new(r1 * straight_angle.cos(), r1 * straight_angle.sin());
+    let p2 = c2 + Vec2::new(r2 * straight_angle.cos(), r2 * straight_angle.sin());
+    let chord = p2 - p1;
+    let l = chord.hypot();
+    if l < 1e-9 {
+        return 0.0;
+    }
+    let u = chord / l;
+    let n = Vec2::new(-u.y, u.x);
+    let mid = (p1 + p2) * 0.5;
+    let delta = vertex_pos - mid;
+    delta.x * n.x + delta.y * n.y
+}
+
+/// Find all arc centers O and radii R such that the arc passes through point V
+/// and is externally (or internally) tangent to both circles (c1,r1) and (c2,r2).
+/// Returns all valid (O, R) solutions with R > 0.
+fn arc_through_point_tangent(
+    c1: Vec2,
+    c2: Vec2,
+    r1: f64,
+    r2: f64,
+    v: Vec2,
+    internal: bool,
+) -> Vec<(Vec2, f64)> {
+    let sr1 = if internal { -r1 } else { r1 };
+    let sr2 = if internal { -r2 } else { r2 };
+    let u = v - c1;
+    let w = v - c2;
+    let det = u.x * w.y - u.y * w.x;
+    if det.abs() < 1e-12 {
+        return vec![];
+    }
+    let alpha = (sr1 * sr1 + v.x * v.x + v.y * v.y - c1.x * c1.x - c1.y * c1.y) / 2.0;
+    let beta = (sr2 * sr2 + v.x * v.x + v.y * v.y - c2.x * c2.x - c2.y * c2.y) / 2.0;
+    let o0 = Vec2::new(
+        (w.y * alpha - u.y * beta) / det,
+        (u.x * beta - w.x * alpha) / det,
+    );
+    let d_o = Vec2::new((w.y * sr1 - u.y * sr2) / det, (u.x * sr2 - w.x * sr1) / det);
+    let pv = o0 - v;
+    let a = d_o.x * d_o.x + d_o.y * d_o.y - 1.0;
+    let b = 2.0 * (pv.x * d_o.x + pv.y * d_o.y);
+    let c = pv.x * pv.x + pv.y * pv.y;
+    let disc = b * b - 4.0 * a * c;
+    if disc < 0.0 {
+        return vec![];
+    }
+    let sq = disc.sqrt();
+    let mut results = Vec::new();
+    for r in [(-b + sq) / (2.0 * a), (-b - sq) / (2.0 * a)] {
+        if r > 0.0 {
+            results.push((o0 + d_o * r, r));
+        }
+    }
+    results
+}
+
+/// Compute the sweep angle from p_start to p_end (around center O) that contains point V.
+/// Returns either the CW or CCW sweep, whichever includes V.
+fn sweep_through_point(o: Vec2, p_start: Vec2, p_end: Vec2, v: Vec2) -> f64 {
+    let a_start = (p_start - o).y.atan2((p_start - o).x);
+    let a_end = (p_end - o).y.atan2((p_end - o).x);
+    let a_v = (v - o).y.atan2((v - o).x);
+
+    // Two possible sweeps: CW (negative) and CCW (positive)
+    let mut sweep_ccw = a_end - a_start;
+    if sweep_ccw < 0.0 {
+        sweep_ccw += 2.0 * PI;
+    }
+    let sweep_cw = sweep_ccw - 2.0 * PI; // negative
+
+    // Check which sweep contains the angle of V
+    let mut dv = a_v - a_start;
+    if dv < 0.0 {
+        dv += 2.0 * PI;
+    }
+    // dv is now in [0, 2π). If dv < sweep_ccw, V is in the CCW arc.
+    if dv <= sweep_ccw { sweep_ccw } else { sweep_cw }
+}
+
+/// Build a polygon BezPath with optional arc sides (sag vertices) and filleted corners.
+/// `apices`: the corner apices (from get_apices_n)
+/// `sag_positions`: one sag vertex per edge (None = straight). sag[i] = edge corner[i]→corner[(i+1)%n]
+pub(crate) fn build_polygon_path_with_sag(
+    apices: &[ApexType],
+    sag_positions: &[Option<Vec2>],
+    tolerance: f64,
+) -> BezPath {
+    use crate::helpers::math::{circle_from_three_points, poly_sag_from_vertex};
+    let n = apices.len();
+    assert_eq!(sag_positions.len(), n);
+
+    let entry_of = |apex: &ApexType| -> Vec2 {
+        match *apex { ApexType::TypeVertex { a } => a, ApexType::Arc { s, .. } => s }
+    };
+    let exit_of = |apex: &ApexType| -> Vec2 {
+        match *apex { ApexType::TypeVertex { a } => a, ApexType::Arc { e, .. } => e }
+    };
+    let corner_pos = |apex: &ApexType| -> Vec2 {
+        match *apex { ApexType::TypeVertex { a } => a, ApexType::Arc { s, c, e } => (s + e) * 0.5 }
+    };
+
+    // Determine polygon winding direction (CW or CCW) via shoelace formula
+    let mut area2 = 0.0;
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let pi = corner_pos(&apices[i]);
+        let pj = corner_pos(&apices[j]);
+        area2 += pi.x * pj.y - pj.x * pi.y;
+    }
+    let winding_ccw = area2 > 0.0;
+
+    // --- Pass 1: compute adjusted entry/exit points for each corner ---
+    let mut adj_entry: Vec<Vec2> = (0..n).map(|i| entry_of(&apices[i])).collect();
+    let mut adj_exit: Vec<Vec2> = (0..n).map(|i| exit_of(&apices[i])).collect();
+    // Store sag arc data for each edge: (arc_center, arc_radius, sag_vertex)
+    let mut edge_arcs: Vec<Option<(Vec2, f64, Vec2)>> = vec![None; n];
+
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let Some(v) = sag_positions[i] else { continue };
+        let edge_start = exit_of(&apices[i]);
+        let edge_end = entry_of(&apices[j]);
+        let sag = poly_sag_from_vertex(edge_start, edge_end, v);
+        if sag.abs() < 1e-6 { continue; }
+
+        let fillet_i = match apices[i] { ApexType::Arc { c, .. } => Some((c, (exit_of(&apices[i]) - c).hypot())), _ => None };
+        let fillet_j = match apices[j] { ApexType::Arc { c, .. } => Some((c, (entry_of(&apices[j]) - c).hypot())), _ => None };
+
+        match (fillet_i, fillet_j) {
+            (Some((c1, r1)), Some((c2, r2))) => {
+                if let Some((ac1, ac2, o, big_r)) = solve_side(c1, c2, r1, r2, v, edge_start, edge_end) {
+                    // solve_side already handles internal/external in ac1/ac2
+                    adj_exit[i] = c1 + Vec2::new(r1 * ac1.cos(), r1 * ac1.sin());
+                    adj_entry[j] = c2 + Vec2::new(r2 * ac2.cos(), r2 * ac2.sin());
+                    edge_arcs[i] = Some((o, big_r, v));
+                }
+            }
+            (Some((c1, r1)), None) => {
+                if let Some((ac1, _, o, big_r)) = solve_side(c1, edge_end, r1, 0.0, v, edge_start, edge_end) {
+                    adj_exit[i] = c1 + Vec2::new(r1 * ac1.cos(), r1 * ac1.sin());
+                    edge_arcs[i] = Some((o, big_r, v));
+                }
+            }
+            (None, Some((c2, r2))) => {
+                if let Some((_, ac2, o, big_r)) = solve_side(edge_start, c2, 0.0, r2, v, edge_start, edge_end) {
+                    adj_entry[j] = c2 + Vec2::new(r2 * ac2.cos(), r2 * ac2.sin());
+                    edge_arcs[i] = Some((o, big_r, v));
+                }
+            }
+            (None, None) => {
+                // point-arc-point: no fillet adjustment needed, just store the circle
+                if let Some((center, radius)) = circle_from_three_points(edge_start, v, edge_end) {
+                    edge_arcs[i] = Some((center, radius, v));
+                }
+            }
+        }
+    }
+
+    // --- Pass 2: draw the path ---
+    let mut path = BezPath::new();
+    path.move_to(adj_exit[0].to_point());
+
+    for i in 0..n {
+        let j = (i + 1) % n;
+
+        // Draw edge i → j
+        if let Some((o, big_r, v)) = edge_arcs[i] {
+            let start = adj_exit[i];
+            let end = adj_entry[j];
+            let sweep = sweep_through_point(o, start, end, v);
+            let a_start = (start - o).y.atan2((start - o).x);
+            let arc = Arc::new(o.to_point(), Vec2::new(big_r, big_r), a_start, sweep, 0.0);
+            let mut elems = arc.path_elements(tolerance);
+            elems.next();
+            path.extend(elems);
+        } else {
+            path.push(PathEl::LineTo(adj_entry[j].to_point()));
+        }
+
+        // Draw fillet arc at corner j — always bulges outward (same winding as polygon)
+        if let ApexType::Arc { s, c, .. } = apices[j] {
+            let r = (s - c).hypot();
+            let a_start = (adj_entry[j] - c).y.atan2((adj_entry[j] - c).x);
+            let a_end = (adj_exit[j] - c).y.atan2((adj_exit[j] - c).x);
+            let mut sweep = a_end - a_start;
+            if winding_ccw {
+                // CCW polygon → fillet sweep must be positive (CCW)
+                if sweep < 0.0 { sweep += 2.0 * PI; }
+            } else {
+                // CW polygon → fillet sweep must be negative (CW)
+                if sweep > 0.0 { sweep -= 2.0 * PI; }
+            }
+            let arc = Arc::new(c.to_point(), Vec2::new(r, r), a_start, sweep, 0.0);
+            arc.to_cubic_beziers(0.01, |p1, p2, p3| {
+                path.push(PathEl::CurveTo(p1, p2, p3));
+            });
+        }
+    }
+
+    path.close_path();
+    path
+}
+
+/// Find the best arc through V tangent to both circles (c1,r1) and (c2,r2).
+/// chord_start/chord_end: the straight-line tangent points (for reference).
+/// Returns (angle_on_c1, angle_on_c2, arc_center, arc_radius) or None.
+pub(crate) fn solve_side(
+    c1: Vec2, c2: Vec2, r1: f64, r2: f64, v: Vec2,
+    chord_start: Vec2, chord_end: Vec2,
+) -> Option<(f64, f64, Vec2, f64)> {
+    let chord = chord_end - chord_start;
+    let chord_len = chord.hypot();
+    if chord_len < 1e-9 { return None; }
+    let chord_n = Vec2::new(-chord.y / chord_len, chord.x / chord_len);
+    let chord_mid = (chord_start + chord_end) * 0.5;
+    let v_side = (v - chord_mid).x * chord_n.x + (v - chord_mid).y * chord_n.y;
+
+    let axis_mid = (c1 + c2) * 0.5;
+    let chord_offset = (chord_mid - axis_mid).x * chord_n.x + (chord_mid - axis_mid).y * chord_n.y;
+    let v_away = v_side * chord_offset > 0.0;
+    let to_chord = chord_mid - v;
+
+    let mut best: Option<(f64, f64, Vec2, f64)> = None;
+    for &try_internal in &[false, true] {
+        for (o, big_r) in arc_through_point_tangent(c1, c2, r1, r2, v, try_internal) {
+            let internal = (o - c1).hypot() < big_r;
+            let (ac1, ac2) = if internal {
+                ((c1 - o).y.atan2((c1 - o).x), (c2 - o).y.atan2((c2 - o).x))
+            } else {
+                ((o - c1).y.atan2((o - c1).x), (o - c2).y.atan2((o - c2).x))
+            };
+            let o_toward_chord = (o - v).x * to_chord.x + (o - v).y * to_chord.y;
+            if o_toward_chord <= 0.0 { continue; }
+            let dominated = if v_away {
+                best.as_ref().map_or(false, |b| big_r <= b.3)
+            } else {
+                best.as_ref().map_or(false, |b| big_r >= b.3)
+            };
+            if !dominated {
+                best = Some((ac1, ac2, o, big_r));
+            }
+        }
+    }
+    best
+}
+
+/// Build the full oblong BezPath with optional arc sides.
+/// v1, v2: sag vertex positions (or None for straight sides).
+pub(crate) fn oblong_build_path(
+    c1: Vec2,
+    c2: Vec2,
+    r1: f64,
+    r2: f64,
+    v_side1: Option<Vec2>,
+    v_side2: Option<Vec2>,
+    tolerance: f64,
+) -> Option<BezPath> {
+    let d = (c2 - c1).hypot();
+    if d < EPSILON {
+        return None;
+    }
+    let (a1_straight, a2_straight) = oblong_straight_angles(c1, c2, r1, r2)?;
+
+    // Side 1: arc goes from c1 to c2
+    let (s1_angle_c1, s1_angle_c2, s1_arc) = if let Some(v) = v_side1 {
+        let cs = c1 + Vec2::new(r1 * a2_straight.cos(), r1 * a2_straight.sin());
+        let ce = c2 + Vec2::new(r2 * a2_straight.cos(), r2 * a2_straight.sin());
+        if let Some((ac1, ac2, o, big_r)) = solve_side(c1, c2, r1, r2, v, cs, ce) {
+            (ac1, ac2, Some((o, big_r)))
+        } else {
+            (a2_straight, a2_straight, None)
+        }
+    } else {
+        (a2_straight, a2_straight, None)
+    };
+
+    // Side 2: arc goes from c2 to c1
+    let (s2_angle_c2, s2_angle_c1, s2_arc) = if let Some(v) = v_side2 {
+        let cs = c2 + Vec2::new(r2 * a1_straight.cos(), r2 * a1_straight.sin());
+        let ce = c1 + Vec2::new(r1 * a1_straight.cos(), r1 * a1_straight.sin());
+        if let Some((ac1, ac2, o, big_r)) = solve_side(c1, c2, r1, r2, v, cs, ce) {
+            (ac2, ac1, Some((o, big_r)))
+        } else {
+            (a1_straight, a1_straight, None)
+        }
+    } else {
+        (a1_straight, a1_straight, None)
+    };
+
+    let mut path = BezPath::new();
+
+    // Arc at c1: from s2_angle_c1 to s1_angle_c1 (the long way, through the "outside")
+    let mut sweep_c1 = s1_angle_c1 - s2_angle_c1;
+    if sweep_c1 <= 0.0 {
+        sweep_c1 += 2.0 * PI;
+    }
+    path.extend(
+        Arc::new(c1.to_point(), Vec2::new(r1, r1), s2_angle_c1, sweep_c1, 0.0)
+            .path_elements(tolerance),
+    );
+
+    // Side 1: from tangent point on c1 to tangent point on c2
+    let p1_s1 = c1 + Vec2::new(r1 * s1_angle_c1.cos(), r1 * s1_angle_c1.sin());
+    let p2_s1 = c2 + Vec2::new(r2 * s1_angle_c2.cos(), r2 * s1_angle_c2.sin());
+    if let Some((o, big_r)) = s1_arc {
+        let sweep = sweep_through_point(o, p1_s1, p2_s1, v_side1.unwrap_or(p2_s1));
+        let a_start = (p1_s1 - o).y.atan2((p1_s1 - o).x);
+        let arc = Arc::new(o.to_point(), Vec2::new(big_r, big_r), a_start, sweep, 0.0);
+        let mut elems = arc.path_elements(tolerance);
+        elems.next();
+        path.extend(elems);
+    } else {
+        path.push(PathEl::LineTo(p2_s1.to_point()));
+    }
+
+    // Arc at c2: from s1_angle_c2 to s2_angle_c2
+    let mut sweep_c2 = s2_angle_c2 - s1_angle_c2;
+    if sweep_c2 <= 0.0 {
+        sweep_c2 += 2.0 * PI;
+    }
+    let mut arc2 = Arc::new(c2.to_point(), Vec2::new(r2, r2), s1_angle_c2, sweep_c2, 0.0)
+        .path_elements(tolerance);
+    arc2.next(); // skip MoveTo
+    path.extend(arc2);
+
+    // Side 2: from tangent point on c2 to tangent point on c1
+    let p1_s2 = c2 + Vec2::new(r2 * s2_angle_c2.cos(), r2 * s2_angle_c2.sin());
+    let p2_s2 = c1 + Vec2::new(r1 * s2_angle_c1.cos(), r1 * s2_angle_c1.sin());
+    if let Some((o, big_r)) = s2_arc {
+        let sweep = sweep_through_point(o, p1_s2, p2_s2, v_side2.unwrap_or(p2_s2));
+        let a_start = (p1_s2 - o).y.atan2((p1_s2 - o).x);
+        let arc = Arc::new(o.to_point(), Vec2::new(big_r, big_r), a_start, sweep, 0.0);
+        let mut elems = arc.path_elements(tolerance);
+        elems.next();
+        path.extend(elems);
+    } else {
+        path.push(PathEl::LineTo(p2_s2.to_point()));
+    }
+
+    path.push(PathEl::ClosePath);
+    Some(path)
 }
 
 fn rings_bbox(rings: &[Vec<Vec2>]) -> Option<(Vec2, Vec2)> {
@@ -2692,6 +3552,10 @@ fn _rotate_bezpaths(paths: &[BezPath], center: Vec2, angle: f64) -> Vec<BezPath>
         .iter()
         .map(|path| _rotate_bezpath(path, center, angle))
         .collect()
+}
+
+pub(crate) fn rotate_bezpath_pub(path: &BezPath, center: Vec2, angle: f64) -> BezPath {
+    _rotate_bezpath(path, center, angle)
 }
 
 fn _rotate_bezpath(path: &BezPath, center: Vec2, angle: f64) -> BezPath {

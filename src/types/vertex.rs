@@ -44,7 +44,7 @@ impl Vertex {
         if self.has_radius {
             if self.radius.is_none() {
                 if self.last_radius.is_none() {
-                    self.radius = Some(Scalar::new(10, 10, u32::MAX, 10));
+                    self.radius = Some(Scalar::new(10, 5, u32::MAX, 10));
                 } else {
                     self.radius = self.last_radius.clone();
                 }
@@ -93,16 +93,31 @@ impl Vertex {
         None
     }
     pub fn inc_radius(&mut self) {
+        self.inc_radius_by(0);
+    }
+    pub fn dec_radius(&mut self) {
+        self.dec_radius_by(0);
+    }
+    /// Increment radius by `step` (0 = use default step from Scalar)
+    pub fn inc_radius_by(&mut self, step: u32) {
         if self.has_radius {
             if let Some(rad) = &mut self.radius {
-                rad.incr();
+                let s = if step > 0 { step } else { rad.step() };
+                let new_val = rad.curr() + s;
+                if new_val <= rad.max() {
+                    rad.set_curr(new_val);
+                }
             }
         }
     }
-    pub fn dec_radius(&mut self) {
+    /// Decrement radius by `step` (0 = use default step from Scalar). Clamps to min.
+    pub fn dec_radius_by(&mut self, step: u32) {
         if self.has_radius {
             if let Some(rad) = &mut self.radius {
-                rad.decr();
+                let s = if step > 0 { step } else { rad.step() };
+                let new_val = rad.curr().saturating_sub(s);
+                let clamped = new_val.max(rad.min());
+                rad.set_curr(clamped);
             }
         }
     }

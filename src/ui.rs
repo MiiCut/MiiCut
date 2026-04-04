@@ -153,6 +153,9 @@ pub(crate) fn on_window_keydown(av: RefAV, event: Event) {
                 do_render = true;
             }
             "Enter" => {
+                if is_typing_in_input(&kb_event, &document) {
+                    return;
+                }
                 let _ = with_av_try_mut(&av, |avb| avb.group_toggle_pressed());
                 do_render = true;
             }
@@ -205,9 +208,10 @@ pub(crate) fn on_window_keydown(av: RefAV, event: Event) {
             "s" | "S" => {
                 if ctrl_cmd {
                     kb_event.prevent_default();
-                    log!("Ctrl+S pressed");
-                    if let Some(save) = av.borrow().document.get_element_by_id("save-option") {
-                        let save = save.dyn_into::<HtmlElement>().unwrap();
+                    let save_el = av.borrow().document.get_element_by_id("save-option")
+                        .and_then(|el| el.dyn_into::<HtmlElement>().ok());
+                    // Click AFTER dropping the borrow so the save closure can borrow_mut
+                    if let Some(save) = save_el {
                         save.click();
                     }
                 }

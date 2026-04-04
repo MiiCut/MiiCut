@@ -1349,22 +1349,30 @@ impl DataSet {
             let Some(shape) = self.shapes.get(&eid) else {
                 continue;
             };
-            let shape_poly = if shape.is_group() {
+            let (shape_poly, op) = if shape.is_group() {
                 let children = shape.get_group_children().unwrap_or_default();
                 let poly = self.calc_group_polygon(children);
-                shape.rotate_polygon_if_needed(&poly)
+                let op = shape.get_operation();
+                // Cache group polygon + rebuild with ghosts
+                if let Some(group_shape) = self.shapes.get_mut(&eid) {
+                    group_shape.set_group_polygon(poly);
+                    group_shape.set_bezpath(); // triggers update_polygon with ghosts
+                }
+                let shape = self.shapes.get(&eid).unwrap();
+                let full_poly = shape.get_polygon().clone();
+                (shape.rotate_polygon_if_needed(&full_poly), op)
             } else {
                 let mut polys = Vec::new();
                 for poly in shape.get_polygon().iter() {
                     polys.push(normalize_polygon_orientation(poly));
                 }
                 let poly = MultiPolygon::new(polys);
-                shape.rotate_polygon_if_needed(&poly)
+                (shape.rotate_polygon_if_needed(&poly), shape.get_operation())
             };
             if shape_poly.0.is_empty() {
                 continue;
             }
-            result = match shape.get_operation() {
+            result = match op {
                 Operation::Union => {
                     if result.0.is_empty() {
                         shape_poly
