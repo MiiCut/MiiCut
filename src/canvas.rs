@@ -981,7 +981,9 @@ impl Canvas {
         for e in self.dataset.shapes.values() {
             match e.get_shape_type() {
                 ShapeType::Square | ShapeType::Poly => {
-                    for apex_type in e.get_vertices().get_apices_n(e.get_n_corners()).iter() {
+                    let nc = e.get_n_corners();
+                    // Fillet radii at corners
+                    for apex_type in e.get_vertices().get_apices_n(nc).iter() {
                         if let ApexType::Arc { s, c, e: _e } = apex_type {
                             let r = (*s - *c).length();
                             let text2 = CanvasText::new(
@@ -992,11 +994,125 @@ impl Canvas {
                             self.draw_text(&text2);
                         }
                     }
+                    // Sag arc radii on edges
+                    if e.get_vertices().len() > nc {
+                        self.draw_sag_arc_radii(e, nc, &text_cfg);
+                    }
+                }
+                ShapeType::Oblong => {
+                    // Sag arc radii for oblong sides
+                    self.draw_sag_arc_radii_oblong(e, &text_cfg);
                 }
                 _ => (),
             }
         }
     }
+    /// Draw sag arc radius labels for Rectangle/Polygon edges.
+    fn draw_sag_arc_radii(&self, e: &GeneralShape, nc: usize, text_cfg: &CanvasTextConfig) {
+        use crate::helpers::math::{poly_sag_from_vertex, ApexType};
+        use crate::shape::solve_side;
+        let verts = e.get_vertices();
+        let scale = self.get_scale();
+        let offset = 12.0 / scale;
+        let apices = verts.get_apices_n(nc);
+
+        let entry_of = |apex: &ApexType| -> Vec2 {
+            match *apex { ApexType::TypeVertex { a } => a, ApexType::Arc { s, .. } => s }
+        };
+        let exit_of = |apex: &ApexType| -> Vec2 {
+            match *apex { ApexType::TypeVertex { a } => a, ApexType::Arc { e, .. } => e }
+        };
+
+        for i in 0..nc {
+            let j = (i + 1) % nc;
+            let sag_idx = nc + i;
+            if sag_idx >= verts.len() { continue; }
+            let edge_start = exit_of(&apices[i]);
+            let edge_end = entry_of(&apices[j]);
+            let handle = verts.val(sag_idx as i64).curr();
+            let sag = poly_sag_from_vertex(edge_start, edge_end, handle);
+            if sag.abs() < 1e-6 { continue; }
+
+            let fillet_i = match apices[i] { ApexType::Arc { c, .. } => Some((c, (exit_of(&apices[i]) - c).hypot())), _ => None };
+            let fillet_j = match apices[j] { ApexType::Arc { c, .. } => Some((c, (entry_of(&apices[j]) - c).hypot())), _ => None };
+
+            let radius = match (fillet_i, fillet_j) {
+                (Some((c1, r1)), Some((c2, r2))) => {
+                    solve_side(c1, c2, r1, r2, handle, edge_start, edge_end).map(|(_, _, _, r)| r)
+                }
+                (Some((c1, r1)), None) => {
+                    solve_side(c1, edge_end, r1, 0.0, handle, edge_start, edge_end).map(|(_, _, _, r)| r)
+                }
+                (None, Some((c2, r2))) => {
+                    solve_side(edge_start, c2, 0.0, r2, handle, edge_start, edge_end).map(|(_, _, _, r)| r)
+                }
+                (None, None) => {
+                    crate::helpers::math::circle_from_three_points(edge_start, handle, edge_end)
+                        .map(|(_, r)| r)
+                }
+            };
+
+            if let Some(radius) = radius {
+                let chord = edge_end - edge_start;
+                let l = chord.hypot();
+                if l < 1e-9 { continue; }
+                let n = Vec2::new(-chord.y / l, chord.x / l);
+                // Text baseline is at the top of the text; add font height when text is below
+                let dir = n * sag.signum();
+                let goes_down = dir.y > 0.0; // positive y = downward in screen coords
+                let extra = if goes_down { 14.0 / scale } else { 0.0 };
+                let text_pos = handle + dir * (offset + extra);
+                let text2 = CanvasText::new(
+                    format!("R{:.0}", radius),
+                    TextPos::PosCustom(text_pos),
+                    text_cfg.clone(),
+                );
+                self.draw_text(&text2);
+            }
+        }
+    }
+
+    /// Draw sag arc radius labels for Oblong sides.
+    fn draw_sag_arc_radii_oblong(&self, e: &GeneralShape, text_cfg: &CanvasTextConfig) {
+        use crate::helpers::math::poly_sag_from_vertex;
+        use crate::shape::{oblong_straight_angles, solve_side};
+        let verts = e.get_vertices();
+        if verts.len() < 6 { return; }
+        let scale = self.get_scale();
+        let offset = 12.0 / scale;
+        let c1 = verts.val(0).curr();
+        let c2 = verts.val(1).curr();
+        let r1 = (verts.val(2).curr() - c1).hypot();
+        let r2 = (verts.val(3).curr() - c2).hypot();
+        let Some((a1_s, a2_s)) = oblong_straight_angles(c1, c2, r1, r2) else { return };
+
+        for (idx, angle) in [(4, a2_s), (5, a1_s)] {
+            let handle = verts.val(idx as i64).curr();
+            let p1 = c1 + Vec2::new(r1 * angle.cos(), r1 * angle.sin());
+            let p2 = c2 + Vec2::new(r2 * angle.cos(), r2 * angle.sin());
+            let sag = poly_sag_from_vertex(p1, p2, handle);
+            if sag.abs() < 1e-6 { continue; }
+
+            if let Some((_, _, _, radius)) = solve_side(c1, c2, r1, r2, handle, p1, p2) {
+                let chord = p2 - p1;
+                let l = chord.hypot();
+                if l < 1e-9 { continue; }
+                let n = Vec2::new(-chord.y / l, chord.x / l);
+                // Text baseline is at the top of the text; add font height when text is below
+                let dir = n * sag.signum();
+                let goes_down = dir.y > 0.0; // positive y = downward in screen coords
+                let extra = if goes_down { 14.0 / scale } else { 0.0 };
+                let text_pos = handle + dir * (offset + extra);
+                let text2 = CanvasText::new(
+                    format!("R{:.0}", radius),
+                    TextPos::PosCustom(text_pos),
+                    text_cfg.clone(),
+                );
+                self.draw_text(&text2);
+            }
+        }
+    }
+
     pub fn draw_dimensions(&mut self, e: &GeneralShape) {
         match e.get_shape_type() {
             ShapeType::Disc => {
@@ -1134,6 +1250,12 @@ impl Canvas {
                         );
                     }
                 }
+                // Sag arc radii (Square)
+                let nc = e.get_n_corners();
+                if e.get_shape_type() == ShapeType::Square && e.get_vertices().len() > nc {
+                    let text_cfg = CanvasTextConfig::new(get_text_colors().stroke_color, 0., TextAlign::Center, 14, 0.8);
+                    self.draw_sag_arc_radii(e, nc, &text_cfg);
+                }
             }
             ShapeType::Oblong => {
                 let v: Vec<Vec2> = e.get_vertices().iter().map(|(_, v)| v.curr()).collect();
@@ -1166,6 +1288,9 @@ impl Canvas {
                     let (path, pattern, colors, text, _) = dim_disc(v[1], r1, a1, cinfo);
                     self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
                 }
+                // Sag arc radii
+                let text_cfg = CanvasTextConfig::new(get_text_colors().stroke_color, 0., TextAlign::Center, 14, 0.8);
+                self.draw_sag_arc_radii_oblong(e, &text_cfg);
             }
             ShapeType::Poly => {
                 let verts = e.get_vertices();
@@ -1224,6 +1349,12 @@ impl Canvas {
                         );
                         first_arc = false;
                     }
+                }
+                // Sag arc radii
+                let nc = e.get_n_corners();
+                if e.get_vertices().len() > nc {
+                    let text_cfg = CanvasTextConfig::new(get_text_colors().stroke_color, 0., TextAlign::Center, 14, 0.8);
+                    self.draw_sag_arc_radii(e, nc, &text_cfg);
                 }
             }
             ShapeType::Arrow => (),

@@ -1257,17 +1257,23 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         canvas.dataset.shapes.insert(new_eid, elem);
     }
 
+    // Collect all group ids up front — at this point every shape (including
+    // nested groups) is still in `canvas.dataset.shapes`, so we capture them all.
     let group_ids: Vec<EUId> = canvas
         .dataset
         .shapes
         .iter()
         .filter_map(|(eid, shape)| shape.is_group().then_some(*eid))
         .collect();
+    // For nested groups, a parent may have already moved its child group into
+    // `grouped_shapes` before we get to process the child here. Look in BOTH
+    // maps when resolving a group's children list.
     for group_id in group_ids {
         let Some(children) = canvas
             .dataset
             .shapes
             .get(&group_id)
+            .or_else(|| canvas.dataset.grouped_shapes.get(&group_id))
             .and_then(|shape| shape.get_group_children())
         else {
             continue;

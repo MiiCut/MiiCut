@@ -400,36 +400,6 @@ impl SegBundle {
     }
 }
 
-#[derive(Copy, Debug, Clone)]
-pub struct Minimum {
-    min_bundle: Option<(f64, i64, Vec2)>,
-}
-impl Default for Minimum {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Minimum {
-    pub fn new() -> Self {
-        Self { min_bundle: None }
-    }
-    pub fn update(&mut self, value: f64, index: i64, pos: Vec2) {
-        if let Some((min, idx_min, pos_min)) = self.min_bundle.as_mut() {
-            if value < *min {
-                *min = value;
-                *idx_min = index;
-                *pos_min = pos;
-            }
-        } else {
-            self.min_bundle = Some((value, index, pos));
-        }
-    }
-    pub fn get_min(&self) -> Option<(f64, i64, Vec2)> {
-        self.min_bundle
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct VecRing<K> {
     vec: Vec<(K, Vertex)>,
@@ -517,7 +487,8 @@ impl<K: PartialEq + Clone + Debug> VecRing<K> {
     pub fn get_idx(&self, key: &K) -> Option<i64> {
         self.vec
             .iter()
-            .position(|(k, _)| k == key).map(|i| i as i64)
+            .position(|(k, _)| k == key)
+            .map(|i| i as i64)
     }
     pub fn key(&self, idx: i64) -> &K {
         let len = self.vec.len() as i64;
@@ -612,7 +583,6 @@ impl Default for VUId {
         Self::new()
     }
 }
-
 impl VUId {
     pub fn new() -> Self {
         let id = COUNTER_VALUE.fetch_add(1, Ordering::SeqCst);
@@ -635,7 +605,6 @@ impl Default for EUId {
         Self::new()
     }
 }
-
 impl EUId {
     pub fn new() -> Self {
         let id = COUNTER_NODE.fetch_add(1, Ordering::SeqCst);

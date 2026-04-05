@@ -264,7 +264,10 @@ pub struct GroupShape {
 }
 impl GroupShape {
     pub fn new(children: Vec<EUId>) -> Self {
-        Self { children, cached_polygon: None }
+        Self {
+            children,
+            cached_polygon: None,
+        }
     }
     pub fn children(&self) -> &[EUId] {
         &self.children
@@ -1606,7 +1609,9 @@ impl GeneralShape {
                     let edge_end = self.vertices.val(((edge_idx + 1) % nc) as i64).curr();
                     self.vertices.val_mut(i).set_curr(user_ui.draw_pos);
                     let mut sag = poly_sag_from_vertex(edge_start, edge_end, user_ui.draw_pos);
-                    if sag.abs() < 5.0 { sag = 0.0; }
+                    if sag.abs() < 5.0 {
+                        sag = 0.0;
+                    }
                     let new_pos = poly_sag_handle(edge_start, edge_end, sag);
                     self.vertices.val_mut(i).set_curr(new_pos);
                     self.set_bezpath();
@@ -1707,7 +1712,9 @@ impl GeneralShape {
                     let edge_start = self.vertices.val(edge_idx as i64).curr();
                     let edge_end = self.vertices.val(((edge_idx + 1) % nc) as i64).curr();
                     let mut sag = poly_sag_from_vertex(edge_start, edge_end, user_ui.draw_pos);
-                    if sag.abs() < 5.0 { sag = 0.0; }
+                    if sag.abs() < 5.0 {
+                        sag = 0.0;
+                    }
                     let new_pos = poly_sag_handle(edge_start, edge_end, sag);
                     self.vertices.val_mut(idx as i64).set_curr(new_pos);
                 } else {
@@ -2235,13 +2242,16 @@ impl GeneralShape {
     /// Recompute sag vertex positions preserving their sag values after corners move.
     fn recompute_sag_vertices(&mut self, nc: usize) {
         use crate::helpers::math::{poly_sag_from_vertex, poly_sag_handle};
-        if self.vertices.len() <= nc { return; }
+        if self.vertices.len() <= nc {
+            return;
+        }
         for i in 0..nc {
             let j = (i + 1) % nc;
             let sag_idx = (nc + i) as i64;
             let old_start = self.vertices.val(i as i64).saved();
             let old_end = self.vertices.val(j as i64).saved();
-            let old_sag = poly_sag_from_vertex(old_start, old_end, self.vertices.val(sag_idx).saved());
+            let old_sag =
+                poly_sag_from_vertex(old_start, old_end, self.vertices.val(sag_idx).saved());
             let new_start = self.vertices.val(i as i64).curr();
             let new_end = self.vertices.val(j as i64).curr();
             let new_pos = poly_sag_handle(new_start, new_end, old_sag);
@@ -2253,11 +2263,19 @@ impl GeneralShape {
     pub fn get_n_corners(&self) -> usize {
         match self.shape_type {
             ShapeType::Square => {
-                if self.vertices.len() == 8 { 4 } else { self.vertices.len() }
+                if self.vertices.len() == 8 {
+                    4
+                } else {
+                    self.vertices.len()
+                }
             }
             ShapeType::Poly => {
                 let n = self.vertices.len();
-                if n >= 6 && n % 2 == 0 { n / 2 } else { n }
+                if n >= 6 && n % 2 == 0 {
+                    n / 2
+                } else {
+                    n
+                }
             }
             _ => self.vertices.len(),
         }
@@ -2421,7 +2439,8 @@ impl GeneralShape {
                     let sag_verts: Vec<Option<Vec2>> = (0..nc)
                         .map(|i| Some(self.vertices.val((nc + i) as i64).curr()))
                         .collect();
-                    self.bezpath = build_polygon_path_with_sag(&apices, &sag_verts, Self::TOLERANCE);
+                    self.bezpath =
+                        build_polygon_path_with_sag(&apices, &sag_verts, Self::TOLERANCE);
                 } else {
                     self.bezpath = bezpath_from_apices(&apices);
                 }
@@ -2434,7 +2453,8 @@ impl GeneralShape {
                     let sag_verts: Vec<Option<Vec2>> = (0..nc)
                         .map(|i| Some(self.vertices.val((nc + i) as i64).curr()))
                         .collect();
-                    self.bezpath = build_polygon_path_with_sag(&apices, &sag_verts, Self::TOLERANCE);
+                    self.bezpath =
+                        build_polygon_path_with_sag(&apices, &sag_verts, Self::TOLERANCE);
                 } else {
                     self.bezpath = bezpath_from_apices(&apices);
                 }
@@ -2548,13 +2568,19 @@ impl GeneralShape {
             for i in 1..=self.ghosts {
                 let angle = 2.0 * PI * (i as f64) / (total as f64);
                 let polys: Vec<geo::Polygon<f64>> = if self.ghosts_self_rot {
-                    base.0.iter().map(|p| rotate_geo_polygon(p, center, angle)).collect()
+                    base.0
+                        .iter()
+                        .map(|p| rotate_geo_polygon(p, center, angle))
+                        .collect()
                 } else {
                     let bbox = self.bezpath.bounding_box();
-                    let sc = Vec2::new((bbox.x0+bbox.x1)*0.5, (bbox.y0+bbox.y1)*0.5);
+                    let sc = Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
                     let rp = rotate_vector(sc - center, angle) + center;
                     let delta = rp - sc;
-                    base.0.iter().map(|p| translate_geo_polygon(p, delta.x, delta.y)).collect()
+                    base.0
+                        .iter()
+                        .map(|p| translate_geo_polygon(p, delta.x, delta.y))
+                        .collect()
                 };
                 ghosts.push(MultiPolygon::new(polys));
             }
@@ -2562,7 +2588,9 @@ impl GeneralShape {
             for i in 1..=self.ghosts {
                 let dx = self.ghosts_trans_x * (i as f64);
                 let dy = self.ghosts_trans_y * (i as f64);
-                let polys: Vec<geo::Polygon<f64>> = base.0.iter()
+                let polys: Vec<geo::Polygon<f64>> = base
+                    .0
+                    .iter()
                     .map(|p| translate_geo_polygon(p, dx, dy))
                     .collect();
                 ghosts.push(MultiPolygon::new(polys));
@@ -2741,20 +2769,37 @@ struct ParsedSvgShape {
 fn translate_geo_polygon(poly: &geo::Polygon<f64>, dx: f64, dy: f64) -> geo::Polygon<f64> {
     use geo::{Coord, LineString, Polygon};
     let translate_ls = |ls: &LineString<f64>| -> LineString<f64> {
-        LineString(ls.0.iter().map(|c| Coord { x: c.x + dx, y: c.y + dy }).collect())
+        LineString(
+            ls.0.iter()
+                .map(|c| Coord {
+                    x: c.x + dx,
+                    y: c.y + dy,
+                })
+                .collect(),
+        )
     };
-    Polygon::new(translate_ls(poly.exterior()), poly.interiors().iter().map(translate_ls).collect())
+    Polygon::new(
+        translate_ls(poly.exterior()),
+        poly.interiors().iter().map(translate_ls).collect(),
+    )
 }
 
 fn rotate_geo_polygon(poly: &geo::Polygon<f64>, center: Vec2, angle: f64) -> geo::Polygon<f64> {
     use geo::{Coord, LineString, Polygon};
     let rotate_ls = |ls: &LineString<f64>| -> LineString<f64> {
-        LineString(ls.0.iter().map(|c| {
-            let v = rotate_vector(Vec2::new(c.x, c.y) - center, angle) + center;
-            Coord { x: v.x, y: v.y }
-        }).collect())
+        LineString(
+            ls.0.iter()
+                .map(|c| {
+                    let v = rotate_vector(Vec2::new(c.x, c.y) - center, angle) + center;
+                    Coord { x: v.x, y: v.y }
+                })
+                .collect(),
+        )
     };
-    Polygon::new(rotate_ls(poly.exterior()), poly.interiors().iter().map(rotate_ls).collect())
+    Polygon::new(
+        rotate_ls(poly.exterior()),
+        poly.interiors().iter().map(rotate_ls).collect(),
+    )
 }
 
 /// Compute the straight-tangent geometry of a 4-vertex oblong (sag=0 case).
@@ -2819,7 +2864,7 @@ fn sag_from_vertex(
 /// Find all arc centers O and radii R such that the arc passes through point V
 /// and is externally (or internally) tangent to both circles (c1,r1) and (c2,r2).
 /// Returns all valid (O, R) solutions with R > 0.
-fn arc_through_point_tangent(
+pub(crate) fn arc_through_point_tangent(
     c1: Vec2,
     c2: Vec2,
     r1: f64,
@@ -2880,7 +2925,11 @@ fn sweep_through_point(o: Vec2, p_start: Vec2, p_end: Vec2, v: Vec2) -> f64 {
         dv += 2.0 * PI;
     }
     // dv is now in [0, 2π). If dv < sweep_ccw, V is in the CCW arc.
-    if dv <= sweep_ccw { sweep_ccw } else { sweep_cw }
+    if dv <= sweep_ccw {
+        sweep_ccw
+    } else {
+        sweep_cw
+    }
 }
 
 /// Build a polygon BezPath with optional arc sides (sag vertices) and filleted corners.
@@ -2896,13 +2945,22 @@ pub(crate) fn build_polygon_path_with_sag(
     assert_eq!(sag_positions.len(), n);
 
     let entry_of = |apex: &ApexType| -> Vec2 {
-        match *apex { ApexType::TypeVertex { a } => a, ApexType::Arc { s, .. } => s }
+        match *apex {
+            ApexType::TypeVertex { a } => a,
+            ApexType::Arc { s, .. } => s,
+        }
     };
     let exit_of = |apex: &ApexType| -> Vec2 {
-        match *apex { ApexType::TypeVertex { a } => a, ApexType::Arc { e, .. } => e }
+        match *apex {
+            ApexType::TypeVertex { a } => a,
+            ApexType::Arc { e, .. } => e,
+        }
     };
     let corner_pos = |apex: &ApexType| -> Vec2 {
-        match *apex { ApexType::TypeVertex { a } => a, ApexType::Arc { s, c, e } => (s + e) * 0.5 }
+        match *apex {
+            ApexType::TypeVertex { a } => a,
+            ApexType::Arc { s, c: _c, e } => (s + e) * 0.5,
+        }
     };
 
     // Determine polygon winding direction (CW or CCW) via shoelace formula
@@ -2927,14 +2985,24 @@ pub(crate) fn build_polygon_path_with_sag(
         let edge_start = exit_of(&apices[i]);
         let edge_end = entry_of(&apices[j]);
         let sag = poly_sag_from_vertex(edge_start, edge_end, v);
-        if sag.abs() < 1e-6 { continue; }
+        if sag.abs() < 1e-6 {
+            continue;
+        }
 
-        let fillet_i = match apices[i] { ApexType::Arc { c, .. } => Some((c, (exit_of(&apices[i]) - c).hypot())), _ => None };
-        let fillet_j = match apices[j] { ApexType::Arc { c, .. } => Some((c, (entry_of(&apices[j]) - c).hypot())), _ => None };
+        let fillet_i = match apices[i] {
+            ApexType::Arc { c, .. } => Some((c, (exit_of(&apices[i]) - c).hypot())),
+            _ => None,
+        };
+        let fillet_j = match apices[j] {
+            ApexType::Arc { c, .. } => Some((c, (entry_of(&apices[j]) - c).hypot())),
+            _ => None,
+        };
 
         match (fillet_i, fillet_j) {
             (Some((c1, r1)), Some((c2, r2))) => {
-                if let Some((ac1, ac2, o, big_r)) = solve_side(c1, c2, r1, r2, v, edge_start, edge_end) {
+                if let Some((ac1, ac2, o, big_r)) =
+                    solve_side(c1, c2, r1, r2, v, edge_start, edge_end)
+                {
                     // solve_side already handles internal/external in ac1/ac2
                     adj_exit[i] = c1 + Vec2::new(r1 * ac1.cos(), r1 * ac1.sin());
                     adj_entry[j] = c2 + Vec2::new(r2 * ac2.cos(), r2 * ac2.sin());
@@ -2942,14 +3010,74 @@ pub(crate) fn build_polygon_path_with_sag(
                 }
             }
             (Some((c1, r1)), None) => {
-                if let Some((ac1, _, o, big_r)) = solve_side(c1, edge_end, r1, 0.0, v, edge_start, edge_end) {
-                    adj_exit[i] = c1 + Vec2::new(r1 * ac1.cos(), r1 * ac1.sin());
+                // arc-arc-point: fillet i + sharp corner j.
+                // Detect external (convex) vs internal (concave) by comparing v with
+                // the fillet center c1: c1 is inside the polygon, so
+                //   v opposite side from c1 w.r.t. chord → external (convex) → largest R
+                //   v same side as c1 → internal (concave) → smallest R
+                let chord = edge_end - edge_start;
+                let chord_n = Vec2::new(-chord.y, chord.x);
+                let chord_mid = (edge_start + edge_end) * 0.5;
+                let v_side = (v.x - chord_mid.x) * chord_n.x + (v.y - chord_mid.y) * chord_n.y;
+                let c_side = (c1.x - chord_mid.x) * chord_n.x + (c1.y - chord_mid.y) * chord_n.y;
+                let external = v_side * c_side < 0.0;
+                let mut best: Option<(Vec2, f64, Vec2)> = None;
+                for &try_internal in &[false, true] {
+                    for (o, big_r) in
+                        arc_through_point_tangent(c1, edge_end, r1, 0.0, v, try_internal)
+                    {
+                        let ac1 = if try_internal {
+                            (c1 - o).y.atan2((c1 - o).x)
+                        } else {
+                            (o - c1).y.atan2((o - c1).x)
+                        };
+                        let tp = c1 + Vec2::new(r1 * ac1.cos(), r1 * ac1.sin());
+                        let dominated = if external {
+                            best.as_ref().map_or(false, |b| big_r <= b.1)
+                        } else {
+                            best.as_ref().map_or(false, |b| big_r >= b.1)
+                        };
+                        if !dominated {
+                            best = Some((tp, big_r, o));
+                        }
+                    }
+                }
+                if let Some((tp, big_r, o)) = best {
+                    adj_exit[i] = tp;
                     edge_arcs[i] = Some((o, big_r, v));
                 }
             }
             (None, Some((c2, r2))) => {
-                if let Some((_, ac2, o, big_r)) = solve_side(edge_start, c2, 0.0, r2, v, edge_start, edge_end) {
-                    adj_entry[j] = c2 + Vec2::new(r2 * ac2.cos(), r2 * ac2.sin());
+                // point-arc-arc: sharp corner i + fillet j.
+                let chord = edge_end - edge_start;
+                let chord_n = Vec2::new(-chord.y, chord.x);
+                let chord_mid = (edge_start + edge_end) * 0.5;
+                let v_side = (v.x - chord_mid.x) * chord_n.x + (v.y - chord_mid.y) * chord_n.y;
+                let c_side = (c2.x - chord_mid.x) * chord_n.x + (c2.y - chord_mid.y) * chord_n.y;
+                let external = v_side * c_side < 0.0;
+                let mut best: Option<(Vec2, f64, Vec2)> = None;
+                for &try_internal in &[false, true] {
+                    for (o, big_r) in
+                        arc_through_point_tangent(edge_start, c2, 0.0, r2, v, try_internal)
+                    {
+                        let ac2 = if try_internal {
+                            (c2 - o).y.atan2((c2 - o).x)
+                        } else {
+                            (o - c2).y.atan2((o - c2).x)
+                        };
+                        let tp = c2 + Vec2::new(r2 * ac2.cos(), r2 * ac2.sin());
+                        let dominated = if external {
+                            best.as_ref().map_or(false, |b| big_r <= b.1)
+                        } else {
+                            best.as_ref().map_or(false, |b| big_r >= b.1)
+                        };
+                        if !dominated {
+                            best = Some((tp, big_r, o));
+                        }
+                    }
+                }
+                if let Some((tp, big_r, o)) = best {
+                    adj_entry[j] = tp;
                     edge_arcs[i] = Some((o, big_r, v));
                 }
             }
@@ -2991,10 +3119,14 @@ pub(crate) fn build_polygon_path_with_sag(
             let mut sweep = a_end - a_start;
             if winding_ccw {
                 // CCW polygon → fillet sweep must be positive (CCW)
-                if sweep < 0.0 { sweep += 2.0 * PI; }
+                if sweep < 0.0 {
+                    sweep += 2.0 * PI;
+                }
             } else {
                 // CW polygon → fillet sweep must be negative (CW)
-                if sweep > 0.0 { sweep -= 2.0 * PI; }
+                if sweep > 0.0 {
+                    sweep -= 2.0 * PI;
+                }
             }
             let arc = Arc::new(c.to_point(), Vec2::new(r, r), a_start, sweep, 0.0);
             arc.to_cubic_beziers(0.01, |p1, p2, p3| {
@@ -3011,12 +3143,19 @@ pub(crate) fn build_polygon_path_with_sag(
 /// chord_start/chord_end: the straight-line tangent points (for reference).
 /// Returns (angle_on_c1, angle_on_c2, arc_center, arc_radius) or None.
 pub(crate) fn solve_side(
-    c1: Vec2, c2: Vec2, r1: f64, r2: f64, v: Vec2,
-    chord_start: Vec2, chord_end: Vec2,
+    c1: Vec2,
+    c2: Vec2,
+    r1: f64,
+    r2: f64,
+    v: Vec2,
+    chord_start: Vec2,
+    chord_end: Vec2,
 ) -> Option<(f64, f64, Vec2, f64)> {
     let chord = chord_end - chord_start;
     let chord_len = chord.hypot();
-    if chord_len < 1e-9 { return None; }
+    if chord_len < 1e-9 {
+        return None;
+    }
     let chord_n = Vec2::new(-chord.y / chord_len, chord.x / chord_len);
     let chord_mid = (chord_start + chord_end) * 0.5;
     let v_side = (v - chord_mid).x * chord_n.x + (v - chord_mid).y * chord_n.y;
@@ -3036,7 +3175,9 @@ pub(crate) fn solve_side(
                 ((o - c1).y.atan2((o - c1).x), (o - c2).y.atan2((o - c2).x))
             };
             let o_toward_chord = (o - v).x * to_chord.x + (o - v).y * to_chord.y;
-            if o_toward_chord <= 0.0 { continue; }
+            if o_toward_chord <= 0.0 {
+                continue;
+            }
             let dominated = if v_away {
                 best.as_ref().map_or(false, |b| big_r <= b.3)
             } else {
