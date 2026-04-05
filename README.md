@@ -130,11 +130,11 @@ The machine IP is configured at the top of `deploy_to_grblhal.py` (`FTP_HOST`).
 
 ## 🗺️ Roadmap
 
-- [ ] Additional parametric shapes
+- [x] Additional parametric shapes
 - [ ] Improved post-processors
 - [ ] Advanced toolpath strategies
 - [ ] Machine feedback and job monitoring
-- [ ] Project save / load
+- [x] Project save / load
 - [ ] Play / machine control view (jog interface, position display)
 
 ---
