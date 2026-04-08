@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "meta": {
+    "title": "MiiCut",
+    "timestamp": "20260406-204303",
+    "canvas": {
+      "size": [3000.000000, 1500.000000],
+      "scale": 1.000000,
+      "offset": [0.000000, 0.000000]
+    }
+  },
+  "shapes": [
+    {
+      "id": 91,
+      "type": "oblong",
+      "operation": "union",
+      "order": 1,
+      "rotation": 0.000000,
+      "dim_offsets": [0.000000, 6.283185, 6.283185, -20.000000, 0.000000, 0.000000],
+      "vertices": [
+        {"x": 0.000000, "y": 0.000000, "rounded": null},
+        {"x": 0.000000, "y": 75.000000, "rounded": null},
+        {"x": -40.000000, "y": 0.000000, "rounded": null},
+        {"x": -15.000000, "y": 75.000000, "rounded": null},
+        {"x": 13.194072, "y": 42.164809, "rounded": null},
+        {"x": -33.210280, "y": 49.241607, "rounded": null}
+      ]
+    },
+    {
+      "id": 96,
+      "type": "oblong",
+      "operation": "union",
+      "order": 0,
+      "rotation": 0.000000,
+      "dim_offsets": [0.000000, 6.283185, 3.141593, -20.000000, 0.000000, 0.000000],
+      "vertices": [
+        {"x": 0.000000, "y": 0.000000, "rounded": null},
+        {"x": 55.000000, "y": -56.000000, "rounded": null},
+        {"x": -40.000000, "y": 0.000000, "rounded": null},
+        {"x": 75.000000, "y": -56.000000, "rounded": null},
+        {"x": 17.487928, "y": -44.825935, "rounded": null},
+        {"x": 45.476429, "y": -17.737306, "rounded": null}
+      ]
+    },
+    {
+      "id": 95,
+      "type": "oblong",
+      "operation": "difference",
+      "order": 3,
+      "rotation": 0.000000,
+      "dim_offsets": [-0.123715, 6.283185, 3.141593, -20.000000, 0.000000, 0.000000],
+      "vertices": [
+        {"x": -23.000000, "y": 0.000000, "rounded": null},
+        {"x": 23.000000, "y": 0.000000, "rounded": null},
+        {"x": -36.000000, "y": 0.000000, "rounded": null},
+        {"x": 36.000000, "y": 0.000000, "rounded": null},
+        {"x": 0.000000, "y": -4.985303, "rounded": null},
+        {"x": 0.000000, "y": 5.114697, "rounded": null}
+      ]
+    },
+    {
+      "id": 92,
+      "type": "disc",
+      "operation": "difference",
+      "order": 2,
+      "rotation": 0.000000,
+      "dim_offsets": [3.141593, 20.000000, -20.000000, -20.000000, 0.000000, 0.000000],
+      "vertices": [
+        {"x": 0.000000, "y": 75.000000, "rounded": null},
+        {"x": 7.000000, "y": 75.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 97,
+      "type": "disc",
+      "operation": "difference",
+      "order": 4,
+      "rotation": 0.000000,
+      "dim_offsets": [3.141593, 20.000000, -20.000000, -20.000000, 0.000000, 0.000000],
+      "vertices": [
+        {"x": 55.000000, "y": -56.000000, "rounded": null},
+        {"x": 64.000000, "y": -56.000000, "rounded": null}
+      ]
+    }
+  ],
+  "notes": [
+  ]
+}

@@ -521,6 +521,9 @@ impl<K: PartialEq + Clone + Debug> VecRing<K> {
     pub fn push(&mut self, e: (K, Vertex)) {
         self.vec.push(e);
     }
+    pub fn insert_at(&mut self, idx: usize, e: (K, Vertex)) {
+        self.vec.insert(idx, e);
+    }
     pub fn replace_first(&mut self, e: (K, Vertex)) {
         self.vec[0] = e;
     }
@@ -545,6 +548,7 @@ impl<K: PartialEq + Clone + Debug> VecRing<K> {
     }
 
     /// Like get_apices() but only considers the first `n` vertices as corners.
+    /// Uses `fillet_at_apex` to compute the arc center on the bisector.
     pub fn get_apices_n(&self, n: usize) -> Vec<ApexType> {
         assert!(n >= 3);
         let mut out = Vec::with_capacity(n);
@@ -563,6 +567,72 @@ impl<K: PartialEq + Clone + Debug> VecRing<K> {
                 .unwrap_or(ApexType::TypeVertex { a: b.curr() });
 
             out.push(apex);
+        }
+        out
+    }
+
+    /// Polygon-specific apex computation: when an apex has a radius, the apex
+    /// position IS the arc center. Tangent points are computed as the common
+    /// external tangent between adjacent circles, so that straight edges are
+    /// tangent to both arcs at the connection points.
+    pub fn get_apices_poly(&self, n: usize) -> Vec<ApexType> {
+        use crate::helpers::math::poly_common_tangent;
+        assert!(n >= 3);
+
+        // Collect centers and radii
+        let centers: Vec<Vec2> = (0..n).map(|i| self.vec[i].1.curr()).collect();
+        let radii: Vec<f64> = (0..n)
+            .map(|i| self.vec[i].1.get_radius().unwrap_or(0) as f64)
+            .collect();
+
+        // Polygon winding (shoelace on centers)
+        let mut area2 = 0.0;
+        for i in 0..n {
+            let j = (i + 1) % n;
+            area2 += centers[i].x * centers[j].y - centers[j].x * centers[i].y;
+        }
+        let ccw = area2 > 0.0;
+
+        // Determine convex/concave per vertex via cross product of adjacent edges.
+        // Convex: cross product sign matches polygon winding. Concave: opposite.
+        let mut convex = vec![true; n];
+        for i in 0..n {
+            let prev = if i == 0 { n - 1 } else { i - 1 };
+            let next = (i + 1) % n;
+            let d1 = centers[i] - centers[prev];
+            let d2 = centers[next] - centers[i];
+            let cross = d1.x * d2.y - d1.y * d2.x;
+            // CCW polygon: convex vertex has cross > 0; CW: cross < 0
+            convex[i] = if ccw { cross >= 0.0 } else { cross <= 0.0 };
+        }
+
+        // For each edge (i → j), compute common tangent points.
+        // For concave vertices, negate the radius to get the internal tangent
+        // on that circle (tangent line passes on the other side).
+        let mut exits = vec![Vec2::ZERO; n];
+        let mut entries = vec![Vec2::ZERO; n];
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let ri = if convex[i] { radii[i] } else { -radii[i] };
+            let rj = if convex[j] { radii[j] } else { -radii[j] };
+            let (exit_i, entry_j) =
+                poly_common_tangent(centers[i], ri, centers[j], rj, ccw);
+            exits[i] = exit_i;
+            entries[j] = entry_j;
+        }
+
+        // Build apices
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            if radii[i] > EPSILON {
+                out.push(ApexType::Arc {
+                    s: entries[i],
+                    c: centers[i],
+                    e: exits[i],
+                });
+            } else {
+                out.push(ApexType::TypeVertex { a: centers[i] });
+            }
         }
         out
     }

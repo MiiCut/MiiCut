@@ -181,7 +181,13 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
             let json = build_json_from_dataset(&canvas.dataset, &canvas.notes, &meta);
             let Some(json) = json else { return };
             let document = avb.document.clone();
-            let filename = avb.save_filename.clone().unwrap_or_else(|| "cutdraw.json".to_string());
+            let mut filename = avb
+                .save_filename
+                .clone()
+                .unwrap_or_else(|| "cutdraw.json".to_string());
+            if !filename.to_lowercase().ends_with(".json") {
+                filename.push_str(".json");
+            }
             avb.save_filename = Some(filename.clone());
             drop(avb);
             trigger_download(&document, &filename, &json, "application/json");
@@ -1114,7 +1120,18 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
                 };
                 GeneralShape::new_shape_text(min, max, shape.order)
             }
-            ShapeType::Poly => GeneralShape::new_shape_poly(positions.clone(), shape.order),
+            ShapeType::Poly => {
+                // `positions` holds all saved vertices. New format stores
+                // 2N vertices (N corners + N sag vertices); legacy format
+                // stores only the N corners. `new_shape_poly` expects just
+                // the corners and adds its own sag vertices, so extract
+                // them here. The outer `max_vertices` loop below then
+                // overwrites all 2N slots with the saved positions/radii.
+                let n = positions.len();
+                let corners_count = if n >= 6 && n % 2 == 0 { n / 2 } else { n };
+                let corners: Vec<Vec2> = positions.iter().take(corners_count).copied().collect();
+                GeneralShape::new_shape_poly(corners, shape.order)
+            }
             ShapeType::ConstrLine => {
                 let Some(v0) = positions.first() else {
                     continue;
@@ -1227,7 +1244,6 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             vertex.set_radius_value(loaded_vertex.rounded);
         }
         elem.update_properties();
-        elem.set_bezpath();
 
         match shape.operation {
             Operation::Union => elem.op_union(),
@@ -1238,9 +1254,6 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             elem.set_text(text);
         }
         elem.set_order(shape.order);
-        if shape.rotation.abs() > f64::EPSILON {
-            elem.set_rotation(shape.rotation);
-        }
         if let Some(offsets) = shape.dim_offsets {
             for (i, v) in offsets.iter().enumerate() {
                 elem.set_dim_offset(i, *v);
@@ -1253,6 +1266,13 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             elem.set_ghosts_rot(shape.ghosts_rot);
             elem.set_ghosts_self_rot(shape.ghosts_self_rot);
             elem.set_ghosts_rot_center(shape.ghosts_rot_center);
+        }
+        // Build the bezpath/polygon *after* ghosts and rotation are set so
+        // they are included in the cached polygon (setters don't rebuild).
+        if shape.rotation.abs() > f64::EPSILON {
+            elem.set_rotation(shape.rotation);
+        } else {
+            elem.set_bezpath();
         }
         canvas.dataset.shapes.insert(new_eid, elem);
     }

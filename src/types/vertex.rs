@@ -44,7 +44,7 @@ impl Vertex {
         if self.has_radius {
             if self.radius.is_none() {
                 if self.last_radius.is_none() {
-                    self.radius = Some(Scalar::new(10, 5, u32::MAX, 10));
+                    self.radius = Some(Scalar::new(10, 1, u32::MAX, 10));
                 } else {
                     self.radius = self.last_radius.clone();
                 }

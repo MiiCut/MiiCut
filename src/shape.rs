@@ -1706,11 +1706,18 @@ impl GeneralShape {
                     None => return false,
                 };
                 if idx >= nc && self.vertices.len() > nc {
-                    // Sag vertex drag
+                    // Sag vertex drag — use effective edge endpoints (tangent points)
                     use crate::helpers::math::{poly_sag_from_vertex, poly_sag_handle};
                     let edge_idx = idx - nc;
-                    let edge_start = self.vertices.val(edge_idx as i64).curr();
-                    let edge_end = self.vertices.val(((edge_idx + 1) % nc) as i64).curr();
+                    let j = (edge_idx + 1) % nc;
+                    let ci = self.vertices.val(edge_idx as i64).curr();
+                    let cj = self.vertices.val(j as i64).curr();
+                    let ri = self.vertices.val(edge_idx as i64).get_radius();
+                    let rj = self.vertices.val(j as i64).get_radius();
+                    let ccw = poly_winding_ccw(&self.vertices, nc);
+                    let ci_conv = poly_is_convex(&self.vertices, nc, edge_idx, ccw);
+                    let cj_conv = poly_is_convex(&self.vertices, nc, j, ccw);
+                    let (edge_start, edge_end) = poly_effective_edge(ci, cj, ri, rj, ccw, ci_conv, cj_conv);
                     let mut sag = poly_sag_from_vertex(edge_start, edge_end, user_ui.draw_pos);
                     if sag.abs() < 5.0 {
                         sag = 0.0;
@@ -1773,11 +1780,40 @@ impl GeneralShape {
         }
         let new_pos = self.vertices.val(0).curr();
         let incr_delta = new_pos - prev_pos;
+        let dx = incr_delta.x;
+        let dy = incr_delta.y;
         self.ghosts_rot_center = self.ghosts_rot_center_saved + delta;
         self.update_properties();
         // Translate bezpath + polygon directly (skip expensive rebuild)
-        self.bezpath = translate_bezpath(&self.bezpath, incr_delta.x, incr_delta.y);
-        self.polygon = self.polygon.translate(incr_delta.x, incr_delta.y);
+        self.bezpath = translate_bezpath(&self.bezpath, dx, dy);
+        self.polygon = self.polygon.translate(dx, dy);
+        // Translate cached render paths so Text/SVG/Voronoi don't stay behind.
+        // Without this, the bbox moves but the actual glyph/svg paths keep
+        // rendering at the old position.
+        if let Some(text_data) = self.text_shape_data.as_mut() {
+            if let Some(paths) = text_data.cached_paths.as_ref() {
+                text_data.cached_paths = Some(translate_bezpaths(paths, dx, dy));
+            }
+            if let Some(poly) = text_data.polygon.as_ref() {
+                text_data.polygon = Some(poly.translate(dx, dy));
+            }
+        }
+        for svg_data in [self.svg_shape_data.as_mut(), self.voronoi_shape_data.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(paths) = svg_data.cached_paths.as_ref() {
+                svg_data.cached_paths = Some(translate_bezpaths(paths, dx, dy));
+            }
+            if let Some(paths) = svg_data.cached_paths_raw.as_ref() {
+                svg_data.cached_paths_raw = Some(translate_bezpaths(paths, dx, dy));
+            }
+            if let Some(poly) = svg_data.cached_polygon.as_ref() {
+                svg_data.cached_polygon = Some(poly.translate(dx, dy));
+            }
+            svg_data.cached_bbox_min = svg_data.cached_bbox_min + incr_delta;
+            svg_data.cached_bbox_max = svg_data.cached_bbox_max + incr_delta;
+        }
     }
 
     pub fn update_from_property(&mut self, prop: &Property) -> Option<()> {
@@ -2240,22 +2276,86 @@ impl GeneralShape {
     }
 
     /// Recompute sag vertex positions preserving their sag values after corners move.
+    /// For Poly shapes, uses the effective edge endpoints (tangent points when the
+    /// apex has a radius) so that straight edges (sag=0) are tangent to the arcs.
     fn recompute_sag_vertices(&mut self, nc: usize) {
         use crate::helpers::math::{poly_sag_from_vertex, poly_sag_handle};
         if self.vertices.len() <= nc {
             return;
         }
+        let is_poly = matches!(self.shape_type, ShapeType::Poly);
+        let ccw = if is_poly { poly_winding_ccw(&self.vertices, nc) } else { false };
+        // old_ccw from saved positions
+        // (We approximate with current ccw — winding rarely flips during drag)
+        let old_ccw = ccw;
         for i in 0..nc {
             let j = (i + 1) % nc;
             let sag_idx = (nc + i) as i64;
-            let old_start = self.vertices.val(i as i64).saved();
-            let old_end = self.vertices.val(j as i64).saved();
+            let (old_start, old_end) = if is_poly {
+                let ri = self.vertices.val(i as i64).get_radius();
+                let rj = self.vertices.val(j as i64).get_radius();
+                let ci_conv = poly_is_convex(&self.vertices, nc, i, old_ccw);
+                let cj_conv = poly_is_convex(&self.vertices, nc, j, old_ccw);
+                poly_effective_edge(
+                    self.vertices.val(i as i64).saved(),
+                    self.vertices.val(j as i64).saved(),
+                    ri, rj, old_ccw, ci_conv, cj_conv,
+                )
+            } else {
+                (self.vertices.val(i as i64).saved(), self.vertices.val(j as i64).saved())
+            };
             let old_sag =
                 poly_sag_from_vertex(old_start, old_end, self.vertices.val(sag_idx).saved());
-            let new_start = self.vertices.val(i as i64).curr();
-            let new_end = self.vertices.val(j as i64).curr();
+            let ci = self.vertices.val(i as i64).curr();
+            let cj = self.vertices.val(j as i64).curr();
+            let (new_start, new_end) = if is_poly {
+                let ri = self.vertices.val(i as i64).get_radius();
+                let rj = self.vertices.val(j as i64).get_radius();
+                let ci_conv = poly_is_convex(&self.vertices, nc, i, ccw);
+                let cj_conv = poly_is_convex(&self.vertices, nc, j, ccw);
+                poly_effective_edge(ci, cj, ri, rj, ccw, ci_conv, cj_conv)
+            } else {
+                (ci, cj)
+            };
             let new_pos = poly_sag_handle(new_start, new_end, old_sag);
             self.vertices.val_mut(sag_idx).set_curr(new_pos);
+        }
+    }
+
+    /// Reset the sag vertices adjacent to corner `corner_idx` to straight
+    /// (midpoint of effective edge). Call this after toggling arc on/off.
+    pub fn reset_adjacent_sags(&mut self, corner_idx: usize) {
+        if !matches!(self.shape_type, ShapeType::Poly) {
+            return;
+        }
+        let nc = self.get_n_corners();
+        if self.vertices.len() <= nc || corner_idx >= nc {
+            return;
+        }
+        use crate::helpers::math::poly_sag_handle;
+        // Compute winding
+        let mut area2 = 0.0;
+        for k in 0..nc {
+            let l = (k + 1) % nc;
+            let pk = self.vertices.val(k as i64).curr();
+            let pl = self.vertices.val(l as i64).curr();
+            area2 += pk.x * pl.y - pl.x * pk.y;
+        }
+        let ccw = area2 > 0.0;
+        // Edge before corner (prev → corner): sag index = nc + prev
+        let prev = if corner_idx == 0 { nc - 1 } else { corner_idx - 1 };
+        for &(ei, ej) in &[(prev, corner_idx), (corner_idx, (corner_idx + 1) % nc)] {
+            let sag_idx = (nc + ei) as i64;
+            let ci = self.vertices.val(ei as i64).curr();
+            let cj = self.vertices.val(ej as i64).curr();
+            let ri = self.vertices.val(ei as i64).get_radius();
+            let rj = self.vertices.val(ej as i64).get_radius();
+            let ci_conv = poly_is_convex(&self.vertices, nc, ei, ccw);
+            let cj_conv = poly_is_convex(&self.vertices, nc, ej, ccw);
+            let (es, ee) = poly_effective_edge(ci, cj, ri, rj, ccw, ci_conv, cj_conv);
+            let mid = poly_sag_handle(es, ee, 0.0);
+            self.vertices.val_mut(sag_idx).set_curr(mid);
+            self.vertices.val_mut(sag_idx).set_saved(mid);
         }
     }
 
@@ -2447,7 +2547,7 @@ impl GeneralShape {
             }
             ShapeType::Poly => {
                 let nc = self.get_n_corners();
-                let apices = self.vertices.get_apices_n(nc);
+                let apices = self.vertices.get_apices_poly(nc);
                 let has_sag = self.vertices.len() > nc;
                 if has_sag {
                     let sag_verts: Vec<Option<Vec2>> = (0..nc)
@@ -2932,6 +3032,51 @@ fn sweep_through_point(o: Vec2, p_start: Vec2, p_end: Vec2, v: Vec2) -> f64 {
     }
 }
 
+/// Check if vertex `i` is convex in a polygon of `nc` corners.
+/// `ccw`: polygon winding (true = CCW). Convex means cross product sign matches winding.
+pub(crate) fn poly_is_convex(vertices: &VecRing<VUId>, nc: usize, i: usize, ccw: bool) -> bool {
+    let prev = if i == 0 { nc - 1 } else { i - 1 };
+    let next = (i + 1) % nc;
+    let cp = vertices.val(prev as i64).curr();
+    let ci = vertices.val(i as i64).curr();
+    let cn = vertices.val(next as i64).curr();
+    let d1 = ci - cp;
+    let d2 = cn - ci;
+    let cross = d1.x * d2.y - d1.y * d2.x;
+    if ccw { cross >= 0.0 } else { cross <= 0.0 }
+}
+
+/// Compute the winding of a polygon from its first `nc` vertices (shoelace formula).
+pub(crate) fn poly_winding_ccw(vertices: &VecRing<VUId>, nc: usize) -> bool {
+    let mut area2 = 0.0;
+    for i in 0..nc {
+        let j = (i + 1) % nc;
+        let pi = vertices.val(i as i64).curr();
+        let pj = vertices.val(j as i64).curr();
+        area2 += pi.x * pj.y - pj.x * pi.y;
+    }
+    area2 > 0.0
+}
+
+/// Compute the effective edge endpoints for a Poly edge between corners i and j,
+/// using the common tangent so edges are tangent to both arcs.
+/// `ccw`: polygon winding direction (true = counter-clockwise).
+/// `convex_i`, `convex_j`: whether each vertex is convex (true) or concave.
+/// Returns (exit_of_i, entry_of_j).
+pub(crate) fn poly_effective_edge(
+    ci: Vec2, cj: Vec2,
+    ri: Option<u32>, rj: Option<u32>,
+    ccw: bool,
+    convex_i: bool, convex_j: bool,
+) -> (Vec2, Vec2) {
+    use crate::helpers::math::poly_common_tangent;
+    let r1 = ri.unwrap_or(0) as f64;
+    let r2 = rj.unwrap_or(0) as f64;
+    let sr1 = if convex_i { r1 } else { -r1 };
+    let sr2 = if convex_j { r2 } else { -r2 };
+    poly_common_tangent(ci, sr1, cj, sr2, ccw)
+}
+
 /// Build a polygon BezPath with optional arc sides (sag vertices) and filleted corners.
 /// `apices`: the corner apices (from get_apices_n)
 /// `sag_positions`: one sag vertex per edge (None = straight). sag[i] = edge corner[i]→corner[(i+1)%n]
@@ -2956,22 +3101,31 @@ pub(crate) fn build_polygon_path_with_sag(
             ApexType::Arc { e, .. } => e,
         }
     };
-    let corner_pos = |apex: &ApexType| -> Vec2 {
+    // Detect convexity of each apex via cross product of adjacent edges.
+    // Use the center positions (c for arcs, a for vertices).
+    let center_of = |apex: &ApexType| -> Vec2 {
         match *apex {
             ApexType::TypeVertex { a } => a,
-            ApexType::Arc { s, c: _c, e } => (s + e) * 0.5,
+            ApexType::Arc { c, .. } => c,
         }
     };
-
-    // Determine polygon winding direction (CW or CCW) via shoelace formula
+    let centers: Vec<Vec2> = (0..n).map(|i| center_of(&apices[i])).collect();
     let mut area2 = 0.0;
     for i in 0..n {
         let j = (i + 1) % n;
-        let pi = corner_pos(&apices[i]);
-        let pj = corner_pos(&apices[j]);
-        area2 += pi.x * pj.y - pj.x * pi.y;
+        area2 += centers[i].x * centers[j].y - centers[j].x * centers[i].y;
     }
-    let winding_ccw = area2 > 0.0;
+    let ccw = area2 > 0.0;
+    let convex: Vec<bool> = (0..n)
+        .map(|i| {
+            let prev = if i == 0 { n - 1 } else { i - 1 };
+            let next = (i + 1) % n;
+            let d1 = centers[i] - centers[prev];
+            let d2 = centers[next] - centers[i];
+            let cross = d1.x * d2.y - d1.y * d2.x;
+            if ccw { cross >= 0.0 } else { cross <= 0.0 }
+        })
+        .collect();
 
     // --- Pass 1: compute adjusted entry/exit points for each corner ---
     let mut adj_entry: Vec<Vec2> = (0..n).map(|i| entry_of(&apices[i])).collect();
@@ -2989,21 +3143,30 @@ pub(crate) fn build_polygon_path_with_sag(
             continue;
         }
 
+        // Signed radii: negative for concave apices so that solve_side
+        // finds the correct mixed tangency (ext-int or int-ext).
         let fillet_i = match apices[i] {
-            ApexType::Arc { c, .. } => Some((c, (exit_of(&apices[i]) - c).hypot())),
+            ApexType::Arc { c, .. } => {
+                let r = (exit_of(&apices[i]) - c).hypot();
+                let sr = if convex[i] { r } else { -r };
+                Some((c, sr))
+            }
             _ => None,
         };
         let fillet_j = match apices[j] {
-            ApexType::Arc { c, .. } => Some((c, (entry_of(&apices[j]) - c).hypot())),
+            ApexType::Arc { c, .. } => {
+                let r = (entry_of(&apices[j]) - c).hypot();
+                let sr = if convex[j] { r } else { -r };
+                Some((c, sr))
+            }
             _ => None,
         };
 
         match (fillet_i, fillet_j) {
             (Some((c1, r1)), Some((c2, r2))) => {
                 if let Some((ac1, ac2, o, big_r)) =
-                    solve_side(c1, c2, r1, r2, v, edge_start, edge_end)
+                    solve_side_signed(c1, c2, r1, r2, v, edge_start, edge_end)
                 {
-                    // solve_side already handles internal/external in ac1/ac2
                     adj_exit[i] = c1 + Vec2::new(r1 * ac1.cos(), r1 * ac1.sin());
                     adj_entry[j] = c2 + Vec2::new(r2 * ac2.cos(), r2 * ac2.sin());
                     edge_arcs[i] = Some((o, big_r, v));
@@ -3111,23 +3274,43 @@ pub(crate) fn build_polygon_path_with_sag(
             path.push(PathEl::LineTo(adj_entry[j].to_point()));
         }
 
-        // Draw fillet arc at corner j — always bulges outward (same winding as polygon)
+        // Draw fillet arc at corner j. The fillet is a circular arc centered
+        // at `c` with radius r = |s - c|. Its sweep direction is determined
+        // by matching the fillet's tangent at adj_entry[j] to the incoming
+        // tangent from edge i (straight or arc). This works regardless of
+        // whether `c` sits inside or outside the polygon, which matters when
+        // sags flip an angle across 180°.
         if let ApexType::Arc { s, c, .. } = apices[j] {
             let r = (s - c).hypot();
             let a_start = (adj_entry[j] - c).y.atan2((adj_entry[j] - c).x);
             let a_end = (adj_exit[j] - c).y.atan2((adj_exit[j] - c).x);
-            let mut sweep = a_end - a_start;
-            if winding_ccw {
-                // CCW polygon → fillet sweep must be positive (CCW)
-                if sweep < 0.0 {
-                    sweep += 2.0 * PI;
-                }
+
+            // Incoming tangent direction at adj_entry[j] from edge i.
+            let d_in = if let Some((o_i, _big_r_i, v_i)) = edge_arcs[i] {
+                let radial = adj_entry[j] - o_i;
+                let t_ccw = Vec2::new(-radial.y, radial.x);
+                // Pick the CCW/CW perpendicular matching the arc-edge sweep.
+                let edge_sweep = sweep_through_point(o_i, adj_exit[i], adj_entry[j], v_i);
+                if edge_sweep >= 0.0 { t_ccw } else { Vec2::new(radial.y, -radial.x) }
             } else {
-                // CW polygon → fillet sweep must be negative (CW)
-                if sweep > 0.0 {
-                    sweep -= 2.0 * PI;
-                }
+                adj_entry[j] - adj_exit[i]
+            };
+
+            // CCW tangent to the fillet at adj_entry[j] is perpendicular
+            // to (adj_entry[j] - c), rotated +90°.
+            let fillet_radial = adj_entry[j] - c;
+            let fillet_t_ccw = Vec2::new(-fillet_radial.y, fillet_radial.x);
+            let fillet_ccw = fillet_t_ccw.x * d_in.x + fillet_t_ccw.y * d_in.y > 0.0;
+
+            let mut sweep = a_end - a_start;
+            if fillet_ccw {
+                while sweep < 0.0 { sweep += 2.0 * PI; }
+                while sweep > 2.0 * PI { sweep -= 2.0 * PI; }
+            } else {
+                while sweep > 0.0 { sweep -= 2.0 * PI; }
+                while sweep < -2.0 * PI { sweep += 2.0 * PI; }
             }
+
             let arc = Arc::new(c.to_point(), Vec2::new(r, r), a_start, sweep, 0.0);
             arc.to_cubic_beziers(0.01, |p1, p2, p3| {
                 path.push(PathEl::CurveTo(p1, p2, p3));
@@ -3140,6 +3323,7 @@ pub(crate) fn build_polygon_path_with_sag(
 }
 
 /// Find the best arc through V tangent to both circles (c1,r1) and (c2,r2).
+/// For use with **positive radii only** (oblong, canvas display).
 /// chord_start/chord_end: the straight-line tangent points (for reference).
 /// Returns (angle_on_c1, angle_on_c2, arc_center, arc_radius) or None.
 pub(crate) fn solve_side(
@@ -3161,7 +3345,8 @@ pub(crate) fn solve_side(
     let v_side = (v - chord_mid).x * chord_n.x + (v - chord_mid).y * chord_n.y;
 
     let axis_mid = (c1 + c2) * 0.5;
-    let chord_offset = (chord_mid - axis_mid).x * chord_n.x + (chord_mid - axis_mid).y * chord_n.y;
+    let chord_offset =
+        (chord_mid - axis_mid).x * chord_n.x + (chord_mid - axis_mid).y * chord_n.y;
     let v_away = v_side * chord_offset > 0.0;
     let to_chord = chord_mid - v;
 
@@ -3189,6 +3374,78 @@ pub(crate) fn solve_side(
         }
     }
     best
+}
+
+/// Same as solve_side but supports **signed radii** (negative = concave apex).
+/// For use with Poly shapes where apices can be concave.
+pub(crate) fn solve_side_signed(
+    c1: Vec2,
+    c2: Vec2,
+    r1: f64,
+    r2: f64,
+    v: Vec2,
+    chord_start: Vec2,
+    chord_end: Vec2,
+) -> Option<(f64, f64, Vec2, f64)> {
+    let chord_len = (chord_end - chord_start).hypot();
+    if chord_len < 1e-9 {
+        return None;
+    }
+    let chord_mid = (chord_start + chord_end) * 0.5;
+    let to_chord = chord_mid - v;
+    let abs_r1 = r1.abs();
+    let abs_r2 = r2.abs();
+
+    let mut best: Option<(f64, f64, Vec2, f64, f64)> = None;
+    for &try_internal in &[false, true] {
+        for (o, big_r) in arc_through_point_tangent(c1, c2, r1, r2, v, try_internal) {
+            let o_toward_chord = (o - v).x * to_chord.x + (o - v).y * to_chord.y;
+            if o_toward_chord <= 0.0 {
+                continue;
+            }
+            let d1 = o - c1;
+            let d1_len = d1.hypot();
+            let d2 = o - c2;
+            let d2_len = d2.hypot();
+            let tp1 = if abs_r1 < 1e-9 || d1_len < 1e-9 {
+                c1
+            } else {
+                let dir = d1 / d1_len;
+                if d1_len < big_r - 1e-6 {
+                    c1 - abs_r1 * dir
+                } else {
+                    c1 + abs_r1 * dir
+                }
+            };
+            let tp2 = if abs_r2 < 1e-9 || d2_len < 1e-9 {
+                c2
+            } else {
+                let dir = d2 / d2_len;
+                if d2_len < big_r - 1e-6 {
+                    c2 - abs_r2 * dir
+                } else {
+                    c2 + abs_r2 * dir
+                }
+            };
+            let ac1 = if abs_r1 > 1e-9 {
+                let d = tp1 - c1;
+                if r1 > 0.0 { d.y.atan2(d.x) } else { (-d.y).atan2(-d.x) }
+            } else {
+                0.0
+            };
+            let ac2 = if abs_r2 > 1e-9 {
+                let d = tp2 - c2;
+                if r2 > 0.0 { d.y.atan2(d.x) } else { (-d.y).atan2(-d.x) }
+            } else {
+                0.0
+            };
+            let dist = (tp1 - chord_start).hypot() + (tp2 - chord_end).hypot();
+            if best.as_ref().map_or(true, |b| dist < b.4) {
+                best = Some((ac1, ac2, o, big_r, dist));
+            }
+        }
+    }
+    best.map(|(ac1, ac2, o, big_r, _)| (ac1, ac2, o, big_r))
 }
 
 /// Build the full oblong BezPath with optional arc sides.

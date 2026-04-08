@@ -982,8 +982,13 @@ impl Canvas {
             match e.get_shape_type() {
                 ShapeType::Square | ShapeType::Poly => {
                     let nc = e.get_n_corners();
+                    let apices = if e.get_shape_type() == ShapeType::Poly {
+                        e.get_vertices().get_apices_poly(nc)
+                    } else {
+                        e.get_vertices().get_apices_n(nc)
+                    };
                     // Fillet radii at corners
-                    for apex_type in e.get_vertices().get_apices_n(nc).iter() {
+                    for apex_type in apices.iter() {
                         if let ApexType::Arc { s, c, e: _e } = apex_type {
                             let r = (*s - *c).length();
                             let text2 = CanvasText::new(
@@ -1014,7 +1019,11 @@ impl Canvas {
         let verts = e.get_vertices();
         let scale = self.get_scale();
         let offset = 12.0 / scale;
-        let apices = verts.get_apices_n(nc);
+        let apices = if e.get_shape_type() == ShapeType::Poly {
+            verts.get_apices_poly(nc)
+        } else {
+            verts.get_apices_n(nc)
+        };
 
         let entry_of = |apex: &ApexType| -> Vec2 {
             match *apex { ApexType::TypeVertex { a } => a, ApexType::Arc { s, .. } => s }
@@ -1319,7 +1328,7 @@ impl Canvas {
                 );
                 self.draw_path(&path, pattern, colors.fill_color, colors.stroke_color, text);
                 // Rayons des apex arrondis
-                let apices = verts.get_apices_n(e.get_n_corners());
+                let apices = verts.get_apices_poly(e.get_n_corners());
                 let mut first_arc = true;
                 for apex in apices.iter() {
                     if let ApexType::Arc { s, c, .. } = apex {

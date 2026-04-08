@@ -311,12 +311,16 @@ impl AppVars {
             if vs_sel.len() == 1 {
                 let (eid, vid) = vs_sel[0];
                 if let Some(elem) = canvas_user.dataset.get_element_mut(eid) {
+                    let corner_idx = elem.get_vertices().get_idx(&vid).map(|i| i as usize);
                     if let Some(v) = elem.get_vertex_mut(&vid) {
                         v.change_apex_type();
-                        elem.set_bezpath();
-                        canvas_user.dataset.mark_final_polygon_dirty();
-                        canvas_user.dataset.calc_final_polygon();
                     }
+                    if let Some(idx) = corner_idx {
+                        elem.reset_adjacent_sags(idx);
+                    }
+                    elem.set_bezpath();
+                    canvas_user.dataset.mark_final_polygon_dirty();
+                    canvas_user.dataset.calc_final_polygon();
                 }
             }
         } else {

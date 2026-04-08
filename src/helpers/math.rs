@@ -138,20 +138,6 @@ fn _is_between(pt: &Vec2, pt1: &Vec2, pt2: &Vec2) -> bool {
     }
     true
 }
-// pub fn is_Vec2_on_segment(pos1: &Vec2, pos2: &Vec2, pos: &Vec2, precision: f64) -> bool {
-//     let denominator = ((pos2.y - pos1.y).powf(2.) + (pos2.x - pos1.x).powf(2.)).sqrt();
-//     if denominator == 0. {
-//         return is_Vec2_on_Vec2(pos, &pos1, precision);
-//     }
-//     let numerator = ((pos2.y - pos1.y) * pos.x - (pos2.x - pos1.x) * pos.y
-//         + pos2.x * pos1.y
-//         - pos2.y * pos1.x)
-//         .abs();
-//     if numerator / denominator > precision {
-//         return false;
-//     }
-//     is_between(pos, &pos1, &pos2)
-// }
 
 pub fn is_near_position(pos: Vec2, other_pos: Vec2, grab_handle_precision: f64) -> bool {
     (pos - other_pos).hypot() < grab_handle_precision / 2.
@@ -2621,7 +2607,9 @@ pub fn bezpath_from_apices(apices: &[ApexType]) -> BezPath {
 pub fn poly_sag_from_vertex(edge_start: Vec2, edge_end: Vec2, vertex_pos: Vec2) -> f64 {
     let chord = edge_end - edge_start;
     let l = chord.hypot();
-    if l < 1e-9 { return 0.0; }
+    if l < 1e-9 {
+        return 0.0;
+    }
     let u = chord / l;
     let n = Vec2::new(-u.y, u.x);
     let mid = (edge_start + edge_end) * 0.5;
@@ -2629,11 +2617,45 @@ pub fn poly_sag_from_vertex(edge_start: Vec2, edge_end: Vec2, vertex_pos: Vec2) 
     delta.x * n.x + delta.y * n.y
 }
 
+/// Compute the tangent points for the common tangent between two circles
+/// (c1, r1) and (c2, r2), on the side determined by polygon winding.
+/// Radii may be negative: a negative radius means the tangent point is on the
+/// opposite side of that circle (internal tangent for that circle), which is
+/// needed for concave polygon vertices.
+/// Returns (P1 on circle 1, P2 on circle 2).
+/// When both |r| are 0, returns (c1, c2).
+pub fn poly_common_tangent(c1: Vec2, r1: f64, c2: Vec2, r2: f64, ccw: bool) -> (Vec2, Vec2) {
+    let d_vec = c2 - c1;
+    let d = d_vec.hypot();
+    if d < EPSILON {
+        return (c1, c2);
+    }
+    if r1.abs() < EPSILON && r2.abs() < EPSILON {
+        return (c1, c2);
+    }
+    let u = d_vec / d;
+    // Normal direction n satisfies: n · (c2 - c1) = r2 - r1
+    // (with signed radii, this naturally handles internal tangents)
+    let cos_nu = ((r2 - r1) / d).clamp(-1.0, 1.0);
+    let sin_nu = (1.0 - cos_nu * cos_nu).sqrt().max(0.0);
+    let sign = if ccw { -1.0 } else { 1.0 };
+    let n = Vec2::new(
+        u.x * cos_nu + sign * u.y * sin_nu,
+        -sign * u.x * sin_nu + u.y * cos_nu,
+    );
+    // Tangent points: P = c - r * n
+    // With r > 0 (convex): circle on +n side, tangent point toward -n
+    // With r < 0 (concave): tangent point flips to +n side
+    (c1 - r1 * n, c2 - r2 * n)
+}
+
 /// Compute the sag handle position from edge endpoints and sag value.
 pub fn poly_sag_handle(edge_start: Vec2, edge_end: Vec2, sag: f64) -> Vec2 {
     let chord = edge_end - edge_start;
     let l = chord.hypot();
-    if l < 1e-9 { return (edge_start + edge_end) * 0.5; }
+    if l < 1e-9 {
+        return (edge_start + edge_end) * 0.5;
+    }
     let u = chord / l;
     let n = Vec2::new(-u.y, u.x);
     (edge_start + edge_end) * 0.5 + n * sag

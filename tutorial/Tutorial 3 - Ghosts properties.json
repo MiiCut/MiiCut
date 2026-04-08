@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "meta": {
+    "title": "MiiCut",
+    "timestamp": "20260405-105044",
+    "canvas": {
+      "size": [3000.000000, 1500.000000],
+      "scale": 1.000000,
+      "offset": [0.000000, 0.000000]
+    }
+  },
+  "shapes": [
+    {
+      "id": 0,
+      "type": "disc",
+      "operation": "union",
+      "order": 2,
+      "rotation": 0.000000,
+      "dim_offsets": [3.141593, 20.000000, -20.000000, -20.000000, 0.000000, 0.000000],
+      "vertices": [
+        {"x": -160.000000, "y": 20.000000, "rounded": null},
+        {"x": -110.000000, "y": 20.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 1,
+      "type": "disc",
+      "operation": "difference",
+      "order": 3,
+      "rotation": 0.000000,
+      "dim_offsets": [3.141593, 20.000000, -20.000000, -20.000000, 0.000000, 0.000000],
+      "vertices": [
+        {"x": -160.000000, "y": 20.000000, "rounded": null},
+        {"x": -140.000000, "y": 20.000000, "rounded": null}
+      ]
+    },
+    {
+      "id": 2,
+      "type": "poly",
+      "operation": "union",
+      "order": 1,
+      "rotation": 0.000000,
+      "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000, 0.000000, 0.000000],
+      "ghosts": 4,
+      "ghosts_trans_x": 100.000000,
+      "ghosts_trans_y": 0.000000,
+      "ghosts_rot": 1,
+      "ghosts_self_rot": 1,
+      "ghosts_rot_center_x": -160.000000,
+      "ghosts_rot_center_y": 20.000000,
+      "vertices": [
+        {"x": -160.000000, "y": 20.000000, "rounded": null},
+        {"x": -360.000000, "y": -80.000000, "rounded": 10},
+        {"x": -430.000000, "y": 0.000000, "rounded": 10},
+        {"x": -265.656554, "y": -18.686893, "rounded": null},
+        {"x": -405.234479, "y": -48.955169, "rounded": null},
+        {"x": -295.960332, "y": 22.964481, "rounded": null}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "disc",
+      "operation": "union",
+      "order": 4,
+      "rotation": 0.000000,
+      "dim_offsets": [3.141593, 20.000000, -20.000000, -20.000000, 0.000000, 0.000000],
+      "ghosts": 5,
+      "ghosts_trans_x": 100.000000,
+      "ghosts_trans_y": 0.000000,
+      "ghosts_rot": 1,
+      "ghosts_self_rot": 1,
+      "ghosts_rot_center_x": 220.000000,
+      "ghosts_rot_center_y": 190.000000,
+      "vertices": [
+        {"x": 220.000000, "y": 280.000000, "rounded": null},
+        {"x": 270.000000, "y": 280.000000, "rounded": null}
+      ]
+    }
+  ],
+  "notes": [
+    {"id": 0, "pos": [79.455474, -279.308240], "size": [229.346224, 119.772106], "text": "Shape ghosts properties"}
+  ]
+}

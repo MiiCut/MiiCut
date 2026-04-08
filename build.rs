@@ -16,7 +16,7 @@ fn write_examples(out_dir: &Path, folder: &str, const_name: &str, out_name: &str
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if is_mii_json(&path) {
+            if is_json(&path) {
                 println!("cargo:rerun-if-changed={}", path.display());
                 files.push(path);
             }
@@ -34,7 +34,7 @@ fn write_examples(out_dir: &Path, folder: &str, const_name: &str, out_name: &str
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("")
-            .trim_end_matches(".mii.json");
+            .trim_end_matches(".json");
         let rel_path = path.strip_prefix(".").unwrap_or(path);
         let rel = rel_path.to_string_lossy();
         output.push_str("    (");
@@ -49,9 +49,9 @@ fn write_examples(out_dir: &Path, folder: &str, const_name: &str, out_name: &str
     fs::write(out_file, output).unwrap();
 }
 
-fn is_mii_json(path: &Path) -> bool {
+fn is_json(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
-    name.ends_with(".mii.json")
+    name.ends_with(".json")
 }

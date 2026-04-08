@@ -1792,7 +1792,7 @@ fn hit_test_dim_handle(
                 // Premier apex arrondi — handle angulaire, dim_idx=2
                 if shape.get_vertices().len() >= 3 {
                     use crate::helpers::math::ApexType;
-                    let apices = shape.get_vertices().get_apices_n(shape.get_n_corners());
+                    let apices = shape.get_vertices().get_apices_poly(shape.get_n_corners());
                     if let Some(ApexType::Arc { s, c, .. }) =
                         apices.iter().find(|a| matches!(a, ApexType::Arc { .. }))
                     {
@@ -1963,7 +1963,7 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                                             if sh.get_vertices().len() < 3 {
                                                 return None;
                                             }
-                                            let apices = sh.get_vertices().get_apices_n(sh.get_n_corners());
+                                            let apices = sh.get_vertices().get_apices_poly(sh.get_n_corners());
                                             apices.into_iter().find_map(|a| {
                                                 if let ApexType::Arc { s, c, .. } = a {
                                                     Some((s - c).y.atan2((s - c).x))

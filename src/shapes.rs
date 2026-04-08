@@ -797,44 +797,129 @@ impl DataSet {
             return None;
         }
         let elem = self.get_element_mut(eid1_sel)?;
-        elem.get_vertices().dist_ok(
-            elem.get_vertices().get_idx(&vid1_sel)?,
-            elem.get_vertices().get_idx(&vid2_sel)?,
-            1,
-        )?;
         let v1_sel = elem.get_vertex(&vid1_sel)?;
         let v2_sel = elem.get_vertex(&vid2_sel)?;
 
         match elem.get_shape_type() {
             ShapeType::Poly => {
-                // Create new vertex between the selected and highlighted vertices
-                let new_v = (
-                    VUId::new(),
-                    Vertex::new(snap_vertex(
-                        (v1_sel.curr() + v2_sel.curr()) / 2.0,
-                        Snap::new(),
-                    )),
+                let nc = elem.get_n_corners();
+                let idx1 = elem.get_vertices().get_idx(&vid1_sel)? as usize;
+                let idx2 = elem.get_vertices().get_idx(&vid2_sel)? as usize;
+                // Only allow insertion between two adjacent corner vertices
+                if idx1 >= nc || idx2 >= nc {
+                    return None;
+                }
+                // Check adjacency among corners (ring of N, not of 2N)
+                let corner_dist = {
+                    let diff = (idx1 as i64 - idx2 as i64).unsigned_abs() as usize;
+                    diff.min(nc - diff)
+                };
+                if corner_dist != 1 {
+                    return None;
+                }
+                // Determine the insert position within corners: after the
+                // smaller index (in ring order).
+                let insert_at = if (idx1 + 1) % nc == idx2 {
+                    idx1 + 1
+                } else {
+                    idx2 + 1
+                };
+                // New corner at midpoint
+                let mid = snap_vertex(
+                    (v1_sel.curr() + v2_sel.curr()) / 2.0,
+                    Snap::new(),
                 );
+                let mut new_corner = Vertex::new(mid);
+                new_corner.enable_radius();
+                // Insert corner at the correct position
                 elem.get_vertices_mut()
-                    .insert_one_between(&vid1_sel, &vid2_sel, new_v);
+                    .insert_at(insert_at, (VUId::new(), new_corner));
+                // Insert a sag vertex at the end of the sag block (index nc+1,
+                // since nc already shifted +1 after the corner insert)
+                let new_nc = nc + 1;
+                elem.get_vertices_mut()
+                    .insert_at(new_nc + nc, (VUId::new(), Vertex::new(mid)));
+                // Compute winding for poly_effective_edge
+                let ccw = crate::shape::poly_winding_ccw(elem.get_vertices(), new_nc);
+                // Recompute all sag vertex positions to effective edge midpoints (reset to straight)
+                for i in 0..new_nc {
+                    let j = (i + 1) % new_nc;
+                    let ci = elem.get_vertices().val(i as i64).curr();
+                    let cj = elem.get_vertices().val(j as i64).curr();
+                    let ri = elem.get_vertices().val(i as i64).get_radius();
+                    let rj = elem.get_vertices().val(j as i64).get_radius();
+                    let ci_conv = crate::shape::poly_is_convex(elem.get_vertices(), new_nc, i, ccw);
+                    let cj_conv = crate::shape::poly_is_convex(elem.get_vertices(), new_nc, j, ccw);
+                    let (es, ee) = crate::shape::poly_effective_edge(ci, cj, ri, rj, ccw, ci_conv, cj_conv);
+                    let edge_mid = (es + ee) * 0.5;
+                    elem.get_vertices_mut()
+                        .val_mut((new_nc + i) as i64)
+                        .set_curr(edge_mid);
+                    elem.get_vertices_mut()
+                        .val_mut((new_nc + i) as i64)
+                        .set_saved(edge_mid);
+                }
                 elem.set_bezpath();
                 self.final_polygon_dirty = true;
                 Some(())
             }
-            _ => None,
+            _ => {
+                // Non-poly shapes: use original adjacency check on the full ring
+                elem.get_vertices().dist_ok(
+                    elem.get_vertices().get_idx(&vid1_sel)?,
+                    elem.get_vertices().get_idx(&vid2_sel)?,
+                    1,
+                )?;
+                None
+            }
         }
     }
     pub fn delete_vertex(&mut self, eid_sel: EUId, vid_sel: VUId) -> bool {
         if let Some(elem) = self.get_element_mut(eid_sel) {
             if elem.get_shape_type() == ShapeType::Poly {
-                if elem.get_vertices().len() < 4 {
+                let nc = elem.get_n_corners();
+                // Need at least 3 corners after deletion
+                if nc < 4 {
                     return false;
                 }
-                if let Some(idx_sel) = elem.get_vertices().get_idx(&vid_sel) {
-                    elem.get_vertices_mut().remove(&idx_sel);
-                    elem.set_bezpath();
-                    self.final_polygon_dirty = true;
+                let Some(idx_sel) = elem.get_vertices().get_idx(&vid_sel) else {
+                    return false;
+                };
+                let idx = idx_sel as usize;
+                // Don't delete sag vertices directly
+                if idx >= nc {
+                    return false;
                 }
+                // Remove the corner vertex
+                elem.get_vertices_mut().remove(&idx_sel);
+                // Remove the corresponding sag vertex.
+                // After removing the corner, sag vertices start at index (nc - 1).
+                // The sag for the removed corner was at original index (nc + idx),
+                // which is now at index (nc - 1 + idx).
+                let sag_idx = (nc - 1 + idx) as i64;
+                elem.get_vertices_mut().remove(&sag_idx);
+                // Recompute all sag vertex positions (reset to effective edge midpoints)
+                let new_nc = nc - 1;
+                let ccw = crate::shape::poly_winding_ccw(elem.get_vertices(), new_nc);
+                for i in 0..new_nc {
+                    let j = (i + 1) % new_nc;
+                    let ci = elem.get_vertices().val(i as i64).curr();
+                    let cj = elem.get_vertices().val(j as i64).curr();
+                    let ri = elem.get_vertices().val(i as i64).get_radius();
+                    let rj = elem.get_vertices().val(j as i64).get_radius();
+                    let ci_conv = crate::shape::poly_is_convex(elem.get_vertices(), new_nc, i, ccw);
+                    let cj_conv = crate::shape::poly_is_convex(elem.get_vertices(), new_nc, j, ccw);
+                    let (es, ee) = crate::shape::poly_effective_edge(ci, cj, ri, rj, ccw, ci_conv, cj_conv);
+                    let mid = (es + ee) * 0.5;
+                    elem.get_vertices_mut()
+                        .val_mut((new_nc + i) as i64)
+                        .set_curr(mid);
+                    elem.get_vertices_mut()
+                        .val_mut((new_nc + i) as i64)
+                        .set_saved(mid);
+                }
+                elem.set_bezpath();
+                self.final_polygon_dirty = true;
             }
         }
         false
