@@ -3165,7 +3165,7 @@ pub(crate) fn build_polygon_path_with_sag(
         match (fillet_i, fillet_j) {
             (Some((c1, r1)), Some((c2, r2))) => {
                 if let Some((ac1, ac2, o, big_r)) =
-                    solve_side_signed(c1, c2, r1, r2, v, edge_start, edge_end)
+                    solve_side_signed(c1, c2, r1, r2, v, edge_start, edge_end, ccw)
                 {
                     adj_exit[i] = c1 + Vec2::new(r1 * ac1.cos(), r1 * ac1.sin());
                     adj_entry[j] = c2 + Vec2::new(r2 * ac2.cos(), r2 * ac2.sin());
@@ -3378,6 +3378,7 @@ pub(crate) fn solve_side(
 
 /// Same as solve_side but supports **signed radii** (negative = concave apex).
 /// For use with Poly shapes where apices can be concave.
+/// `ccw`: polygon winding direction (needed to determine edge concavity).
 pub(crate) fn solve_side_signed(
     c1: Vec2,
     c2: Vec2,
@@ -3386,8 +3387,10 @@ pub(crate) fn solve_side_signed(
     v: Vec2,
     chord_start: Vec2,
     chord_end: Vec2,
+    ccw: bool,
 ) -> Option<(f64, f64, Vec2, f64)> {
-    let chord_len = (chord_end - chord_start).hypot();
+    let chord = chord_end - chord_start;
+    let chord_len = chord.hypot();
     if chord_len < 1e-9 {
         return None;
     }
@@ -3395,6 +3398,21 @@ pub(crate) fn solve_side_signed(
     let to_chord = chord_mid - v;
     let abs_r1 = r1.abs();
     let abs_r2 = r2.abs();
+
+    // Determine edge concavity: is v on the interior side of the chord?
+    let chord_n = Vec2::new(-chord.y / chord_len, chord.x / chord_len);
+    let v_side = (v.x - chord_mid.x) * chord_n.x + (v.y - chord_mid.y) * chord_n.y;
+    let edge_concave = (v_side > 0.0) == ccw;
+
+    // Selection rule per apex: want tp FARTHEST from v when
+    // apex and edge have same concavity, CLOSEST when different.
+    //   edge_concave + r<0 (concave apex) → farthest
+    //   edge_concave + r>0 (convex apex)  → closest
+    //   edge_convex  + r<0 (concave apex) → closest
+    //   edge_convex  + r>0 (convex apex)  → farthest
+    // i.e.: want_far = (r > 0) != edge_concave
+    let want_far_1 = (r1 > 0.0) != edge_concave;
+    let want_far_2 = (r2 > 0.0) != edge_concave;
 
     let mut best: Option<(f64, f64, Vec2, f64, f64)> = None;
     for &try_internal in &[false, true] {
@@ -3439,9 +3457,13 @@ pub(crate) fn solve_side_signed(
             } else {
                 0.0
             };
-            let dist = (tp1 - chord_start).hypot() + (tp2 - chord_end).hypot();
-            if best.as_ref().map_or(true, |b| dist < b.4) {
-                best = Some((ac1, ac2, o, big_r, dist));
+            // Score: +dist when we want far, -dist when we want close.
+            let dist1 = (tp1 - v).hypot();
+            let dist2 = (tp2 - v).hypot();
+            let score = if want_far_1 { dist1 } else { -dist1 }
+                + if want_far_2 { dist2 } else { -dist2 };
+            if best.as_ref().map_or(true, |b| score > b.4) {
+                best = Some((ac1, ac2, o, big_r, score));
             }
         }
     }
