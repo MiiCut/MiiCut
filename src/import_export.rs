@@ -2,12 +2,12 @@ use crate::app::{load_toolpath_params, save_toolpath_params, RefAV};
 use crate::canvas::{CanvasKind, NotesData};
 use crate::helpers::canvas_fit::fit_paths_canvas;
 use crate::helpers::math::{to_draw, EPSILON};
-use crate::shape::{GeneralShape, Operation, ShapeType, SvgData, SvgFillRule};
+use crate::shape::{GeneralShape, GhostMode, Operation, ShapeType, SvgData, SvgFillRule};
 use crate::shapes::DataSet;
 use crate::status::update_status_bar;
+use crate::types::others::{EUId, Properties, Property, PropertyValue, VUId};
 use crate::types::scalar::Scalar;
 use crate::types::vertex::Vertex;
-use crate::types::others::{EUId, Properties, Property, PropertyValue};
 use crate::view_draw::app::render_draw_view;
 use crate::view_draw::notes_dom::update_notes_view;
 use js_sys::{Array, Date, JSON};
@@ -124,31 +124,31 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
      -> Result<(), JsValue> {
         if let Some(container) = document.get_element_by_id(container_id) {
             for (idx, (name, data)) in items.iter().enumerate() {
-            let Ok(link) = document.create_element("a") else {
-                continue;
-            };
-            let Some(link) = link.dyn_into::<HtmlElement>().ok() else {
-                continue;
-            };
-            link.set_text_content(Some(name));
-            link.set_attribute("href", "#").ok();
-            link.set_attribute("data-example-idx", &idx.to_string())
-                .ok();
-            let av_clone = av.clone();
-            let data = data.to_string();
-            let menu = menu.clone();
-            let on_click = Closure::wrap(Box::new(move |event: Event| {
-                event.prevent_default();
-                if let Some(menu) = menu.as_ref() {
-                    let _ = menu.class_list().add_1("dropdown-locked");
-                }
-                load_json_to_dataset(av_clone.clone(), data.clone());
-                update_notes_view(av_clone.clone());
-                render_draw_view(av_clone.clone());
-            }) as Box<dyn FnMut(_)>);
-            link.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
-            on_click.forget();
-            container.append_child(&link).ok();
+                let Ok(link) = document.create_element("a") else {
+                    continue;
+                };
+                let Some(link) = link.dyn_into::<HtmlElement>().ok() else {
+                    continue;
+                };
+                link.set_text_content(Some(name));
+                link.set_attribute("href", "#").ok();
+                link.set_attribute("data-example-idx", &idx.to_string())
+                    .ok();
+                let av_clone = av.clone();
+                let data = data.to_string();
+                let menu = menu.clone();
+                let on_click = Closure::wrap(Box::new(move |event: Event| {
+                    event.prevent_default();
+                    if let Some(menu) = menu.as_ref() {
+                        let _ = menu.class_list().add_1("dropdown-locked");
+                    }
+                    load_json_to_dataset(av_clone.clone(), data.clone());
+                    update_notes_view(av_clone.clone());
+                    render_draw_view(av_clone.clone());
+                }) as Box<dyn FnMut(_)>);
+                link.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
+                on_click.forget();
+                container.append_child(&link).ok();
             }
         }
         Ok(())
@@ -175,7 +175,9 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
         let save = save.dyn_into::<HtmlElement>()?;
         let on_save = Closure::wrap(Box::new(move |event: Event| {
             event.prevent_default();
-            let Ok(mut avb) = av_clone.try_borrow_mut() else { return };
+            let Ok(mut avb) = av_clone.try_borrow_mut() else {
+                return;
+            };
             let canvas = &avb.canvases[CanvasKind::Draw.idx()];
             let meta = make_export_info(&avb.document);
             let json = build_json_from_dataset(&canvas.dataset, &canvas.notes, &meta);
@@ -318,15 +320,19 @@ pub(crate) fn init_menu(av: RefAV) -> Result<(), JsValue> {
                         let br = to_draw(Vec2::new(size.width, size.height), scale, offset);
                         (tl, br)
                     };
-                    let canvas_user = &mut av_for_load.borrow_mut().canvases[CanvasKind::Draw.idx()];
+                    let canvas_user =
+                        &mut av_for_load.borrow_mut().canvases[CanvasKind::Draw.idx()];
                     let before = canvas_user.snapshot_draw_state();
                     let mut imported_any = false;
                     if combine_paths {
-                        if let Some(shape) = GeneralShape::new_shape_svg_fit(0, result, true, tl, br) {
+                        if let Some(shape) =
+                            GeneralShape::new_shape_svg_fit(0, result, true, tl, br)
+                        {
                             canvas_user.dataset.push_element(shape);
                             imported_any = true;
                         }
-                    } else if let Some(shapes) = GeneralShape::new_shapes_svg_fit(0, result, tl, br) {
+                    } else if let Some(shapes) = GeneralShape::new_shapes_svg_fit(0, result, tl, br)
+                    {
                         for shape in shapes {
                             canvas_user.dataset.push_element(shape);
                             imported_any = true;
@@ -448,19 +454,24 @@ pub(crate) fn build_json_from_dataset(
         let dim_offsets = elem.get_dim_offsets();
         out.push_str(&format!(
             "      \"dim_offsets\": [{:.6}, {:.6}, {:.6}, {:.6}, {:.6}, {:.6}],\n",
-            dim_offsets[0], dim_offsets[1], dim_offsets[2], dim_offsets[3], dim_offsets[4], dim_offsets[5]
+            dim_offsets[0],
+            dim_offsets[1],
+            dim_offsets[2],
+            dim_offsets[3],
+            dim_offsets[4],
+            dim_offsets[5]
         ));
-        // Ghost fields
-        if elem.get_ghosts() > 0 {
+        // Ghost/pattern fields
+        if elem.ghost().is_active() {
+            let g = elem.ghost();
             out.push_str(&format!(
-                "      \"ghosts\": {},\n      \"ghosts_trans_x\": {:.6},\n      \"ghosts_trans_y\": {:.6},\n      \"ghosts_rot\": {},\n      \"ghosts_self_rot\": {},\n      \"ghosts_rot_center_x\": {:.6},\n      \"ghosts_rot_center_y\": {:.6},\n",
-                elem.get_ghosts(),
-                elem.get_ghosts_trans_x(),
-                elem.get_ghosts_trans_y(),
-                elem.get_ghosts_rot() as u8,
-                elem.get_ghosts_self_rot() as u8,
-                elem.get_ghosts_rot_center().x,
-                elem.get_ghosts_rot_center().y,
+                "      \"ghost_mode\": \"{}\",\n      \"ghost_m\": {},\n      \"ghost_n\": {},\n      \"ghost_handle_x\": {:.6},\n      \"ghost_handle_y\": {:.6},\n      \"ghost_self_rot\": {},\n",
+                g.mode.as_str(),
+                g.m,
+                g.n,
+                g.handle.x,
+                g.handle.y,
+                g.self_rot as u8,
             ));
         }
         if elem.is_group() {
@@ -479,7 +490,8 @@ pub(crate) fn build_json_from_dataset(
             out.push_str(&format!("      \"constr_vertices\": {count},\n"));
         }
         if matches!(elem.get_shape_type(), ShapeType::Voronoi) {
-            if let Some(PropertyValue::Seeds { value }) = elem.get_properties().get(&Property::Seeds)
+            if let Some(PropertyValue::Seeds { value }) =
+                elem.get_properties().get(&Property::Seeds)
             {
                 out.push_str(&format!("      \"voronoi_seeds\": {},\n", value.curr()));
             }
@@ -495,6 +507,11 @@ pub(crate) fn build_json_from_dataset(
                     "      \"voronoi_relaxation\": {},\n",
                     value.curr()
                 ));
+            }
+            if let Some(PropertyValue::VoronoiInvert { value: true }) =
+                elem.get_properties().get(&Property::VoronoiInvert)
+            {
+                out.push_str("      \"voronoi_invert\": 1,\n");
             }
         }
         let vertices = elem.get_vertices();
@@ -574,6 +591,39 @@ pub(crate) fn build_json_from_dataset(
             note.size.x,
             note.size.y,
             json_escape(&note.text)
+        ));
+    }
+    out.push_str("  ],\n");
+
+    // ── User-placed dimensions ──────────────────────────────────────────
+    out.push_str("  \"user_dims\": [\n");
+    let resolve_vidx = |eid: EUId, vid: VUId| -> Option<usize> {
+        let shape = dataset
+            .shapes
+            .get(&eid)
+            .or_else(|| dataset.grouped_shapes.get(&eid))?;
+        shape
+            .get_vertices()
+            .iter()
+            .position(|(uid, _)| *uid == vid)
+    };
+    for (idx, dim) in dataset.user_dims.iter().enumerate() {
+        let Some(vidx1) = resolve_vidx(dim.eid1, dim.vid1) else { continue };
+        let Some(vidx2) = resolve_vidx(dim.eid2, dim.vid2) else { continue };
+        let separator = if idx + 1 == dataset.user_dims.len() {
+            "\n"
+        } else {
+            ",\n"
+        };
+        out.push_str(&format!(
+            "    {{\"id\": {}, \"kind\": \"{}\", \"eid1\": {}, \"vidx1\": {}, \"eid2\": {}, \"vidx2\": {}, \"offset\": {:.6}}}{separator}",
+            dim.id,
+            dim.kind.as_str(),
+            dim.eid1,
+            vidx1,
+            dim.eid2,
+            vidx2,
+            dim.offset
         ));
     }
     out.push_str("  ]\n}\n");
@@ -808,15 +858,15 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         voronoi_seeds: Option<usize>,
         voronoi_gap: Option<f64>,
         voronoi_relaxation: Option<usize>,
+        voronoi_invert: bool,
         vertices: Vec<LoadedVertex>,
         svg_data: Option<SvgData>,
         voronoi_data: Option<SvgData>,
-        ghosts: usize,
-        ghosts_trans_x: f64,
-        ghosts_trans_y: f64,
-        ghosts_rot: bool,
-        ghosts_self_rot: bool,
-        ghosts_rot_center: Vec2,
+        ghost_mode: GhostMode,
+        ghost_m: usize,
+        ghost_n: usize,
+        ghost_handle: Vec2,
+        ghost_self_rot: bool,
     }
 
     fn f64_to_usize(value: f64) -> Option<usize> {
@@ -945,8 +995,8 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         let constr_vertices = get_f64(&shape_value, "constr_vertices").and_then(f64_to_usize);
         let voronoi_seeds = get_f64(&shape_value, "voronoi_seeds").and_then(f64_to_usize);
         let voronoi_gap = get_f64(&shape_value, "voronoi_gap");
-        let voronoi_relaxation =
-            get_f64(&shape_value, "voronoi_relaxation").and_then(f64_to_usize);
+        let voronoi_relaxation = get_f64(&shape_value, "voronoi_relaxation").and_then(f64_to_usize);
+        let voronoi_invert = get_f64(&shape_value, "voronoi_invert").map(|v| v != 0.0).unwrap_or(false);
 
         let vertices_value = get_prop(&shape_value, "vertices");
         let Some(vertices_value) = vertices_value else {
@@ -1016,15 +1066,22 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
         } else {
             (svg_data, None)
         };
-        let ghosts = get_f64(&shape_value, "ghosts").and_then(f64_to_usize).unwrap_or(0);
-        let ghosts_trans_x = get_f64(&shape_value, "ghosts_trans_x").unwrap_or(100.0);
-        let ghosts_trans_y = get_f64(&shape_value, "ghosts_trans_y").unwrap_or(0.0);
-        let ghosts_rot = get_f64(&shape_value, "ghosts_rot").map(|v| v != 0.0).unwrap_or(false);
-        let ghosts_self_rot = get_f64(&shape_value, "ghosts_self_rot").map(|v| v != 0.0).unwrap_or(false);
-        let ghosts_rot_center = Vec2::new(
-            get_f64(&shape_value, "ghosts_rot_center_x").unwrap_or(0.0),
-            get_f64(&shape_value, "ghosts_rot_center_y").unwrap_or(0.0),
+        let ghost_mode = get_string(&shape_value, "ghost_mode")
+            .map(|s| GhostMode::from_str(&s))
+            .unwrap_or(GhostMode::None);
+        let ghost_m = get_f64(&shape_value, "ghost_m")
+            .and_then(f64_to_usize)
+            .unwrap_or(2);
+        let ghost_n = get_f64(&shape_value, "ghost_n")
+            .and_then(f64_to_usize)
+            .unwrap_or(2);
+        let ghost_handle = Vec2::new(
+            get_f64(&shape_value, "ghost_handle_x").unwrap_or(0.0),
+            get_f64(&shape_value, "ghost_handle_y").unwrap_or(0.0),
         );
+        let ghost_self_rot = get_f64(&shape_value, "ghost_self_rot")
+            .map(|v| v != 0.0)
+            .unwrap_or(false);
         loaded_shapes.push(LoadedShape {
             saved_id,
             icon,
@@ -1039,15 +1096,15 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             voronoi_seeds,
             voronoi_gap,
             voronoi_relaxation,
+            voronoi_invert,
             vertices,
             svg_data,
             voronoi_data,
-            ghosts,
-            ghosts_trans_x,
-            ghosts_trans_y,
-            ghosts_rot,
-            ghosts_self_rot,
-            ghosts_rot_center,
+            ghost_mode,
+            ghost_m,
+            ghost_n,
+            ghost_handle,
+            ghost_self_rot,
         });
     }
 
@@ -1203,6 +1260,12 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
                         value: Scalar::new(relaxation, 0_u64, 5_u64, 1_u64),
                     },
                 );
+                properties.add(
+                    Property::VoronoiInvert,
+                    PropertyValue::VoronoiInvert {
+                        value: shape.voronoi_invert,
+                    },
+                );
                 let vertices: Vec<Vertex> = positions.iter().copied().map(Vertex::new).collect();
                 GeneralShape::new(
                     ShapeType::Voronoi,
@@ -1259,13 +1322,12 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
                 elem.set_dim_offset(i, *v);
             }
         }
-        if shape.ghosts > 0 {
-            elem.set_ghosts(shape.ghosts);
-            elem.set_ghosts_trans_x(shape.ghosts_trans_x);
-            elem.set_ghosts_trans_y(shape.ghosts_trans_y);
-            elem.set_ghosts_rot(shape.ghosts_rot);
-            elem.set_ghosts_self_rot(shape.ghosts_self_rot);
-            elem.set_ghosts_rot_center(shape.ghosts_rot_center);
+        if shape.ghost_mode != GhostMode::None {
+            elem.set_ghost_mode(shape.ghost_mode);
+            elem.set_ghost_m(shape.ghost_m);
+            elem.set_ghost_n(shape.ghost_n);
+            elem.set_ghost_handle(shape.ghost_handle);
+            elem.set_ghost_self_rot(shape.ghost_self_rot);
         }
         // Build the bezpath/polygon *after* ghosts and rotation are set so
         // they are included in the cached polygon (setters don't rebuild).
@@ -1321,6 +1383,45 @@ pub(crate) fn load_json_to_dataset(av: RefAV, json_data: String) {
             };
             let text = get_string(&note_value, "text").unwrap_or_default();
             canvas.notes.add_with_id(id, pos, size, text);
+        }
+    }
+
+    // ── User-placed dimensions ──────────────────────────────────────────
+    if let Some(udims_value) = get_prop(&value, "user_dims") {
+        let arr = Array::from(&udims_value);
+        for d in arr.iter() {
+            let Some(saved_eid1) = get_f64(&d, "eid1").and_then(f64_to_usize) else { continue };
+            let Some(vidx1) = get_f64(&d, "vidx1").and_then(f64_to_usize) else { continue };
+            let Some(saved_eid2) = get_f64(&d, "eid2").and_then(f64_to_usize) else { continue };
+            let Some(vidx2) = get_f64(&d, "vidx2").and_then(f64_to_usize) else { continue };
+            let kind = crate::shapes::DimKind::from_str(
+                &get_string(&d, "kind").unwrap_or_else(|| "h".to_string()),
+            );
+            let offset = get_f64(&d, "offset").unwrap_or(0.0);
+            let Some(eid1) = id_map.get(&saved_eid1).copied() else { continue };
+            let Some(eid2) = id_map.get(&saved_eid2).copied() else { continue };
+            let vid1 = canvas
+                .dataset
+                .shapes
+                .get(&eid1)
+                .or_else(|| canvas.dataset.grouped_shapes.get(&eid1))
+                .and_then(|s| s.get_vertices().iter().nth(vidx1).map(|(uid, _)| *uid));
+            let vid2 = canvas
+                .dataset
+                .shapes
+                .get(&eid2)
+                .or_else(|| canvas.dataset.grouped_shapes.get(&eid2))
+                .and_then(|s| s.get_vertices().iter().nth(vidx2).map(|(uid, _)| *uid));
+            let (Some(vid1), Some(vid2)) = (vid1, vid2) else { continue };
+            canvas.dataset.add_user_dim(crate::shapes::UserDimension {
+                id: 0,
+                kind,
+                eid1,
+                vid1,
+                eid2,
+                vid2,
+                offset,
+            });
         }
     }
 

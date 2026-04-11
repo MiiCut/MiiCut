@@ -5,10 +5,30 @@ use crate::types::scalar::Scalar;
 
 pub type ScalarU32 = Scalar<u32>;
 
+/// Describes the role of a vertex within its shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VertexRole {
+    /// Generic / unspecified
+    Generic,
+    /// Polygon corner (apex)
+    Apex,
+    /// Shape center (e.g. disc, oblong endpoint)
+    Center,
+    /// Radius control point (e.g. disc edge, oblong radius handle)
+    Radius,
+    /// Edge sag handle (curved edge control)
+    SagHandle,
+    /// Bounding-box corner (rectangle, text, svg, voronoi)
+    BBoxCorner,
+    /// Construction geometry point
+    Construction,
+}
+
 #[derive(Debug, Clone)]
 pub struct Vertex {
     curr: Vec2,
     saved: Vec2,
+    pub role: VertexRole,
     // For rounded apexes
     has_radius: bool,
     radius: Option<ScalarU32>,
@@ -19,6 +39,17 @@ impl Vertex {
         Self {
             saved: value,
             curr: value,
+            role: VertexRole::Generic,
+            has_radius: false,
+            radius: None,
+            last_radius: None,
+        }
+    }
+    pub fn new_with_role(value: Vec2, role: VertexRole) -> Self {
+        Self {
+            saved: value,
+            curr: value,
+            role,
             has_radius: false,
             radius: None,
             last_radius: None,
@@ -28,6 +59,7 @@ impl Vertex {
         Self {
             saved: Vec2::new(x, y),
             curr: Vec2::new(x, y),
+            role: VertexRole::Generic,
             has_radius: false,
             radius: None,
             last_radius: None,

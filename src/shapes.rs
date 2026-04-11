@@ -493,6 +493,64 @@ pub fn toolpath_to_plasma_gcode(tp: &Toolpath, p: &ToolpathParams) -> String {
     out
 }
 
+// ── User-placed dimensions ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DimKind {
+    Horizontal, // distance H between two vertices
+    Vertical,   // distance V between two vertices
+    Aligned,    // distance // segment between two vertices
+    Radius,     // radius dimension on a single vertex (Radius/SagHandle/Apex+r/BBox+r)
+}
+
+impl DimKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Horizontal => "h",
+            Self::Vertical => "v",
+            Self::Aligned => "aligned",
+            Self::Radius => "radius",
+        }
+    }
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "v" => Self::Vertical,
+            "aligned" => Self::Aligned,
+            "radius" => Self::Radius,
+            _ => Self::Horizontal,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DimToolMode {
+    None,
+    Horizontal,
+    Vertical,
+    Aligned,
+    Radius,
+}
+
+#[derive(Debug, Clone)]
+pub struct UserDimension {
+    pub id: usize,
+    pub kind: DimKind,
+    pub eid1: EUId,
+    pub vid1: VUId,
+    /// For H/V/Aligned: the second vertex. For Radius: unused.
+    pub eid2: EUId,
+    pub vid2: VUId,
+    pub offset: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RadiusInfo {
+    pub center: Vec2,
+    pub radius: f64,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 #[derive(Clone, Debug)]
 pub struct DataSet {
     pub shapes: HashMap<EUId, GeneralShape>,
@@ -507,6 +565,9 @@ pub struct DataSet {
     pub final_polygon: MultiPolygon<f64>,
     pub final_paths: Vec<BezPath>,
     pub final_polygon_dirty: bool,
+
+    pub user_dims: Vec<UserDimension>,
+    user_dim_next_id: usize,
 }
 impl Default for DataSet {
     fn default() -> Self {
@@ -528,10 +589,162 @@ impl DataSet {
             final_paths: Vec::new(),
             final_polygon_dirty: true,
             next_order: 0,
+            user_dims: Vec::new(),
+            user_dim_next_id: 0,
         }
     }
     pub fn mark_final_polygon_dirty(&mut self) {
         self.final_polygon_dirty = true;
+    }
+    pub fn add_user_dim(&mut self, dim: UserDimension) -> usize {
+        let id = self.user_dim_next_id;
+        self.user_dim_next_id += 1;
+        self.user_dims.push(UserDimension { id, ..dim });
+        id
+    }
+    pub fn remove_user_dim(&mut self, id: usize) {
+        self.user_dims.retain(|d| d.id != id);
+    }
+    /// Remove user dimensions referencing missing shapes/vertices, or radius dims whose
+    /// vertex no longer carries a radius.
+    pub fn cleanup_user_dims(&mut self) {
+        let valid: Vec<bool> = self
+            .user_dims
+            .iter()
+            .map(|d| {
+                let v1_ok = self.resolve_vertex_pos(d.eid1, d.vid1).is_some();
+                if d.kind == DimKind::Radius {
+                    v1_ok && self.resolve_radius_info(d.eid1, d.vid1).is_some()
+                } else {
+                    v1_ok && self.resolve_vertex_pos(d.eid2, d.vid2).is_some()
+                }
+            })
+            .collect();
+        let mut i = 0;
+        self.user_dims.retain(|_| {
+            let keep = valid[i];
+            i += 1;
+            keep
+        });
+    }
+    /// Resolve a vertex reference to its current world position.
+    pub fn resolve_vertex_pos(&self, eid: EUId, vid: VUId) -> Option<Vec2> {
+        let shape = self.shapes.get(&eid)
+            .or_else(|| self.grouped_shapes.get(&eid))?;
+        let vertex = shape.get_vertex(&vid)?;
+        Some(shape.vertex_display_pos(vertex.curr()))
+    }
+    /// Compute the (p1, p2) endpoints of the dimension line in world space for a given dim.
+    /// Returns (line_p1, line_p2) — the actual dimension line, not the reference vertices.
+    /// For Radius: returns (center, edge_point) along the radius direction.
+    pub fn user_dim_line(&self, dim: &UserDimension) -> Option<(Vec2, Vec2)> {
+        if dim.kind == DimKind::Radius {
+            let info = self.resolve_radius_info(dim.eid1, dim.vid1)?;
+            // Line from center to a point on the circle (using offset as the angle for handle)
+            let angle = dim.offset; // for radius, offset stores the display angle
+            let edge =
+                info.center + Vec2::new(info.radius * angle.cos(), info.radius * angle.sin());
+            return Some((info.center, edge));
+        }
+        let v1 = self.resolve_vertex_pos(dim.eid1, dim.vid1)?;
+        let v2 = self.resolve_vertex_pos(dim.eid2, dim.vid2)?;
+        match dim.kind {
+            DimKind::Horizontal => {
+                let y = (v1.y + v2.y) * 0.5 + dim.offset;
+                Some((Vec2::new(v1.x, y), Vec2::new(v2.x, y)))
+            }
+            DimKind::Vertical => {
+                let x = (v1.x + v2.x) * 0.5 + dim.offset;
+                Some((Vec2::new(x, v1.y), Vec2::new(x, v2.y)))
+            }
+            DimKind::Aligned => {
+                let seg = v2 - v1;
+                let len = seg.hypot();
+                if len < 1e-6 {
+                    return None;
+                }
+                let n = Vec2::new(-seg.y / len, seg.x / len);
+                Some((v1 + n * dim.offset, v2 + n * dim.offset))
+            }
+            DimKind::Radius => None,
+        }
+    }
+    /// Resolve radius info for a vertex that represents (or controls) a radius.
+    /// Returns (center, radius) for shapes where this vertex is meaningful as a radius source.
+    pub fn resolve_radius_info(&self, eid: EUId, vid: VUId) -> Option<RadiusInfo> {
+        use crate::shape::ShapeType;
+        use crate::types::vertex::VertexRole;
+        let shape = self
+            .shapes
+            .get(&eid)
+            .or_else(|| self.grouped_shapes.get(&eid))?;
+        let vertex = shape.get_vertex(&vid)?;
+        match vertex.role {
+            VertexRole::Center | VertexRole::Radius => {
+                // Disc / Oblong / ConstrCircle: vertex 0 = center, vertex 1 = radius handle
+                // Or for Oblong: 0/1 = centers, 2/3 = radii.
+                match shape.get_shape_type() {
+                    ShapeType::Disc | ShapeType::ConstrCircle => {
+                        let c = shape.get_vertices().val(0).curr();
+                        let r = shape.get_vertices().val(1).curr();
+                        Some(RadiusInfo { center: c, radius: (r - c).hypot() })
+                    }
+                    ShapeType::Oblong => {
+                        // The center associated with this vertex
+                        let idx = shape
+                            .get_vertices()
+                            .iter()
+                            .position(|(uid, _)| *uid == vid)?;
+                        // 0/2 pair, 1/3 pair
+                        let (c_idx, r_idx) = match idx {
+                            0 => (0, 2),
+                            1 => (1, 3),
+                            2 => (0, 2),
+                            3 => (1, 3),
+                            _ => return None,
+                        };
+                        let c = shape.get_vertices().val(c_idx as i64).curr();
+                        let r = shape.get_vertices().val(r_idx as i64).curr();
+                        Some(RadiusInfo { center: c, radius: (r - c).hypot() })
+                    }
+                    _ => None,
+                }
+            }
+            VertexRole::Apex | VertexRole::BBoxCorner => {
+                // Polygon apex / Rectangle corner with rounded radius
+                let r = vertex.get_radius()?;
+                let center = vertex.curr();
+                Some(RadiusInfo { center, radius: r as f64 })
+            }
+            VertexRole::SagHandle => {
+                // Sag handle of polygon edge — the radius is the arc radius of that edge
+                // For now, fall through (would need solve_side); skip
+                None
+            }
+            _ => None,
+        }
+    }
+    /// Hit-test: returns the user dim id whose line is within `hit_radius` of `pos`.
+    pub fn hit_test_user_dim(&self, pos: Vec2, hit_radius: f64) -> Option<usize> {
+        let mut best: Option<(usize, f64)> = None;
+        for dim in &self.user_dims {
+            let Some((p1, p2)) = self.user_dim_line(dim) else {
+                continue;
+            };
+            let seg = p2 - p1;
+            let len2 = seg.x * seg.x + seg.y * seg.y;
+            if len2 < 1e-9 {
+                continue;
+            }
+            let t = ((pos.x - p1.x) * seg.x + (pos.y - p1.y) * seg.y) / len2;
+            let t = t.clamp(0.0, 1.0);
+            let proj = p1 + seg * t;
+            let dist = (proj - pos).hypot();
+            if dist < hit_radius && best.as_ref().map_or(true, |(_, d)| dist < *d) {
+                best = Some((dim.id, dist));
+            }
+        }
+        best.map(|(id, _)| id)
     }
     pub fn push_element(&mut self, mut elem: GeneralShape) -> EUId {
         let affects_final = !matches!(
@@ -829,7 +1042,8 @@ impl DataSet {
                     (v1_sel.curr() + v2_sel.curr()) / 2.0,
                     Snap::new(),
                 );
-                let mut new_corner = Vertex::new(mid);
+                use crate::types::vertex::VertexRole;
+                let mut new_corner = Vertex::new_with_role(mid, VertexRole::Apex);
                 new_corner.enable_radius();
                 // Insert corner at the correct position
                 elem.get_vertices_mut()
@@ -838,7 +1052,7 @@ impl DataSet {
                 // since nc already shifted +1 after the corner insert)
                 let new_nc = nc + 1;
                 elem.get_vertices_mut()
-                    .insert_at(new_nc + nc, (VUId::new(), Vertex::new(mid)));
+                    .insert_at(new_nc + nc, (VUId::new(), Vertex::new_with_role(mid, VertexRole::SagHandle)));
                 // Compute winding for poly_effective_edge
                 let ccw = crate::shape::poly_winding_ccw(elem.get_vertices(), new_nc);
                 // Recompute all sag vertex positions to effective edge midpoints (reset to straight)

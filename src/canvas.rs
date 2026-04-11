@@ -1370,7 +1370,7 @@ impl Canvas {
         }
     }
 
-    pub fn draw_vs(&mut self, e: &GeneralShape) {
+    pub fn draw_vs(&mut self, e: &GeneralShape, selected: bool) {
         let scale = self.get_scale();
         for (vid, vertex) in e.get_vertices().iter() {
             let pos = e.vertex_display_pos(vertex.curr());
@@ -1424,27 +1424,65 @@ impl Canvas {
                 vec![],
             );
         }
-        // Ghost rotation center handle (crosshair)
-        if e.get_ghosts_rot() && e.get_ghosts() > 0 {
-            let c = e.get_ghosts_rot_center();
-            let sz = 6.0 / scale;
-            let mut cross = BezPath::new();
-            cross.move_to(kurbo::Point::new(c.x - sz, c.y));
-            cross.line_to(kurbo::Point::new(c.x + sz, c.y));
-            cross.move_to(kurbo::Point::new(c.x, c.y - sz));
-            cross.line_to(kurbo::Point::new(c.x, c.y + sz));
-            self.draw_path(&cross, Pattern::Composed(false), Color::Transparent, Color::Red30, vec![]);
-            let ring = point_path(c, scale);
+        // Ghost handle display (only when shape is selected)
+        if selected && e.ghost().is_active() {
+            use crate::shape::GhostMode;
+            let h = e.ghost().handle;
+            let ring = point_path(h, scale);
             self.draw_path(&ring, Pattern::Point, Color::Ocre, Color::Black, vec![]);
+            match e.ghost().mode {
+                GhostMode::Rotation => {
+                    let sz = 6.0 / scale;
+                    let mut cross = BezPath::new();
+                    cross.move_to(kurbo::Point::new(h.x - sz, h.y));
+                    cross.line_to(kurbo::Point::new(h.x + sz, h.y));
+                    cross.move_to(kurbo::Point::new(h.x, h.y - sz));
+                    cross.line_to(kurbo::Point::new(h.x, h.y + sz));
+                    self.draw_path(&cross, Pattern::Composed(false), Color::Transparent, Color::Red30, vec![]);
+                }
+                GhostMode::MirrorH => {
+                    // ↔ reflect across vertical axis at x=H.x
+                    let ext = 2000.0;
+                    let mut line = BezPath::new();
+                    line.move_to(kurbo::Point::new(h.x, -ext));
+                    line.line_to(kurbo::Point::new(h.x, ext));
+                    self.draw_path(&line, Pattern::Composed(false), Color::Transparent, Color::Red30, vec![]);
+                }
+                GhostMode::MirrorV => {
+                    // ↕ reflect across horizontal axis at y=H.y
+                    let ext = 2000.0;
+                    let mut line = BezPath::new();
+                    line.move_to(kurbo::Point::new(-ext, h.y));
+                    line.line_to(kurbo::Point::new(ext, h.y));
+                    self.draw_path(&line, Pattern::Composed(false), Color::Transparent, Color::Red30, vec![]);
+                }
+                GhostMode::Copy => {
+                    let center = e.bbox_center_pub();
+                    let sc = kurbo::Point::new(
+                        (center.x / 10.0).round() * 10.0,
+                        (center.y / 10.0).round() * 10.0,
+                    );
+                    let mut line = BezPath::new();
+                    line.move_to(sc);
+                    line.line_to(kurbo::Point::new(h.x, h.y));
+                    self.draw_path(&line, Pattern::Composed(false), Color::Transparent, Color::Red30, vec![]);
+                }
+                _ => {}
+            }
         }
     }
     pub fn draw_vertices(&mut self) {
         // move shapes out of self.dataset temporarily
         let shapes = mem::take(&mut self.dataset.shapes);
 
-        for (_, e) in shapes.iter() {
-            self.draw_vs(e);
-            self.draw_dimensions(e);
+        let selected = self.dataset.shapes_selected.clone();
+        let highlighted = self.dataset.shapes_highlighted.clone();
+        for (eid, e) in shapes.iter() {
+            let is_sel = selected.contains(eid);
+            self.draw_vs(e, is_sel);
+            if is_sel || highlighted.contains(eid) {
+                self.draw_dimensions(e);
+            }
         }
         // put back
         self.dataset.shapes = shapes;
@@ -1460,6 +1498,58 @@ impl Canvas {
             stroke_color,
             vec![],
         );
+    }
+    pub fn draw_user_dimensions(&mut self, selected_id: Option<usize>) {
+        use crate::dimensions::{dim_classic, dim_disc};
+        use crate::shapes::DimKind;
+        let dims = self.dataset.user_dims.clone();
+        for dim in &dims {
+            let cinfo = self.get_canvas_infos();
+            let stroke_override = if Some(dim.id) == selected_id {
+                Some(Color::Red)
+            } else {
+                None
+            };
+            if dim.kind == DimKind::Radius {
+                let Some(info) = self.dataset.resolve_radius_info(dim.eid1, dim.vid1) else {
+                    continue;
+                };
+                let (path, pattern, colors, text, _) =
+                    dim_disc(info.center, info.radius, dim.offset, cinfo);
+                let stroke = stroke_override.unwrap_or(colors.stroke_color);
+                self.draw_path(&path, pattern, colors.fill_color, stroke, text);
+                continue;
+            }
+            let p1 = self.dataset.resolve_vertex_pos(dim.eid1, dim.vid1);
+            let p2 = self.dataset.resolve_vertex_pos(dim.eid2, dim.vid2);
+            let (Some(p1), Some(p2)) = (p1, p2) else {
+                continue;
+            };
+            let (dp1, dp2, label) = match dim.kind {
+                DimKind::Horizontal => {
+                    let y = (p1.y + p2.y) * 0.5;
+                    (
+                        Vec2::new(p1.x, y),
+                        Vec2::new(p2.x, y),
+                        format!("{:.1}", (p2.x - p1.x).abs()),
+                    )
+                }
+                DimKind::Vertical => {
+                    let x = (p1.x + p2.x) * 0.5;
+                    (
+                        Vec2::new(x, p1.y),
+                        Vec2::new(x, p2.y),
+                        format!("{:.1}", (p2.y - p1.y).abs()),
+                    )
+                }
+                DimKind::Aligned => (p1, p2, format!("{:.1}", (p2 - p1).hypot())),
+                DimKind::Radius => continue,
+            };
+            let (path, pattern, colors, text, _handle) =
+                dim_classic(dp1, dp2, dim.offset, label, cinfo);
+            let stroke = stroke_override.unwrap_or(colors.stroke_color);
+            self.draw_path(&path, pattern, colors.fill_color, stroke, text);
+        }
     }
     pub fn draw_paths_sets(&mut self) {
         self.draw_paths_sets_with_svg_bbox(false);
@@ -1524,10 +1614,11 @@ impl Canvas {
                 let path = shape.get_bezpath_rotated();
                 self.draw_path(&path, pattern, fill_color, stroke_color, vec![]);
             }
-            return;
+            // fall through to draw ghosts below
+        } else {
+            let path = shape.get_bezpath_rotated();
+            self.draw_path(&path, pattern, fill_color, stroke_color, vec![]);
         }
-        let path = shape.get_bezpath_rotated();
-        self.draw_path(&path, pattern, fill_color, stroke_color, vec![]);
         // Draw ghost copies (apply shape rotation for display)
         let ghost_paths = shape.get_ghost_bezpaths();
         if !ghost_paths.is_empty() {

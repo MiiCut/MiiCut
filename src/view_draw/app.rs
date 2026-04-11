@@ -3,7 +3,7 @@ use crate::{
     canvas::{CanvasKind, Color, Pattern},
     dimensions::dim_hv,
     dom::{
-        add_property_number_input, add_property_section, add_property_text_input,
+        add_property_number_input, add_property_row, add_property_section, add_property_text_input,
         add_property_two_number_inputs, add_property_value, Tabs,
     },
     helpers::canvas_fit::zoom_canvas_at,
@@ -67,6 +67,7 @@ impl AppVars {
         self.notes.draft = None;
         self.notes.drag = None;
         self.notes.selected = None;
+        self.deselect_dim_tool();
         self.user_icons
             .iter()
             .for_each(|icon| self.html_deselect_icons(*icon));
@@ -79,6 +80,7 @@ impl AppVars {
         self.element_on_creation = None;
         self.notes.drag = None;
         self.notes.selected = None;
+        self.deselect_dim_tool();
         self.user_icons
             .iter()
             .for_each(|icon| self.html_deselect_icons(*icon));
@@ -96,6 +98,51 @@ impl AppVars {
         if let Some(html_element) = self.document.get_element_by_id("icon-note") {
             if let Ok(html_element) = html_element.dyn_into::<HtmlElement>() {
                 let _ = html_element.set_attribute("class", "icon");
+            }
+        }
+    }
+    pub(crate) fn select_dim_tool(&mut self, mode: crate::shapes::DimToolMode) {
+        self.icon_selected = ShapeType::Arrow;
+        self.notes.mode = false;
+        self.dim_tool_mode = mode;
+        self.dim_tool_first = None;
+        self.element_on_creation = None;
+        self.user_icons
+            .iter()
+            .for_each(|icon| self.html_deselect_icons(*icon));
+        self.html_deselect_note_icon();
+        self.html_deselect_dim_icons();
+        self.html_select_dim_icon(mode);
+    }
+    pub(crate) fn deselect_dim_tool(&mut self) {
+        self.dim_tool_mode = crate::shapes::DimToolMode::None;
+        self.dim_tool_first = None;
+        self.html_deselect_dim_icons();
+    }
+    fn dim_icon_id(mode: crate::shapes::DimToolMode) -> Option<&'static str> {
+        use crate::shapes::DimToolMode;
+        match mode {
+            DimToolMode::Horizontal => Some("icon-dim-h"),
+            DimToolMode::Vertical => Some("icon-dim-v"),
+            DimToolMode::Aligned => Some("icon-dim-a"),
+            DimToolMode::Radius => Some("icon-dim-r"),
+            DimToolMode::None => None,
+        }
+    }
+    fn html_select_dim_icon(&self, mode: crate::shapes::DimToolMode) {
+        let Some(id) = Self::dim_icon_id(mode) else { return };
+        if let Some(el) = self.document.get_element_by_id(id) {
+            if let Ok(el) = el.dyn_into::<HtmlElement>() {
+                let _ = el.set_attribute("class", "icon icon-selected");
+            }
+        }
+    }
+    fn html_deselect_dim_icons(&self) {
+        for id in &["icon-dim-h", "icon-dim-v", "icon-dim-a", "icon-dim-r"] {
+            if let Some(el) = self.document.get_element_by_id(id) {
+                if let Ok(el) = el.dyn_into::<HtmlElement>() {
+                    let _ = el.set_attribute("class", "icon");
+                }
             }
         }
     }
@@ -260,11 +307,22 @@ pub(crate) fn update_context_help(av: &RefAV) -> Option<()> {
             } else {
                 lines.push("Click to place the second point".to_string());
             }
+        } else if avb.dim_tool_mode != crate::shapes::DimToolMode::None {
+            use crate::shapes::DimToolMode;
+            if avb.dim_tool_mode == DimToolMode::Radius {
+                lines.push("Click on a vertex with a radius".to_string());
+            } else if avb.dim_tool_first.is_some() {
+                lines.push("Click on the second vertex".to_string());
+            } else {
+                lines.push("Click on the first vertex".to_string());
+            }
         } else if matches!(avb.icon_selected, ShapeType::Poly) {
             lines.push("Click to add points".to_string());
             lines.push("Right-click to finish".to_string());
         } else if matches!(avb.icon_selected, ShapeType::Arrow) {
-            if canvas.dataset.vertex_selected.is_some() {
+            if canvas.dataset.vertex_selected.is_some() && canvas.get_user_ui().is_left_down() {
+                lines.push("Shift: remove magnetism".to_string());
+            } else if canvas.dataset.vertex_selected.is_some() {
                 lines.push("Space: change apex type".to_string());
                 lines.push("↑/↓ change radius".to_string());
             } else if canvas.dataset.shapes_selected.len() > 1 {
@@ -405,6 +463,174 @@ pub(crate) fn update_shape_properties_panel(
 
         (eid, props, shape_section_label)
     };
+
+    // ── Ghost section (at top so dropdown doesn't overflow) ─────
+    {
+        use crate::shape::GhostMode;
+        let avb = av.borrow();
+        let canvas = &avb.canvases[CanvasKind::Draw.idx()];
+        let shape = canvas.dataset.get_element(eid)?;
+        let ghost = shape.ghost().clone();
+        drop(avb);
+
+        add_property_section(&document, &body, "───── Ghosts ─────");
+
+        // Mode dropdown
+        {
+            let row = add_property_row(&document, &body, "mode")?;
+            let select: web_sys::HtmlSelectElement = document
+                .create_element("select")
+                .ok()?
+                .dyn_into::<web_sys::HtmlSelectElement>()
+                .ok()?;
+            select.set_class_name("prop-input");
+            for m in GhostMode::ALL {
+                let opt: web_sys::HtmlOptionElement = document
+                    .create_element("option")
+                    .ok()?
+                    .dyn_into::<web_sys::HtmlOptionElement>()
+                    .ok()?;
+                opt.set_value(m.as_str());
+                opt.set_text_content(Some(m.label()));
+                if m == ghost.mode {
+                    opt.set_selected(true);
+                }
+                let _ = select.append_child(&opt);
+            }
+            let _ = row.append_child(&select);
+            let av_in = av.clone();
+            let sel_c = select.clone();
+            let on_change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
+                let mode = GhostMode::from_str(&sel_c.value());
+                let _ = sel_c.blur();
+                let Ok(mut avb) = av_in.try_borrow_mut() else {
+                    return;
+                };
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                if let Some(s) = canvas.dataset.get_element_mut(eid) {
+                    s.set_ghost_mode(mode);
+                    s.set_bezpath();
+                }
+                canvas.dataset.mark_final_polygon_dirty();
+                canvas.dataset.calc_final_polygon();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+                drop(avb);
+                render_draw_view(av_in.clone());
+            });
+            let _ = select
+                .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+            on_change.forget();
+        }
+
+        // M (copies) — shown for Copy, Matrix, Rotation
+        if matches!(
+            ghost.mode,
+            GhostMode::Copy | GhostMode::Matrix | GhostMode::Rotation
+        ) {
+            let input =
+                add_property_number_input(&document, &body, "M", Some(ghost.m as f64), 1.0)?;
+            input.set_step("1");
+            input.set_min("1");
+            input.set_max("50");
+            let av_in = av.clone();
+            let input_c = input.clone();
+            let on_change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
+                let Ok(v) = input_c.value().parse::<f64>() else {
+                    return;
+                };
+                let v = (v.round() as usize).clamp(1, 50);
+                let Ok(mut avb) = av_in.try_borrow_mut() else {
+                    return;
+                };
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                if let Some(s) = canvas.dataset.get_element_mut(eid) {
+                    s.set_ghost_m(v);
+                    s.set_bezpath();
+                }
+                canvas.dataset.mark_final_polygon_dirty();
+                canvas.dataset.calc_final_polygon();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+                drop(avb);
+                render_draw_view(av_in.clone());
+            });
+            let _ = input
+                .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+            on_change.forget();
+        }
+
+        // N (rows) — shown only for Matrix
+        if ghost.mode == GhostMode::Matrix {
+            let input =
+                add_property_number_input(&document, &body, "N", Some(ghost.n as f64), 1.0)?;
+            input.set_step("1");
+            input.set_min("1");
+            input.set_max("50");
+            let av_in = av.clone();
+            let input_c = input.clone();
+            let on_change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
+                let Ok(v) = input_c.value().parse::<f64>() else {
+                    return;
+                };
+                let v = (v.round() as usize).clamp(1, 50);
+                let Ok(mut avb) = av_in.try_borrow_mut() else {
+                    return;
+                };
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                if let Some(s) = canvas.dataset.get_element_mut(eid) {
+                    s.set_ghost_n(v);
+                    s.set_bezpath();
+                }
+                canvas.dataset.mark_final_polygon_dirty();
+                canvas.dataset.calc_final_polygon();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+                drop(avb);
+                render_draw_view(av_in.clone());
+            });
+            let _ = input
+                .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+            on_change.forget();
+        }
+
+        // Self-rotation checkbox — shown only for Rotation
+        if ghost.mode == GhostMode::Rotation {
+            let input = add_property_number_input(
+                &document,
+                &body,
+                "self rot",
+                Some(if ghost.self_rot { 1.0 } else { 0.0 }),
+                1.0,
+            )?;
+            input.set_attribute("type", "checkbox").ok();
+            if ghost.self_rot {
+                input.set_attribute("checked", "").ok();
+            }
+            let av_in = av.clone();
+            let input_c = input.clone();
+            let on_change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
+                let checked = input_c.checked();
+                let Ok(mut avb) = av_in.try_borrow_mut() else {
+                    return;
+                };
+                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                if let Some(s) = canvas.dataset.get_element_mut(eid) {
+                    s.set_ghost_self_rot(checked);
+                    s.set_bezpath();
+                }
+                canvas.dataset.mark_final_polygon_dirty();
+                canvas.dataset.calc_final_polygon();
+                avb.refresh_toolpath_cache();
+                avb.refresh_gcode_cache();
+                drop(avb);
+                render_draw_view(av_in.clone());
+            });
+            let _ = input
+                .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+            on_change.forget();
+        }
+    }
 
     let _ = add_property_section(&document, &body, &shape_section_label);
     for (label, prop, prop_val) in shape_props {
@@ -896,6 +1122,42 @@ pub(crate) fn update_shape_properties_panel(
                     .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
                 on_change.forget();
             }
+            VoronoiInvert { value } => {
+                let input = add_property_number_input(
+                    &document,
+                    &body,
+                    &label,
+                    Some(if value { 1.0 } else { 0.0 }),
+                    1.0,
+                )?;
+                input.set_attribute("type", "checkbox").ok();
+                if value {
+                    input.set_attribute("checked", "").ok();
+                }
+                let av_in = av.clone();
+                let input_c = input.clone();
+                let on_change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
+                    let checked = input_c.checked();
+                    let Ok(mut avb) = av_in.try_borrow_mut() else { return };
+                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                    let Some(shape) = canvas.dataset.get_element_mut(eid) else { return };
+                    if let Some(PropertyValue::VoronoiInvert { value: v }) =
+                        shape.get_properties_mut().get_mut(&prop)
+                    {
+                        *v = checked;
+                    }
+                    let _ = shape.update_from_property(&prop);
+                    shape.set_bezpath();
+                    canvas.dataset.mark_final_polygon_dirty();
+                    canvas.dataset.calc_final_polygon();
+                    avb.refresh_toolpath_cache();
+                    avb.refresh_gcode_cache();
+                    drop(avb);
+                    render_draw_view(av_in.clone());
+                });
+                let _ = input.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+                on_change.forget();
+            }
             Text { value } => {
                 let input = add_property_text_input(&document, &body, &label, value.as_str())?;
 
@@ -928,175 +1190,6 @@ pub(crate) fn update_shape_properties_panel(
             }
             PropertyValue::Font { value } => {
                 let _ = add_property_value(&document, &body, &label, value.as_str());
-            }
-        }
-    }
-
-    // ── Ghost section ──────────────────────────────────────────────────────
-    {
-        let avb = av.borrow();
-        let canvas = &avb.canvases[CanvasKind::Draw.idx()];
-        let shape = canvas.dataset.get_element(eid)?;
-        let ghosts_count = shape.get_ghosts();
-        let ghosts_tx = shape.get_ghosts_trans_x();
-        let ghosts_ty = shape.get_ghosts_trans_y();
-        let ghosts_rot = shape.get_ghosts_rot();
-        let ghosts_self_rot = shape.get_ghosts_self_rot();
-        let ghosts_rc = shape.get_ghosts_rot_center();
-
-        add_property_section(&document, &body, "───── Ghosts ─────");
-
-        // Ghost count
-        let input = add_property_number_input(&document, &body, "copies", Some(ghosts_count as f64), 1.0)?;
-        input.set_step("1");
-        input.set_min("0");
-        input.set_max("50");
-        let av_in = av.clone();
-        let input_c = input.clone();
-        let on_change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
-            let Ok(v) = input_c.value().parse::<f64>() else { return };
-            let v = (v.round() as usize).min(50);
-            let Ok(mut avb) = av_in.try_borrow_mut() else { return };
-            let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-            if let Some(s) = canvas.dataset.get_element_mut(eid) {
-                s.set_ghosts(v);
-                s.set_bezpath();
-            }
-            canvas.dataset.mark_final_polygon_dirty();
-            canvas.dataset.calc_final_polygon();
-            avb.refresh_toolpath_cache();
-            avb.refresh_gcode_cache();
-            drop(avb);
-            render_draw_view(av_in.clone());
-        });
-        let _ = input.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
-        on_change.forget();
-
-        // Rotation mode checkbox
-        {
-            let input = add_property_number_input(&document, &body, "rot mode", Some(if ghosts_rot { 1.0 } else { 0.0 }), 1.0)?;
-            input.set_attribute("type", "checkbox").ok();
-            if ghosts_rot { input.set_attribute("checked", "").ok(); }
-            let av_in = av.clone();
-            let input_c = input.clone();
-            let on_change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
-                let checked = input_c.checked();
-                let _ = input_c.blur(); // release focus so properties panel rebuilds
-                let Ok(mut avb) = av_in.try_borrow_mut() else { return };
-                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                if let Some(s) = canvas.dataset.get_element_mut(eid) {
-                    s.set_ghosts_rot(checked);
-                    s.set_bezpath();
-                }
-                canvas.dataset.mark_final_polygon_dirty();
-                canvas.dataset.calc_final_polygon();
-                avb.refresh_toolpath_cache();
-                avb.refresh_gcode_cache();
-                drop(avb);
-                render_draw_view(av_in.clone());
-            });
-            let _ = input.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
-            on_change.forget();
-        }
-
-        if !ghosts_rot {
-            // Trans X
-            let input = add_property_number_input(&document, &body, "trans X", Some(ghosts_tx), 1.0)?;
-            let av_in = av.clone();
-            let input_c = input.clone();
-            let on_change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
-                let Ok(v) = input_c.value().parse::<f64>() else { return };
-                let Ok(mut avb) = av_in.try_borrow_mut() else { return };
-                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                if let Some(s) = canvas.dataset.get_element_mut(eid) {
-                    s.set_ghosts_trans_x(v);
-                    s.set_bezpath();
-                }
-                canvas.dataset.mark_final_polygon_dirty();
-                canvas.dataset.calc_final_polygon();
-                avb.refresh_toolpath_cache();
-                avb.refresh_gcode_cache();
-                drop(avb);
-                render_draw_view(av_in.clone());
-            });
-            let _ = input.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
-            on_change.forget();
-
-            // Trans Y
-            let input = add_property_number_input(&document, &body, "trans Y", Some(ghosts_ty), 1.0)?;
-            let av_in = av.clone();
-            let input_c = input.clone();
-            let on_change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
-                let Ok(v) = input_c.value().parse::<f64>() else { return };
-                let Ok(mut avb) = av_in.try_borrow_mut() else { return };
-                let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                if let Some(s) = canvas.dataset.get_element_mut(eid) {
-                    s.set_ghosts_trans_y(v);
-                    s.set_bezpath();
-                }
-                canvas.dataset.mark_final_polygon_dirty();
-                canvas.dataset.calc_final_polygon();
-                avb.refresh_toolpath_cache();
-                avb.refresh_gcode_cache();
-                drop(avb);
-                render_draw_view(av_in.clone());
-            });
-            let _ = input.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
-            on_change.forget();
-        } else {
-            // Self-rot checkbox
-            {
-                let input = add_property_number_input(&document, &body, "self rot", Some(if ghosts_self_rot { 1.0 } else { 0.0 }), 1.0)?;
-                input.set_attribute("type", "checkbox").ok();
-                if ghosts_self_rot { input.set_attribute("checked", "").ok(); }
-                let av_in = av.clone();
-                let input_c = input.clone();
-                let on_change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
-                    let checked = input_c.checked();
-                    let Ok(mut avb) = av_in.try_borrow_mut() else { return };
-                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                    if let Some(s) = canvas.dataset.get_element_mut(eid) {
-                        s.set_ghosts_self_rot(checked);
-                        s.set_bezpath();
-                    }
-                    canvas.dataset.mark_final_polygon_dirty();
-                    canvas.dataset.calc_final_polygon();
-                    avb.refresh_toolpath_cache();
-                    avb.refresh_gcode_cache();
-                    drop(avb);
-                    render_draw_view(av_in.clone());
-                });
-                let _ = input.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
-                on_change.forget();
-            }
-
-            // Rot center X/Y
-            let (input_x, input_y) = add_property_two_number_inputs(
-                &document, &body, "rot center", Some(ghosts_rc.x), Some(ghosts_rc.y), 1.0, 1,
-            )?;
-            {
-                let av_in = av.clone();
-                let ix = input_x.clone();
-                let iy = input_y.clone();
-                let on_change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
-                    let Ok(vx) = ix.value().parse::<f64>() else { return };
-                    let Ok(vy) = iy.value().parse::<f64>() else { return };
-                    let Ok(mut avb) = av_in.try_borrow_mut() else { return };
-                    let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
-                    if let Some(s) = canvas.dataset.get_element_mut(eid) {
-                        s.set_ghosts_rot_center(Vec2::new(vx, vy));
-                        s.set_bezpath();
-                    }
-                    canvas.dataset.mark_final_polygon_dirty();
-                    canvas.dataset.calc_final_polygon();
-                    avb.refresh_toolpath_cache();
-                    avb.refresh_gcode_cache();
-                    drop(avb);
-                    render_draw_view(av_in.clone());
-                });
-                let _ = input_x.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
-                let _ = input_y.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
-                on_change.forget();
             }
         }
     }
@@ -1289,6 +1382,42 @@ pub(crate) fn init_icons(av: RefAV) -> Result<(), JsValue> {
             &note_icon,
             Box::new(on_icon_mouseout),
         )?;
+    }
+
+    use crate::shapes::DimToolMode;
+    for (id, mode, label) in [
+        ("icon-dim-h", DimToolMode::Horizontal, "Horizontal dimension"),
+        ("icon-dim-v", DimToolMode::Vertical, "Vertical dimension"),
+        ("icon-dim-a", DimToolMode::Aligned, "Aligned dimension"),
+        ("icon-dim-r", DimToolMode::Radius, "Radius dimension"),
+    ] {
+        if let Some(icon) = av.borrow().document.get_element_by_id(id) {
+            set_callback(
+                av.clone(),
+                "click".into(),
+                &icon,
+                Box::new(move |av, _event| {
+                    let Ok(mut avb) = av.try_borrow_mut() else {
+                        return;
+                    };
+                    avb.select_dim_tool(mode);
+                    drop(avb);
+                    render_draw_view(av.clone());
+                }),
+            )?;
+            set_callback(
+                av.clone(),
+                "mouseenter".into(),
+                &icon,
+                Box::new(move |av, event| on_icon_mouseover_label(av, event, label)),
+            )?;
+            set_callback(
+                av.clone(),
+                "mouseleave".into(),
+                &icon,
+                Box::new(on_icon_mouseout),
+            )?;
+        }
     }
 
     Ok(())
@@ -1844,7 +1973,41 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                     if !is_draw_view {
                         return Ok(());
                     }
-                    if let Some(dd) = avb.dim_drag {
+                    // User dimension drag: update offset
+                    if let Some(udd) = avb.user_dim_drag {
+                        use crate::shapes::DimKind;
+                        let mouse_pos = avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
+                        // Look up the dim kind first
+                        let dim_kind = avb.canvases[CanvasKind::Draw.idx()]
+                            .dataset
+                            .user_dims
+                            .iter()
+                            .find(|d| d.id == udd.dim_id)
+                            .map(|d| d.kind);
+                        let new_offset = match dim_kind {
+                            Some(DimKind::Radius) => {
+                                // For radius, normal stores the circle center; offset = angle
+                                let center = udd.normal; // reused field
+                                let v = mouse_pos - center;
+                                v.y.atan2(v.x)
+                            }
+                            _ => {
+                                let delta = mouse_pos - udd.start_mouse;
+                                udd.start_offset
+                                    + delta.x * udd.normal.x
+                                    + delta.y * udd.normal.y
+                            }
+                        };
+                        if let Some(dim) = avb.canvases[CanvasKind::Draw.idx()]
+                            .dataset
+                            .user_dims
+                            .iter_mut()
+                            .find(|d| d.id == udd.dim_id)
+                        {
+                            dim.offset = new_offset;
+                        }
+                        do_render = true;
+                    } else if let Some(dd) = avb.dim_drag {
                         let mouse_pos = avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
                         let new_offset = if dd.is_angular {
                             // Angle from circle center to current mouse position
@@ -1878,20 +2041,26 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                             shape.set_rotation_curr(new_rotation);
                         }
                         do_render = true;
-                    } else if let Some(sid) = avb.ghost_center_drag {
+                    } else if let Some(sid) = avb.ghost_handle_drag {
                         use crate::helpers::math::snap_vertex;
                         let ui = avb.canvases[CanvasKind::Draw.idx()].get_user_ui();
                         let mouse_pos = ui.draw_pos;
                         let snap = ui.snap;
                         let snapped = snap_vertex(mouse_pos, snap);
                         if let Some(shape) = avb.canvases[CanvasKind::Draw.idx()]
-                            .dataset.shapes.get_mut(&sid)
+                            .dataset
+                            .shapes
+                            .get_mut(&sid)
                         {
-                            shape.set_ghosts_rot_center(snapped);
+                            shape.set_ghost_handle(snapped);
                             shape.set_bezpath();
                         }
-                        avb.canvases[CanvasKind::Draw.idx()].dataset.mark_final_polygon_dirty();
-                        avb.canvases[CanvasKind::Draw.idx()].dataset.calc_final_polygon();
+                        avb.canvases[CanvasKind::Draw.idx()]
+                            .dataset
+                            .mark_final_polygon_dirty();
+                        avb.canvases[CanvasKind::Draw.idx()]
+                            .dataset
+                            .calc_final_polygon();
                         do_render = true;
                     } else if avb.update_selection_window_current() {
                         do_render = true;
@@ -1909,6 +2078,177 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                 if button == MouseButton::Left {
                     if !is_draw_view {
                         return Ok(());
+                    }
+
+                    // ── Dimension tool: vertex picking ──────────────────────
+                    {
+                        use crate::shapes::{DimKind, DimToolMode, UserDimension};
+                        use crate::types::vertex::VertexRole;
+                        let mode = avb.dim_tool_mode;
+                        if mode != DimToolMode::None {
+                            let vh = avb.canvases[CanvasKind::Draw.idx()].dataset.vertex_highlighted;
+                            if let Some((eid, vid)) = vh {
+                                let role = avb.canvases[CanvasKind::Draw.idx()]
+                                    .dataset
+                                    .shapes
+                                    .get(&eid)
+                                    .and_then(|s| s.get_vertex(&vid))
+                                    .map(|v| v.role);
+                                let accept = match (mode, role) {
+                                    (DimToolMode::Horizontal, Some(r))
+                                    | (DimToolMode::Vertical, Some(r))
+                                    | (DimToolMode::Aligned, Some(r)) => matches!(
+                                        r,
+                                        VertexRole::Apex
+                                            | VertexRole::Center
+                                            | VertexRole::BBoxCorner
+                                    ),
+                                    (DimToolMode::Radius, Some(_)) => avb
+                                        .canvases[CanvasKind::Draw.idx()]
+                                        .dataset
+                                        .resolve_radius_info(eid, vid)
+                                        .is_some(),
+                                    _ => false,
+                                };
+                                if accept {
+                                    match mode {
+                                        DimToolMode::Radius => {
+                                            // Single click → create radius dim
+                                            let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
+                                            canvas.dataset.add_user_dim(UserDimension {
+                                                id: 0,
+                                                kind: DimKind::Radius,
+                                                eid1: eid,
+                                                vid1: vid,
+                                                eid2: eid,
+                                                vid2: vid,
+                                                offset: 0.4, // initial display angle (radians)
+                                            });
+                                            avb.dim_tool_first = None;
+                                            drop(avb);
+                                            render_draw_view(av.clone());
+                                            return Ok(());
+                                        }
+                                        DimToolMode::Horizontal
+                                        | DimToolMode::Vertical
+                                        | DimToolMode::Aligned => {
+                                            if let Some((eid1, vid1)) = avb.dim_tool_first.take()
+                                            {
+                                                // Second click → finalize H/V/Aligned dim
+                                                let kind = match mode {
+                                                    DimToolMode::Horizontal => DimKind::Horizontal,
+                                                    DimToolMode::Vertical => DimKind::Vertical,
+                                                    DimToolMode::Aligned => DimKind::Aligned,
+                                                    _ => DimKind::Aligned,
+                                                };
+                                                let canvas =
+                                                    &mut avb.canvases[CanvasKind::Draw.idx()];
+                                                canvas.dataset.add_user_dim(UserDimension {
+                                                    id: 0,
+                                                    kind,
+                                                    eid1,
+                                                    vid1,
+                                                    eid2: eid,
+                                                    vid2: vid,
+                                                    offset: 30.0,
+                                                });
+                                                drop(avb);
+                                                render_draw_view(av.clone());
+                                                return Ok(());
+                                            } else {
+                                                avb.dim_tool_first = Some((eid, vid));
+                                                drop(avb);
+                                                render_draw_view(av.clone());
+                                                return Ok(());
+                                            }
+                                        }
+                                        DimToolMode::None => {}
+                                    }
+                                }
+                            }
+                            // Click off vertex in dim mode → just consume the click (no shape select)
+                            drop(avb);
+                            return Ok(());
+                        }
+                    }
+
+                    // Check if clicking on a user dimension line (select + drag offset)
+                    {
+                        let draw_pos = avb.canvases[CanvasKind::Draw.idx()].get_user_ui().draw_pos;
+                        let hit_radius = 8.0
+                            / avb.canvases[CanvasKind::Draw.idx()].get_scale().max(0.001);
+                        let hit_dim = avb.canvases[CanvasKind::Draw.idx()]
+                            .dataset
+                            .hit_test_user_dim(draw_pos, hit_radius);
+                        if let Some(dim_id) = hit_dim {
+                            avb.user_dim_selected = Some(dim_id);
+                            // Clear other selections
+                            avb.canvases[CanvasKind::Draw.idx()].dataset.shapes_selected.clear();
+                            avb.canvases[CanvasKind::Draw.idx()].dataset.vertex_selected = None;
+                            let dim = avb.canvases[CanvasKind::Draw.idx()]
+                                .dataset
+                                .user_dims
+                                .iter()
+                                .find(|d| d.id == dim_id)
+                                .cloned();
+                            if let Some(dim) = dim {
+                                use crate::shapes::DimKind;
+                                if dim.kind == DimKind::Radius {
+                                    // Radius dim drag rotates the angle
+                                    let info = avb.canvases[CanvasKind::Draw.idx()]
+                                        .dataset
+                                        .resolve_radius_info(dim.eid1, dim.vid1);
+                                    if let Some(info) = info {
+                                        avb.user_dim_drag = Some(crate::app::UserDimDrag {
+                                            dim_id,
+                                            start_mouse: draw_pos,
+                                            start_offset: dim.offset,
+                                            normal: Vec2::new(info.center.x, info.center.y),
+                                        });
+                                        avb.selection_window = None;
+                                        drop(avb);
+                                        render_draw_view(av.clone());
+                                        return Ok(());
+                                    }
+                                } else {
+                                    let p1 = avb.canvases[CanvasKind::Draw.idx()]
+                                        .dataset
+                                        .resolve_vertex_pos(dim.eid1, dim.vid1);
+                                    let p2 = avb.canvases[CanvasKind::Draw.idx()]
+                                        .dataset
+                                        .resolve_vertex_pos(dim.eid2, dim.vid2);
+                                    if let (Some(p1), Some(p2)) = (p1, p2) {
+                                        let normal = match dim.kind {
+                                            DimKind::Horizontal => Vec2::new(0.0, 1.0),
+                                            DimKind::Vertical => Vec2::new(1.0, 0.0),
+                                            DimKind::Aligned => {
+                                                let seg = p2 - p1;
+                                                let l = seg.hypot();
+                                                if l > 1e-6 {
+                                                    Vec2::new(-seg.y / l, seg.x / l)
+                                                } else {
+                                                    Vec2::new(0.0, 1.0)
+                                                }
+                                            }
+                                            DimKind::Radius => Vec2::new(0.0, 1.0),
+                                        };
+                                        avb.user_dim_drag = Some(crate::app::UserDimDrag {
+                                            dim_id,
+                                            start_mouse: draw_pos,
+                                            start_offset: dim.offset,
+                                            normal,
+                                        });
+                                        avb.selection_window = None;
+                                        drop(avb);
+                                        render_draw_view(av.clone());
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        } else {
+                            // Click elsewhere → deselect any user dimension
+                            avb.user_dim_selected = None;
+                        }
                     }
 
                     // Check if clicking on a dim handle
@@ -1963,7 +2303,9 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                                             if sh.get_vertices().len() < 3 {
                                                 return None;
                                             }
-                                            let apices = sh.get_vertices().get_apices_poly(sh.get_n_corners());
+                                            let apices = sh
+                                                .get_vertices()
+                                                .get_apices_poly(sh.get_n_corners());
                                             apices.into_iter().find_map(|a| {
                                                 if let ApexType::Arc { s, c, .. } = a {
                                                     Some((s - c).y.atan2((s - c).x))
@@ -2037,20 +2379,20 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                             return Ok(());
                         }
                     }
-                    // Ghost rotation center hit-test
+                    // Ghost handle hit-test
                     {
                         let shapes = &avb.canvases[CanvasKind::Draw.idx()].dataset.shapes;
-                        let found_gc = shapes.iter().find_map(|(&sid, shape)| {
-                            if shape.get_ghosts_rot() && shape.get_ghosts() > 0 {
-                                let c = shape.get_ghosts_rot_center();
-                                if (c - draw_pos).hypot() < hit_radius {
+                        let found_gh = shapes.iter().find_map(|(&sid, shape)| {
+                            if shape.ghost().is_active() {
+                                let h = shape.ghost().handle;
+                                if (h - draw_pos).hypot() < hit_radius {
                                     return Some(sid);
                                 }
                             }
                             None
                         });
-                        if let Some(sid) = found_gc {
-                            avb.ghost_center_drag = Some(sid);
+                        if let Some(sid) = found_gh {
+                            avb.ghost_handle_drag = Some(sid);
                             avb.selection_window = None;
                             drop(avb);
                             render_active_view(av.clone());
@@ -2103,7 +2445,15 @@ pub(crate) fn update(av: RefAV, user_action: UserAction) -> Result<(), MyError> 
                         }
                         return Ok(());
                     }
-                    if avb.ghost_center_drag.take().is_some() {
+                    if avb.user_dim_drag.take().is_some() {
+                        do_render = true;
+                        drop(avb);
+                        if do_render {
+                            render_active_view(av.clone());
+                        }
+                        return Ok(());
+                    }
+                    if avb.ghost_handle_drag.take().is_some() {
                         {
                             let canvas = &mut avb.canvases[CanvasKind::Draw.idx()];
                             canvas.dataset.mark_final_polygon_dirty();
@@ -2439,6 +2789,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
         let svg_bbox_only = true;
         let element_on_creation = avb.element_on_creation.clone();
         let selection_window = avb.selection_window;
+        let user_dim_selected = avb.user_dim_selected;
         let canvas_draw = &mut avb.canvases[CanvasKind::Draw.idx()];
 
         canvas_draw.clear();
@@ -2449,6 +2800,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
             canvas_draw.draw_paths_sets_with_svg_bbox(svg_bbox_only);
 
             canvas_draw.draw_vertices();
+            canvas_draw.draw_user_dimensions(user_dim_selected);
         }
 
         if let Some((cs, mut vs)) = element_on_creation {
@@ -2459,7 +2811,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
                         vs.push(canvas_draw.get_user_ui().pointer.curr());
                         if let Some(e) = GeneralShape::new_shape_disc(vs[0], vs[1], 0) {
                             canvas_draw.draw_paths_creation(&e);
-                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_vs(&e, false);
                             canvas_draw.draw_dimensions(&e);
                         }
                     }
@@ -2469,7 +2821,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
                         vs.push(canvas_draw.get_user_ui().pointer.curr());
                         if let Some(e) = GeneralShape::new_shape_rectangle(vs[0], vs[1], 0) {
                             canvas_draw.draw_paths_creation(&e);
-                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_vs(&e, false);
                             canvas_draw.draw_dimensions(&e);
                         }
                     }
@@ -2479,7 +2831,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
                         vs.push(canvas_draw.get_user_ui().pointer.curr());
                         if let Some(e) = GeneralShape::new_shape_oblong(vs[0], vs[1], 0) {
                             canvas_draw.draw_paths_creation(&e);
-                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_vs(&e, false);
                             canvas_draw.draw_dimensions(&e);
                         }
                     }
@@ -2510,7 +2862,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
                         vs.push(canvas_draw.get_user_ui().pointer.curr());
                         if let Some(e) = GeneralShape::new_shape_constr_line(vs[0], vs[1], 0) {
                             canvas_draw.draw_paths_creation(&e);
-                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_vs(&e, false);
                             canvas_draw.draw_dimensions(&e);
                         }
                     }
@@ -2520,7 +2872,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
                         vs.push(canvas_draw.get_user_ui().pointer.curr());
                         if let Some(e) = GeneralShape::new_shape_constr_circle(vs[0], vs[1], 0) {
                             canvas_draw.draw_paths_creation(&e);
-                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_vs(&e, false);
                             canvas_draw.draw_dimensions(&e);
                         }
                     }
@@ -2530,7 +2882,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
                         vs.push(canvas_draw.get_user_ui().pointer.curr());
                         if let Some(e) = GeneralShape::new_shape_text(vs[0], vs[1], 0) {
                             canvas_draw.draw_paths_creation(&e);
-                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_vs(&e, false);
                             canvas_draw.draw_dimensions(&e);
                         }
                     }
@@ -2540,7 +2892,7 @@ pub(crate) fn render_draw_view(av: RefAV) {
                         vs.push(canvas_draw.get_user_ui().pointer.curr());
                         if let Some(e) = GeneralShape::new_shape_poly(vs, 0) {
                             canvas_draw.draw_paths_creation(&e);
-                            canvas_draw.draw_vs(&e);
+                            canvas_draw.draw_vs(&e, false);
                             canvas_draw.draw_dimensions(&e);
                         }
                     } else {
@@ -2609,6 +2961,7 @@ pub(crate) fn on_icon_click(av: RefAV, icon: ShapeType) {
     avb.notes.mode = false;
     avb.notes.draft = None;
     avb.notes.drag = None;
+    avb.deselect_dim_tool();
     avb.user_icons
         .iter()
         .for_each(|icon| avb.html_deselect_icons(*icon));

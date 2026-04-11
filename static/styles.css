@@ -609,6 +609,18 @@ html {
 #icon-constr-circle {
   background-image: url("assets/icon-construction-circle.svg");
 }
+#icon-dim-h {
+  background-image: url("assets/icon-dim-h.svg");
+}
+#icon-dim-v {
+  background-image: url("assets/icon-dim-v.svg");
+}
+#icon-dim-a {
+  background-image: url("assets/icon-dim-a.svg");
+}
+#icon-dim-r {
+  background-image: url("assets/icon-dim-r.svg");
+}
 
 /* Tooltip & Context Menu */
 .tooltip {

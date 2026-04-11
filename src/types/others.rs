@@ -56,6 +56,7 @@ pub enum Property {
     VoronoiGap,
     VoronoiRelaxation,
     Magnets,
+    VoronoiInvert,
     Apex { idx: usize },
 }
 impl Property {
@@ -78,6 +79,7 @@ impl Property {
             Property::VoronoiGap => 150,
             Property::VoronoiRelaxation => 160,
             Property::Magnets => 170,
+            Property::VoronoiInvert => 165,
             Property::Apex { idx } => 1000 + idx,
         }
     }
@@ -148,6 +150,9 @@ pub enum PropertyValue {
     Magnets {
         value: Scalar<usize>,
     },
+    VoronoiInvert {
+        value: bool,
+    },
     Apex {
         idx: usize, // index of the vertex in the shape's vertex list
         value: Vec2,
@@ -175,6 +180,7 @@ impl fmt::Display for PropertyValue {
             VoronoiGap { .. } => write!(f, "gap"),
             VoronoiRelaxation { .. } => write!(f, "relaxation"),
             Magnets { .. } => write!(f, "magnets"),
+            VoronoiInvert { .. } => write!(f, "invert"),
             Apex { idx, .. } => write!(f, "apex {}", idx),
         }
     }

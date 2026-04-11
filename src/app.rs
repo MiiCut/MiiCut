@@ -7,7 +7,7 @@ use crate::import_export::{get_prop, load_json_to_dataset};
 use crate::inputs::{SystemMouse, UserAction};
 use crate::machine::{update_machine_value, MachineGroup};
 use crate::shape::ShapeType;
-use crate::types::others::EUId;
+use crate::types::others::{EUId, VUId};
 use crate::shapes::{Toolpath, ToolpathParams};
 use crate::status::update_status_bar;
 use crate::ui::resize_canvases;
@@ -71,9 +71,14 @@ pub(crate) struct AppVars {
     pub(crate) selection_window: Option<SelectionWindow>,
     pub(crate) dim_drag: Option<DimDrag>,
     pub(crate) rotation_drag: Option<RotationDrag>,
-    pub(crate) ghost_center_drag: Option<EUId>,
+    pub(crate) ghost_handle_drag: Option<EUId>,
     pub(crate) save_filename: Option<String>,
     pub(crate) play: PlayState,
+    // User-placed dimensions
+    pub(crate) dim_tool_mode: crate::shapes::DimToolMode,
+    pub(crate) dim_tool_first: Option<(EUId, VUId)>,
+    pub(crate) user_dim_drag: Option<UserDimDrag>,
+    pub(crate) user_dim_selected: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +104,14 @@ pub(crate) struct DimDrag {
     // Angular drag (Disc): recompute angle from circle center to mouse
     pub(crate) is_angular: bool,
     pub(crate) drag_center: Vec2,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct UserDimDrag {
+    pub(crate) dim_id: usize,
+    pub(crate) start_mouse: Vec2,
+    pub(crate) start_offset: f64,
+    pub(crate) normal: Vec2,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -312,13 +325,17 @@ pub(crate) fn create_app_vars(window: Window) -> Result<(), JsValue> {
         selection_window: None,
         dim_drag: None,
         rotation_drag: None,
-        ghost_center_drag: None,
+        ghost_handle_drag: None,
         save_filename: None,
         play: PlayState {
             view_built: false,
             mpos: None,
             grbl_state: None,
         },
+        dim_tool_mode: crate::shapes::DimToolMode::None,
+        dim_tool_first: None,
+        user_dim_drag: None,
+        user_dim_selected: None,
     }));
 
     if let Some(cnc) = app_vars.borrow().machine.cnc.clone() {

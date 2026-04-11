@@ -2,7 +2,7 @@
   "version": 1,
   "meta": {
     "title": "MiiCut",
-    "timestamp": "20260405-105044",
+    "timestamp": "20260408-100101",
     "canvas": {
       "size": [3000.000000, 1500.000000],
       "scale": 1.000000,
@@ -11,19 +11,25 @@
   },
   "shapes": [
     {
-      "id": 0,
+      "id": 83,
       "type": "disc",
       "operation": "union",
-      "order": 2,
+      "order": 4,
       "rotation": 0.000000,
       "dim_offsets": [3.141593, 20.000000, -20.000000, -20.000000, 0.000000, 0.000000],
+      "ghost_mode": "matrix",
+      "ghost_m": 3,
+      "ghost_n": 2,
+      "ghost_handle_x": 210.000000,
+      "ghost_handle_y": 230.000000,
+      "ghost_self_rot": 0,
       "vertices": [
-        {"x": -160.000000, "y": 20.000000, "rounded": null},
-        {"x": -110.000000, "y": 20.000000, "rounded": null}
+        {"x": 50.000000, "y": 100.000000, "rounded": null},
+        {"x": 100.000000, "y": 100.000000, "rounded": null}
       ]
     },
     {
-      "id": 1,
+      "id": 81,
       "type": "disc",
       "operation": "difference",
       "order": 3,
@@ -35,19 +41,18 @@
       ]
     },
     {
-      "id": 2,
+      "id": 82,
       "type": "poly",
       "operation": "union",
       "order": 1,
       "rotation": 0.000000,
       "dim_offsets": [-20.000000, 20.000000, -20.000000, -20.000000, 0.000000, 0.000000],
-      "ghosts": 4,
-      "ghosts_trans_x": 100.000000,
-      "ghosts_trans_y": 0.000000,
-      "ghosts_rot": 1,
-      "ghosts_self_rot": 1,
-      "ghosts_rot_center_x": -160.000000,
-      "ghosts_rot_center_y": 20.000000,
+      "ghost_mode": "rotation",
+      "ghost_m": 2,
+      "ghost_n": 2,
+      "ghost_handle_x": -160.000000,
+      "ghost_handle_y": 20.000000,
+      "ghost_self_rot": 1,
       "vertices": [
         {"x": -160.000000, "y": 20.000000, "rounded": null},
         {"x": -360.000000, "y": -80.000000, "rounded": 10},
@@ -58,26 +63,19 @@
       ]
     },
     {
-      "id": 3,
+      "id": 80,
       "type": "disc",
       "operation": "union",
-      "order": 4,
+      "order": 2,
       "rotation": 0.000000,
       "dim_offsets": [3.141593, 20.000000, -20.000000, -20.000000, 0.000000, 0.000000],
-      "ghosts": 5,
-      "ghosts_trans_x": 100.000000,
-      "ghosts_trans_y": 0.000000,
-      "ghosts_rot": 1,
-      "ghosts_self_rot": 1,
-      "ghosts_rot_center_x": 220.000000,
-      "ghosts_rot_center_y": 190.000000,
       "vertices": [
-        {"x": 220.000000, "y": 280.000000, "rounded": null},
-        {"x": 270.000000, "y": 280.000000, "rounded": null}
+        {"x": -160.000000, "y": 20.000000, "rounded": null},
+        {"x": -110.000000, "y": 20.000000, "rounded": null}
       ]
     }
   ],
   "notes": [
-    {"id": 0, "pos": [79.455474, -279.308240], "size": [229.346224, 119.772106], "text": "Shape ghosts properties"}
+    {"id": 0, "pos": [98.295285, -213.368901], "size": [229.409489, 119.541812], "text": "Shape ghosts properties"}
   ]
 }

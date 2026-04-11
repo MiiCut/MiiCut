@@ -160,11 +160,18 @@ impl AppVars {
 
     pub(crate) fn del_back_pressed(&mut self) {
         if let ShapeType::Arrow = self.icon_selected {
+            // Delete selected user dimension first if any
+            if let Some(dim_id) = self.user_dim_selected.take() {
+                let canvas_user = self.get_active_canvas_mut();
+                canvas_user.dataset.remove_user_dim(dim_id);
+                return;
+            }
             let canvas_user = self.get_active_canvas_mut();
             if canvas_user.dataset.delete_selected_elements() {
                 canvas_user.dataset.refresh_svg_cache();
                 canvas_user.dataset.mark_final_polygon_dirty();
                 canvas_user.dataset.calc_final_polygon();
+                canvas_user.dataset.cleanup_user_dims();
                 if canvas_user.dataset.shapes.is_empty() {
                     self.clear_toolpath_gcode();
                 }
@@ -179,6 +186,7 @@ impl AppVars {
                     canvas_user.dataset.delete_vertex(vs_sel[0].0, vs_sel[0].1);
                     canvas_user.dataset.mark_final_polygon_dirty();
                     canvas_user.dataset.calc_final_polygon();
+                    canvas_user.dataset.cleanup_user_dims();
                 }
             }
         }
@@ -321,6 +329,7 @@ impl AppVars {
                     elem.set_bezpath();
                     canvas_user.dataset.mark_final_polygon_dirty();
                     canvas_user.dataset.calc_final_polygon();
+                    canvas_user.dataset.cleanup_user_dims();
                 }
             }
         } else {

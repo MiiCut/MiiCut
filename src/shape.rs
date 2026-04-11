@@ -194,6 +194,96 @@ impl ShapeRotation {
     }
 }
 
+// ── Ghost / pattern system ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhostMode {
+    None,
+    Copy,
+    Matrix,
+    Rotation,
+    MirrorH,
+    MirrorV,
+}
+
+impl GhostMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Copy => "copy",
+            Self::Matrix => "matrix",
+            Self::Rotation => "rotation",
+            Self::MirrorH => "mirror_h",
+            Self::MirrorV => "mirror_v",
+        }
+    }
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "copy" => Self::Copy,
+            "matrix" => Self::Matrix,
+            "rotation" => Self::Rotation,
+            "mirror_h" => Self::MirrorH,
+            "mirror_v" => Self::MirrorV,
+            _ => Self::None,
+        }
+    }
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Copy => "Copy",
+            Self::Matrix => "Matrix",
+            Self::Rotation => "Rotation",
+            Self::MirrorH => "Mirror ↔",
+            Self::MirrorV => "Mirror ↕",
+        }
+    }
+    pub const ALL: [GhostMode; 6] = [
+        Self::None,
+        Self::Copy,
+        Self::Matrix,
+        Self::Rotation,
+        Self::MirrorH,
+        Self::MirrorV,
+    ];
+}
+
+impl Display for GhostMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GhostConfig {
+    pub mode: GhostMode,
+    pub m: usize,
+    pub n: usize,
+    pub handle: Vec2,
+    pub handle_saved: Vec2,
+    pub self_rot: bool,
+}
+
+impl Default for GhostConfig {
+    fn default() -> Self {
+        Self {
+            mode: GhostMode::None,
+            m: 2,
+            n: 2,
+            handle: Vec2::ZERO,
+            handle_saved: Vec2::ZERO,
+            self_rot: false,
+        }
+    }
+}
+
+impl GhostConfig {
+    pub fn is_active(&self) -> bool {
+        self.mode != GhostMode::None
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct GeneralShape {
@@ -216,13 +306,7 @@ pub struct GeneralShape {
     rotation: ShapeRotation,
     dim_offsets: [f64; 6],
 
-    ghosts: usize,
-    ghosts_trans_x: f64,
-    ghosts_trans_y: f64,
-    ghosts_rot_center: Vec2,
-    ghosts_rot_center_saved: Vec2,
-    ghosts_rot: bool,
-    ghosts_self_rot: bool,
+    ghost: GhostConfig,
 }
 impl Clone for GeneralShape {
     fn clone(&self) -> Self {
@@ -246,13 +330,7 @@ impl Clone for GeneralShape {
             polygon: self.polygon.clone(),
             rotation: self.rotation.clone(),
             dim_offsets: self.dim_offsets,
-            ghosts: self.ghosts,
-            ghosts_trans_x: self.ghosts_trans_x,
-            ghosts_trans_y: self.ghosts_trans_y,
-            ghosts_rot_center: self.ghosts_rot_center,
-            ghosts_rot_center_saved: self.ghosts_rot_center_saved,
-            ghosts_rot: self.ghosts_rot,
-            ghosts_self_rot: self.ghosts_self_rot,
+            ghost: self.ghost.clone(),
         }
     }
 }
@@ -307,14 +385,15 @@ impl GeneralShape {
         self.operation.difference();
     }
     pub(crate) fn bb(v1: Vec2, v2: Vec2) -> Vec<Vertex> {
+        use crate::types::vertex::VertexRole;
         let min_x = v1.x.min(v2.x);
         let max_x = v1.x.max(v2.x);
         let min_y = v1.y.min(v2.y);
         let max_y = v1.y.max(v2.y);
-        let bl = Vertex::new_from_coords(min_x, max_y);
-        let tr = Vertex::new_from_coords(max_x, max_y);
-        let br = Vertex::new_from_coords(max_x, min_y);
-        let tl = Vertex::new_from_coords(min_x, min_y);
+        let bl = Vertex::new_with_role(Vec2::new(min_x, max_y), VertexRole::BBoxCorner);
+        let tr = Vertex::new_with_role(Vec2::new(max_x, max_y), VertexRole::BBoxCorner);
+        let br = Vertex::new_with_role(Vec2::new(max_x, min_y), VertexRole::BBoxCorner);
+        let tl = Vertex::new_with_role(Vec2::new(min_x, min_y), VertexRole::BBoxCorner);
         vec![tl, bl, tr, br]
     }
 
@@ -325,7 +404,11 @@ impl GeneralShape {
         // Place radius handle horizontally to the right
         let radius = (v2 - v1).hypot();
         let v2_horiz = Vec2::new(v1.x + radius, v1.y);
-        let vs = vec![Vertex::new(v1), Vertex::new(v2_horiz)];
+        use crate::types::vertex::VertexRole;
+        let vs = vec![
+            Vertex::new_with_role(v1, VertexRole::Center),
+            Vertex::new_with_role(v2_horiz, VertexRole::Radius),
+        ];
 
         let mut properties = Properties::new();
         use PropertyValue::*;
@@ -429,7 +512,7 @@ impl GeneralShape {
         for i in 0..4 {
             let j = (i + 1) % 4;
             let mid = (values[i].curr() + values[j].curr()) * 0.5;
-            values.push(Vertex::new(mid));
+            values.push(Vertex::new_with_role(mid, crate::types::vertex::VertexRole::SagHandle));
         }
 
         GeneralShape::new(
@@ -499,13 +582,14 @@ impl GeneralShape {
                 let mid = (v1 + v2) * 0.5;
                 (mid, mid)
             };
+        use crate::types::vertex::VertexRole;
         let vs = vec![
-            Vertex::new(v1),       // v[0] = c1
-            Vertex::new(v2),       // v[1] = c2
-            Vertex::new(r1),       // v[2] = r1 control
-            Vertex::new(r2),       // v[3] = r2 control
-            Vertex::new(sag1_pos), // v[4] = sag1 handle (side at a2)
-            Vertex::new(sag2_pos), // v[5] = sag2 handle (side at a1)
+            Vertex::new_with_role(v1, VertexRole::Center),       // v[0] = c1
+            Vertex::new_with_role(v2, VertexRole::Center),       // v[1] = c2
+            Vertex::new_with_role(r1, VertexRole::Radius),       // v[2] = r1 control
+            Vertex::new_with_role(r2, VertexRole::Radius),       // v[3] = r2 control
+            Vertex::new_with_role(sag1_pos, VertexRole::SagHandle), // v[4] = sag1
+            Vertex::new_with_role(sag2_pos, VertexRole::SagHandle), // v[5] = sag2
         ];
 
         use PropertyValue::*;
@@ -654,11 +738,12 @@ impl GeneralShape {
                 ),
             },
         );
+        use crate::types::vertex::VertexRole;
         let n = vs.len();
         let mut values: Vec<Vertex> = vs
             .into_iter()
             .map(|v| {
-                let mut vertex = Vertex::new(v);
+                let mut vertex = Vertex::new_with_role(v, VertexRole::Apex);
                 vertex.enable_radius();
                 vertex
             })
@@ -667,7 +752,7 @@ impl GeneralShape {
         for i in 0..n {
             let j = (i + 1) % n;
             let mid = (values[i].curr() + values[j].curr()) * 0.5;
-            values.push(Vertex::new(mid));
+            values.push(Vertex::new_with_role(mid, VertexRole::SagHandle));
         }
 
         GeneralShape::new(
@@ -775,6 +860,10 @@ impl GeneralShape {
                     Self::SCALE_STEP,
                 ),
             },
+        );
+        properties.add(
+            Property::VoronoiInvert,
+            PropertyValue::VoronoiInvert { value: false },
         );
 
         GeneralShape::new(
@@ -1114,7 +1203,11 @@ impl GeneralShape {
         if v1 == v2 {
             return None;
         }
-        let vs = vec![Vertex::new(v1), Vertex::new(v2)];
+        use crate::types::vertex::VertexRole;
+        let vs = vec![
+            Vertex::new_with_role(v1, VertexRole::Construction),
+            Vertex::new_with_role(v2, VertexRole::Construction),
+        ];
 
         use PropertyValue::*;
         let mut properties = Properties::new();
@@ -1173,10 +1266,13 @@ impl GeneralShape {
             },
         );
 
+        use crate::types::vertex::VertexRole;
         let vs_magnets = get_magnets_vertices(v1, v2, GeneralShape::DEFAULT_MAGNETS);
-        let mut vs = vec![v1, v2];
-        vs.extend(vs_magnets);
-        let vs: Vec<Vertex> = vs.into_iter().map(Vertex::new).collect();
+        let mut vs: Vec<Vertex> = vec![
+            Vertex::new_with_role(v1, VertexRole::Center),
+            Vertex::new_with_role(v2, VertexRole::Radius),
+        ];
+        vs.extend(vs_magnets.into_iter().map(|p| Vertex::new_with_role(p, VertexRole::Construction)));
 
         GeneralShape::new(
             ShapeType::ConstrCircle,
@@ -1237,24 +1333,18 @@ impl GeneralShape {
             rotation: ShapeRotation::new(),
             dim_offsets: [-20.0, 20.0, -20.0, -20.0, 0.0, 0.0],
 
-            ghosts: 0,
-            ghosts_trans_x: 100.0,
-            ghosts_trans_y: 0.0,
-            ghosts_rot: false,
-            ghosts_rot_center: Vec2::ZERO,
-            ghosts_rot_center_saved: Vec2::ZERO,
-            ghosts_self_rot: false,
+            ghost: GhostConfig::default(),
         };
-        // Compute default rot center as vertex centroid
-        let n = shape.vertices.len() as f64;
-        if n > 0.0 {
+        // Compute default ghost handle as vertex centroid
+        let nv = shape.vertices.len() as f64;
+        if nv > 0.0 {
             let sum: Vec2 = shape
                 .vertices
                 .iter()
                 .map(|(_, v)| v.curr())
                 .fold(Vec2::ZERO, |a, b| a + b);
-            shape.ghosts_rot_center = sum / n;
-            shape.ghosts_rot_center_saved = shape.ghosts_rot_center;
+            shape.ghost.handle = sum / nv;
+            shape.ghost.handle_saved = shape.ghost.handle;
         }
         shape.set_bezpath();
         Some(shape)
@@ -1538,37 +1628,39 @@ impl GeneralShape {
                             angle,
                             self.vertices.val(idx as i64).curr(),
                         );
-                        // Magnet: snap to 0 (straight line)
-                        if sag.abs() < 5.0 {
-                            sag = 0.0;
-                        } else {
-                            // Magnet: snap when inter-handle distance ≈ average diameter
-                            let other_idx = if idx == 4 { 5 } else { 4 };
-                            let other_pos = self.vertices.val(other_idx).curr();
-                            let target = r1 + r2;
-                            let p1 = c1 + Vec2::new(r1 * angle.cos(), r1 * angle.sin());
-                            let p2 = c2 + Vec2::new(r2 * angle.cos(), r2 * angle.sin());
-                            let chord = p2 - p1;
-                            let l = chord.hypot();
-                            if l > 1e-9 {
-                                let u = chord / l;
-                                let n = Vec2::new(-u.y, u.x);
-                                let mid = (p1 + p2) * 0.5;
-                                let p = mid - other_pos;
-                                let pn = p.x * n.x + p.y * n.y;
-                                let pp = p.x * p.x + p.y * p.y;
-                                let disc = 4.0 * pn * pn - 4.0 * (pp - target * target);
-                                if disc >= 0.0 {
-                                    let sq = disc.sqrt();
-                                    let s1 = (-2.0 * pn + sq) / 2.0;
-                                    let s2 = (-2.0 * pn - sq) / 2.0;
-                                    let snap_sag = if (s1 - sag).abs() < (s2 - sag).abs() {
-                                        s1
-                                    } else {
-                                        s2
-                                    };
-                                    if (sag - snap_sag).abs() < 5.0 {
-                                        sag = snap_sag;
+                        if !user_ui.keys_states.shift_pressed {
+                            // Magnet: snap to 0 (straight line)
+                            if sag.abs() < 5.0 {
+                                sag = 0.0;
+                            } else {
+                                // Magnet: snap when inter-handle distance ≈ average diameter
+                                let other_idx = if idx == 4 { 5 } else { 4 };
+                                let other_pos = self.vertices.val(other_idx).curr();
+                                let target = r1 + r2;
+                                let p1 = c1 + Vec2::new(r1 * angle.cos(), r1 * angle.sin());
+                                let p2 = c2 + Vec2::new(r2 * angle.cos(), r2 * angle.sin());
+                                let chord = p2 - p1;
+                                let l = chord.hypot();
+                                if l > 1e-9 {
+                                    let u = chord / l;
+                                    let n = Vec2::new(-u.y, u.x);
+                                    let mid = (p1 + p2) * 0.5;
+                                    let p = mid - other_pos;
+                                    let pn = p.x * n.x + p.y * n.y;
+                                    let pp = p.x * p.x + p.y * p.y;
+                                    let disc = 4.0 * pn * pn - 4.0 * (pp - target * target);
+                                    if disc >= 0.0 {
+                                        let sq = disc.sqrt();
+                                        let s1 = (-2.0 * pn + sq) / 2.0;
+                                        let s2 = (-2.0 * pn - sq) / 2.0;
+                                        let snap_sag = if (s1 - sag).abs() < (s2 - sag).abs() {
+                                            s1
+                                        } else {
+                                            s2
+                                        };
+                                        if (sag - snap_sag).abs() < 5.0 {
+                                            sag = snap_sag;
+                                        }
                                     }
                                 }
                             }
@@ -1609,7 +1701,7 @@ impl GeneralShape {
                     let edge_end = self.vertices.val(((edge_idx + 1) % nc) as i64).curr();
                     self.vertices.val_mut(i).set_curr(user_ui.draw_pos);
                     let mut sag = poly_sag_from_vertex(edge_start, edge_end, user_ui.draw_pos);
-                    if sag.abs() < 5.0 {
+                    if sag.abs() < 5.0 && !user_ui.keys_states.shift_pressed {
                         sag = 0.0;
                     }
                     let new_pos = poly_sag_handle(edge_start, edge_end, sag);
@@ -1676,23 +1768,25 @@ impl GeneralShape {
                 }
                 self.vertices.val_mut(i).add(local_delta);
                 let tmp = self.vertices.val_mut(i).saved();
+                let left = (i - 1).rem_euclid(4);
+                let right = (i + 1).rem_euclid(4);
                 if i % 2 == 1 {
-                    self.vertices.val_mut(i - 1).set_saved_x(tmp.x);
+                    self.vertices.val_mut(left).set_saved_x(tmp.x);
                     self.vertices
-                        .val_mut(i - 1)
+                        .val_mut(left)
                         .add(Vec2::new(local_delta.x, 0.));
-                    self.vertices.val_mut(i + 1).set_saved_y(tmp.y);
+                    self.vertices.val_mut(right).set_saved_y(tmp.y);
                     self.vertices
-                        .val_mut(i + 1)
+                        .val_mut(right)
                         .add(Vec2::new(0., local_delta.y));
                 } else {
-                    self.vertices.val_mut(i - 1).set_saved_y(tmp.y);
+                    self.vertices.val_mut(left).set_saved_y(tmp.y);
                     self.vertices
-                        .val_mut(i - 1)
+                        .val_mut(left)
                         .add(Vec2::new(0., local_delta.y));
-                    self.vertices.val_mut(i + 1).set_saved_x(tmp.x);
+                    self.vertices.val_mut(right).set_saved_x(tmp.x);
                     self.vertices
-                        .val_mut(i + 1)
+                        .val_mut(right)
                         .add(Vec2::new(local_delta.x, 0.));
                 }
                 self.recompute_sag_vertices(nc);
@@ -1717,9 +1811,10 @@ impl GeneralShape {
                     let ccw = poly_winding_ccw(&self.vertices, nc);
                     let ci_conv = poly_is_convex(&self.vertices, nc, edge_idx, ccw);
                     let cj_conv = poly_is_convex(&self.vertices, nc, j, ccw);
-                    let (edge_start, edge_end) = poly_effective_edge(ci, cj, ri, rj, ccw, ci_conv, cj_conv);
+                    let (edge_start, edge_end) =
+                        poly_effective_edge(ci, cj, ri, rj, ccw, ci_conv, cj_conv);
                     let mut sag = poly_sag_from_vertex(edge_start, edge_end, user_ui.draw_pos);
-                    if sag.abs() < 5.0 {
+                    if sag.abs() < 5.0 && !user_ui.keys_states.shift_pressed {
                         sag = 0.0;
                     }
                     let new_pos = poly_sag_handle(edge_start, edge_end, sag);
@@ -1782,7 +1877,7 @@ impl GeneralShape {
         let incr_delta = new_pos - prev_pos;
         let dx = incr_delta.x;
         let dy = incr_delta.y;
-        self.ghosts_rot_center = self.ghosts_rot_center_saved + delta;
+        self.ghost.handle = self.ghost.handle_saved + delta;
         self.update_properties();
         // Translate bezpath + polygon directly (skip expensive rebuild)
         self.bezpath = translate_bezpath(&self.bezpath, dx, dy);
@@ -1798,9 +1893,12 @@ impl GeneralShape {
                 text_data.polygon = Some(poly.translate(dx, dy));
             }
         }
-        for svg_data in [self.svg_shape_data.as_mut(), self.voronoi_shape_data.as_mut()]
-            .into_iter()
-            .flatten()
+        for svg_data in [
+            self.svg_shape_data.as_mut(),
+            self.voronoi_shape_data.as_mut(),
+        ]
+        .into_iter()
+        .flatten()
         {
             if let Some(paths) = svg_data.cached_paths.as_ref() {
                 svg_data.cached_paths = Some(translate_bezpaths(paths, dx, dy));
@@ -1873,6 +1971,12 @@ impl GeneralShape {
                     self.rebuild_voronoi_from_properties();
                 }
             }
+            VoronoiInvert { .. } => {
+                // Invalidate cache so update_svg_polygon rebuilds with new invert setting
+                if let Some(svg) = self.voronoi_shape_data.as_mut() {
+                    svg.invalidate_cache();
+                }
+            }
             _ => {}
         }
         self.update_properties();
@@ -1924,7 +2028,7 @@ impl GeneralShape {
             value.save();
         }
         self.rotation.save();
-        self.ghosts_rot_center_saved = self.ghosts_rot_center;
+        self.ghost.handle_saved = self.ghost.handle;
     }
     pub fn get_properties(&self) -> &Properties {
         &self.properties
@@ -2238,41 +2342,26 @@ impl GeneralShape {
     }
 
     // ── Ghost getters / setters ──────────────────────────────────────────
-    pub fn get_ghosts(&self) -> usize {
-        self.ghosts
+    pub fn ghost(&self) -> &GhostConfig {
+        &self.ghost
     }
-    pub fn get_ghosts_trans_x(&self) -> f64 {
-        self.ghosts_trans_x
+    pub fn ghost_mut(&mut self) -> &mut GhostConfig {
+        &mut self.ghost
     }
-    pub fn get_ghosts_trans_y(&self) -> f64 {
-        self.ghosts_trans_y
+    pub fn set_ghost_mode(&mut self, mode: GhostMode) {
+        self.ghost.mode = mode;
     }
-    pub fn get_ghosts_rot(&self) -> bool {
-        self.ghosts_rot
+    pub fn set_ghost_m(&mut self, m: usize) {
+        self.ghost.m = m.clamp(1, 50);
     }
-    pub fn get_ghosts_self_rot(&self) -> bool {
-        self.ghosts_self_rot
+    pub fn set_ghost_n(&mut self, n: usize) {
+        self.ghost.n = n.clamp(1, 50);
     }
-    pub fn get_ghosts_rot_center(&self) -> Vec2 {
-        self.ghosts_rot_center
+    pub fn set_ghost_handle(&mut self, h: Vec2) {
+        self.ghost.handle = h;
     }
-    pub fn set_ghosts(&mut self, v: usize) {
-        self.ghosts = v;
-    }
-    pub fn set_ghosts_trans_x(&mut self, v: f64) {
-        self.ghosts_trans_x = v;
-    }
-    pub fn set_ghosts_trans_y(&mut self, v: f64) {
-        self.ghosts_trans_y = v;
-    }
-    pub fn set_ghosts_rot(&mut self, v: bool) {
-        self.ghosts_rot = v;
-    }
-    pub fn set_ghosts_self_rot(&mut self, v: bool) {
-        self.ghosts_self_rot = v;
-    }
-    pub fn set_ghosts_rot_center(&mut self, v: Vec2) {
-        self.ghosts_rot_center = v;
+    pub fn set_ghost_self_rot(&mut self, v: bool) {
+        self.ghost.self_rot = v;
     }
 
     /// Recompute sag vertex positions preserving their sag values after corners move.
@@ -2284,7 +2373,11 @@ impl GeneralShape {
             return;
         }
         let is_poly = matches!(self.shape_type, ShapeType::Poly);
-        let ccw = if is_poly { poly_winding_ccw(&self.vertices, nc) } else { false };
+        let ccw = if is_poly {
+            poly_winding_ccw(&self.vertices, nc)
+        } else {
+            false
+        };
         // old_ccw from saved positions
         // (We approximate with current ccw — winding rarely flips during drag)
         let old_ccw = ccw;
@@ -2299,10 +2392,17 @@ impl GeneralShape {
                 poly_effective_edge(
                     self.vertices.val(i as i64).saved(),
                     self.vertices.val(j as i64).saved(),
-                    ri, rj, old_ccw, ci_conv, cj_conv,
+                    ri,
+                    rj,
+                    old_ccw,
+                    ci_conv,
+                    cj_conv,
                 )
             } else {
-                (self.vertices.val(i as i64).saved(), self.vertices.val(j as i64).saved())
+                (
+                    self.vertices.val(i as i64).saved(),
+                    self.vertices.val(j as i64).saved(),
+                )
             };
             let old_sag =
                 poly_sag_from_vertex(old_start, old_end, self.vertices.val(sag_idx).saved());
@@ -2343,7 +2443,11 @@ impl GeneralShape {
         }
         let ccw = area2 > 0.0;
         // Edge before corner (prev → corner): sag index = nc + prev
-        let prev = if corner_idx == 0 { nc - 1 } else { corner_idx - 1 };
+        let prev = if corner_idx == 0 {
+            nc - 1
+        } else {
+            corner_idx - 1
+        };
         for &(ei, ej) in &[(prev, corner_idx), (corner_idx, (corner_idx + 1) % nc)] {
             let sag_idx = (nc + ei) as i64;
             let ci = self.vertices.val(ei as i64).curr();
@@ -2383,7 +2487,7 @@ impl GeneralShape {
 
     /// Compute the ghost copies of the current bezpath.
     pub fn get_ghost_bezpaths(&self) -> Vec<BezPath> {
-        if self.ghosts == 0 {
+        if !self.ghost.is_active() {
             return vec![];
         }
         // Use the actual shape paths, not just the bounding box bezpath
@@ -2400,31 +2504,74 @@ impl GeneralShape {
         } else {
             vec![self.bezpath.clone()]
         };
+        let center = self.bbox_center();
+        let h = self.ghost.handle;
         let mut result = Vec::new();
-        if self.ghosts_rot {
-            let total = self.ghosts + 1;
-            let center = self.ghosts_rot_center;
-            for i in 1..=self.ghosts {
-                let angle = 2.0 * PI * (i as f64) / (total as f64);
-                for base in &base_paths {
-                    if self.ghosts_self_rot {
-                        result.push(_rotate_bezpath(base, center, angle));
-                    } else {
-                        let bbox = base.bounding_box();
-                        let shape_center =
-                            Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
-                        let rotated_pos = rotate_vector(shape_center - center, angle) + center;
-                        let delta = rotated_pos - shape_center;
-                        result.push(translate_bezpath(base, delta.x, delta.y));
+        match self.ghost.mode {
+            GhostMode::None => {}
+            GhostMode::Copy => {
+                // Snap center to grid so direction vector aligns to clean positions
+                let sc = Vec2::new(
+                    (center.x / 10.0).round() * 10.0,
+                    (center.y / 10.0).round() * 10.0,
+                );
+                let dir = h - sc;
+                for i in 1..=self.ghost.m {
+                    let dx = dir.x * (i as f64);
+                    let dy = dir.y * (i as f64);
+                    for base in &base_paths {
+                        result.push(translate_bezpath(base, dx, dy));
                     }
                 }
             }
-        } else {
-            for i in 1..=self.ghosts {
-                let dx = self.ghosts_trans_x * (i as f64);
-                let dy = self.ghosts_trans_y * (i as f64);
+            GhostMode::Matrix => {
+                let sc = Vec2::new(
+                    (center.x / 10.0).round() * 10.0,
+                    (center.y / 10.0).round() * 10.0,
+                );
+                let dx = h.x - sc.x;
+                let dy = h.y - sc.y;
+                for col in 0..self.ghost.m {
+                    for row in 0..self.ghost.n {
+                        if col == 0 && row == 0 {
+                            continue;
+                        }
+                        let tx = dx * (col as f64);
+                        let ty = dy * (row as f64);
+                        for base in &base_paths {
+                            result.push(translate_bezpath(base, tx, ty));
+                        }
+                    }
+                }
+            }
+            GhostMode::Rotation => {
+                let total = self.ghost.m + 1;
+                for i in 1..=self.ghost.m {
+                    let angle = 2.0 * PI * (i as f64) / (total as f64);
+                    for base in &base_paths {
+                        if self.ghost.self_rot {
+                            result.push(_rotate_bezpath(base, h, angle));
+                        } else {
+                            let bbox = base.bounding_box();
+                            let sc =
+                                Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+                            let rotated_pos = rotate_vector(sc - h, angle) + h;
+                            let delta = rotated_pos - sc;
+                            result.push(translate_bezpath(base, delta.x, delta.y));
+                        }
+                    }
+                }
+            }
+            GhostMode::MirrorH => {
+                // ↔ horizontal copy = reflect across vertical axis at x=H.x
                 for base in &base_paths {
-                    result.push(translate_bezpath(base, dx, dy));
+                    result.push(mirror_bezpath_v(base, h.x));
+                }
+            }
+            GhostMode::MirrorV => {
+                // ↕ vertical copy = reflect across horizontal axis at y=H.y
+                for base in &base_paths {
+                    result.push(mirror_bezpath_h(base, h.y));
                 }
             }
         }
@@ -2636,13 +2783,10 @@ impl GeneralShape {
 
     fn update_polygon(&mut self) {
         if self.shape_type == ShapeType::Group {
-            // For Groups, translate/rotate the cached MultiPolygon directly
-            // (preserves holes from Difference operations)
             if let Some(base) = self.get_group_polygon().cloned() {
                 let mut result = base.clone();
-                if self.ghosts > 0 {
-                    let ghost_polys = self.group_ghost_multipolygons(&base);
-                    for gp in ghost_polys {
+                if self.ghost.is_active() {
+                    for gp in self.group_ghost_multipolygons(&base) {
                         result = result.boolean_op(&gp, geo::OpType::Union);
                     }
                 }
@@ -2662,36 +2806,87 @@ impl GeneralShape {
     /// Generate ghost MultiPolygons for a Group (translated/rotated copies of base).
     fn group_ghost_multipolygons(&self, base: &MultiPolygon<f64>) -> Vec<MultiPolygon<f64>> {
         let mut ghosts = Vec::new();
-        if self.ghosts_rot {
-            let total = self.ghosts + 1;
-            let center = self.ghosts_rot_center;
-            for i in 1..=self.ghosts {
-                let angle = 2.0 * PI * (i as f64) / (total as f64);
-                let polys: Vec<geo::Polygon<f64>> = if self.ghosts_self_rot {
-                    base.0
+        let center = self.bbox_center();
+        let h = self.ghost.handle;
+        match self.ghost.mode {
+            GhostMode::None => {}
+            GhostMode::Copy => {
+                let sc = Vec2::new(
+                    (center.x / 10.0).round() * 10.0,
+                    (center.y / 10.0).round() * 10.0,
+                );
+                let dir = h - sc;
+                for i in 1..=self.ghost.m {
+                    let dx = dir.x * (i as f64);
+                    let dy = dir.y * (i as f64);
+                    let polys: Vec<geo::Polygon<f64>> = base
+                        .0
                         .iter()
-                        .map(|p| rotate_geo_polygon(p, center, angle))
-                        .collect()
-                } else {
-                    let bbox = self.bezpath.bounding_box();
-                    let sc = Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
-                    let rp = rotate_vector(sc - center, angle) + center;
-                    let delta = rp - sc;
-                    base.0
-                        .iter()
-                        .map(|p| translate_geo_polygon(p, delta.x, delta.y))
-                        .collect()
-                };
-                ghosts.push(MultiPolygon::new(polys));
+                        .map(|p| translate_geo_polygon(p, dx, dy))
+                        .collect();
+                    ghosts.push(MultiPolygon::new(polys));
+                }
             }
-        } else {
-            for i in 1..=self.ghosts {
-                let dx = self.ghosts_trans_x * (i as f64);
-                let dy = self.ghosts_trans_y * (i as f64);
+            GhostMode::Matrix => {
+                let sc = Vec2::new(
+                    (center.x / 10.0).round() * 10.0,
+                    (center.y / 10.0).round() * 10.0,
+                );
+                let dx = h.x - sc.x;
+                let dy = h.y - sc.y;
+                for col in 0..self.ghost.m {
+                    for row in 0..self.ghost.n {
+                        if col == 0 && row == 0 {
+                            continue;
+                        }
+                        let tx = dx * (col as f64);
+                        let ty = dy * (row as f64);
+                        let polys: Vec<geo::Polygon<f64>> = base
+                            .0
+                            .iter()
+                            .map(|p| translate_geo_polygon(p, tx, ty))
+                            .collect();
+                        ghosts.push(MultiPolygon::new(polys));
+                    }
+                }
+            }
+            GhostMode::Rotation => {
+                let total = self.ghost.m + 1;
+                for i in 1..=self.ghost.m {
+                    let angle = 2.0 * PI * (i as f64) / (total as f64);
+                    let polys: Vec<geo::Polygon<f64>> = if self.ghost.self_rot {
+                        base.0
+                            .iter()
+                            .map(|p| rotate_geo_polygon(p, h, angle))
+                            .collect()
+                    } else {
+                        let bbox = self.bezpath.bounding_box();
+                        let sc = Vec2::new((bbox.x0 + bbox.x1) * 0.5, (bbox.y0 + bbox.y1) * 0.5);
+                        let rp = rotate_vector(sc - h, angle) + h;
+                        let delta = rp - sc;
+                        base.0
+                            .iter()
+                            .map(|p| translate_geo_polygon(p, delta.x, delta.y))
+                            .collect()
+                    };
+                    ghosts.push(MultiPolygon::new(polys));
+                }
+            }
+            GhostMode::MirrorH => {
+                // ↔ horizontal copy = reflect across vertical axis at x=H.x
                 let polys: Vec<geo::Polygon<f64>> = base
                     .0
                     .iter()
-                    .map(|p| translate_geo_polygon(p, dx, dy))
+                    .map(|p| mirror_geo_polygon_v(p, h.x))
+                    .collect();
+                ghosts.push(MultiPolygon::new(polys));
+            }
+            GhostMode::MirrorV => {
+                // ↕ vertical copy = reflect across horizontal axis at y=H.y
+                let polys: Vec<geo::Polygon<f64>> = base
+                    .0
+                    .iter()
+                    .map(|p| mirror_geo_polygon_h(p, h.y))
                     .collect();
                 ghosts.push(MultiPolygon::new(polys));
             }
@@ -2725,14 +2920,7 @@ impl GeneralShape {
         self.polygon = poly.clone();
         text_data.polygon = Some(poly.clone());
         text_data.cached_paths = Some(geo_multipolygon_to_bez_paths(&poly));
-        // Add ghost copies to the polygon
-        if self.ghosts > 0 {
-            let mut all_polys: Vec<geo::Polygon<f64>> = self.polygon.0.clone();
-            for ghost_path in self.get_ghost_bezpaths() {
-                all_polys.push(bez_path_to_geo_polygon(&ghost_path));
-            }
-            self.polygon = MultiPolygon::new(all_polys);
-        }
+        self.add_ghost_to_polygon();
         Some(())
     }
 
@@ -2763,6 +2951,7 @@ impl GeneralShape {
         if let Some(cached) = svg.cached_polygon.as_ref() {
             if svg.cached_bbox_min == bbox_min && svg.cached_bbox_max == bbox_max {
                 self.polygon = cached.clone();
+                self.add_ghost_to_polygon();
                 return;
             }
             let cached_size = svg.cached_bbox_max - svg.cached_bbox_min;
@@ -2780,6 +2969,7 @@ impl GeneralShape {
                 }
                 svg.cached_bbox_min = bbox_min;
                 svg.cached_bbox_max = bbox_max;
+                self.add_ghost_to_polygon();
                 return;
             }
         }
@@ -2825,18 +3015,40 @@ impl GeneralShape {
             holes = Vec::new();
         }
 
+        // Check if voronoi invert is enabled
+        let invert = self
+            .properties
+            .get(&Property::VoronoiInvert)
+            .map(|v| matches!(v, PropertyValue::VoronoiInvert { value: true }))
+            .unwrap_or(false);
+
         let mut polys = Vec::new();
-        for outer in outers.iter() {
-            let outer_poly = Polygon::new(vec2_to_linestring(outer), vec![]);
-            let mut inner_lines = Vec::new();
-            for hole in holes.iter() {
-                if let Some(pt) = hole.first() {
-                    if outer_poly.contains(&Point::new(pt.x, pt.y)) {
-                        inner_lines.push(vec2_to_linestring(hole));
+        if invert {
+            // Invert: bbox is the outer ring, all voronoi cells become holes
+            let bbox_ring = vec![
+                Vec2::new(bbox_min.x, bbox_min.y),
+                Vec2::new(bbox_max.x, bbox_min.y),
+                Vec2::new(bbox_max.x, bbox_max.y),
+                Vec2::new(bbox_min.x, bbox_max.y),
+            ];
+            let mut all_holes: Vec<LineString<f64>> = Vec::new();
+            for ring in outers.iter().chain(holes.iter()) {
+                all_holes.push(vec2_to_linestring(ring));
+            }
+            polys.push(Polygon::new(vec2_to_linestring(&bbox_ring), all_holes));
+        } else {
+            for outer in outers.iter() {
+                let outer_poly = Polygon::new(vec2_to_linestring(outer), vec![]);
+                let mut inner_lines = Vec::new();
+                for hole in holes.iter() {
+                    if let Some(pt) = hole.first() {
+                        if outer_poly.contains(&Point::new(pt.x, pt.y)) {
+                            inner_lines.push(vec2_to_linestring(hole));
+                        }
                     }
                 }
+                polys.push(Polygon::new(vec2_to_linestring(outer), inner_lines));
             }
-            polys.push(Polygon::new(vec2_to_linestring(outer), inner_lines));
         }
 
         self.polygon = MultiPolygon::new(polys);
@@ -2846,8 +3058,12 @@ impl GeneralShape {
         svg.cached_paths = Some(raw_paths);
         svg.cached_bbox_min = bbox_min;
         svg.cached_bbox_max = bbox_max;
-        // Add ghost copies to the polygon
-        if self.ghosts > 0 {
+        self.add_ghost_to_polygon();
+    }
+
+    /// Add ghost copies to self.polygon (shared by update_text_polygon and update_svg_polygon).
+    fn add_ghost_to_polygon(&mut self) {
+        if self.ghost.is_active() {
             let mut all_polys: Vec<geo::Polygon<f64>> = self.polygon.0.clone();
             for ghost_path in self.get_ghost_bezpaths() {
                 all_polys.push(bez_path_to_geo_polygon(&ghost_path));
@@ -2899,6 +3115,44 @@ fn rotate_geo_polygon(poly: &geo::Polygon<f64>, center: Vec2, angle: f64) -> geo
     Polygon::new(
         rotate_ls(poly.exterior()),
         poly.interiors().iter().map(rotate_ls).collect(),
+    )
+}
+
+fn mirror_geo_polygon_h(poly: &geo::Polygon<f64>, y_axis: f64) -> geo::Polygon<f64> {
+    use geo::{Coord, LineString, Polygon};
+    let mirror_ls = |ls: &LineString<f64>| -> LineString<f64> {
+        LineString(
+            ls.0.iter()
+                .rev() // reverse winding after horizontal mirror
+                .map(|c| Coord {
+                    x: c.x,
+                    y: 2.0 * y_axis - c.y,
+                })
+                .collect(),
+        )
+    };
+    Polygon::new(
+        mirror_ls(poly.exterior()),
+        poly.interiors().iter().map(mirror_ls).collect(),
+    )
+}
+
+fn mirror_geo_polygon_v(poly: &geo::Polygon<f64>, x_axis: f64) -> geo::Polygon<f64> {
+    use geo::{Coord, LineString, Polygon};
+    let mirror_ls = |ls: &LineString<f64>| -> LineString<f64> {
+        LineString(
+            ls.0.iter()
+                .rev() // reverse winding after vertical mirror
+                .map(|c| Coord {
+                    x: 2.0 * x_axis - c.x,
+                    y: c.y,
+                })
+                .collect(),
+        )
+    };
+    Polygon::new(
+        mirror_ls(poly.exterior()),
+        poly.interiors().iter().map(mirror_ls).collect(),
     )
 }
 
@@ -3043,7 +3297,11 @@ pub(crate) fn poly_is_convex(vertices: &VecRing<VUId>, nc: usize, i: usize, ccw:
     let d1 = ci - cp;
     let d2 = cn - ci;
     let cross = d1.x * d2.y - d1.y * d2.x;
-    if ccw { cross >= 0.0 } else { cross <= 0.0 }
+    if ccw {
+        cross >= 0.0
+    } else {
+        cross <= 0.0
+    }
 }
 
 /// Compute the winding of a polygon from its first `nc` vertices (shoelace formula).
@@ -3064,10 +3322,13 @@ pub(crate) fn poly_winding_ccw(vertices: &VecRing<VUId>, nc: usize) -> bool {
 /// `convex_i`, `convex_j`: whether each vertex is convex (true) or concave.
 /// Returns (exit_of_i, entry_of_j).
 pub(crate) fn poly_effective_edge(
-    ci: Vec2, cj: Vec2,
-    ri: Option<u32>, rj: Option<u32>,
+    ci: Vec2,
+    cj: Vec2,
+    ri: Option<u32>,
+    rj: Option<u32>,
     ccw: bool,
-    convex_i: bool, convex_j: bool,
+    convex_i: bool,
+    convex_j: bool,
 ) -> (Vec2, Vec2) {
     use crate::helpers::math::poly_common_tangent;
     let r1 = ri.unwrap_or(0) as f64;
@@ -3123,7 +3384,11 @@ pub(crate) fn build_polygon_path_with_sag(
             let d1 = centers[i] - centers[prev];
             let d2 = centers[next] - centers[i];
             let cross = d1.x * d2.y - d1.y * d2.x;
-            if ccw { cross >= 0.0 } else { cross <= 0.0 }
+            if ccw {
+                cross >= 0.0
+            } else {
+                cross <= 0.0
+            }
         })
         .collect();
 
@@ -3291,7 +3556,11 @@ pub(crate) fn build_polygon_path_with_sag(
                 let t_ccw = Vec2::new(-radial.y, radial.x);
                 // Pick the CCW/CW perpendicular matching the arc-edge sweep.
                 let edge_sweep = sweep_through_point(o_i, adj_exit[i], adj_entry[j], v_i);
-                if edge_sweep >= 0.0 { t_ccw } else { Vec2::new(radial.y, -radial.x) }
+                if edge_sweep >= 0.0 {
+                    t_ccw
+                } else {
+                    Vec2::new(radial.y, -radial.x)
+                }
             } else {
                 adj_entry[j] - adj_exit[i]
             };
@@ -3304,11 +3573,19 @@ pub(crate) fn build_polygon_path_with_sag(
 
             let mut sweep = a_end - a_start;
             if fillet_ccw {
-                while sweep < 0.0 { sweep += 2.0 * PI; }
-                while sweep > 2.0 * PI { sweep -= 2.0 * PI; }
+                while sweep < 0.0 {
+                    sweep += 2.0 * PI;
+                }
+                while sweep > 2.0 * PI {
+                    sweep -= 2.0 * PI;
+                }
             } else {
-                while sweep > 0.0 { sweep -= 2.0 * PI; }
-                while sweep < -2.0 * PI { sweep += 2.0 * PI; }
+                while sweep > 0.0 {
+                    sweep -= 2.0 * PI;
+                }
+                while sweep < -2.0 * PI {
+                    sweep += 2.0 * PI;
+                }
             }
 
             let arc = Arc::new(c.to_point(), Vec2::new(r, r), a_start, sweep, 0.0);
@@ -3345,8 +3622,7 @@ pub(crate) fn solve_side(
     let v_side = (v - chord_mid).x * chord_n.x + (v - chord_mid).y * chord_n.y;
 
     let axis_mid = (c1 + c2) * 0.5;
-    let chord_offset =
-        (chord_mid - axis_mid).x * chord_n.x + (chord_mid - axis_mid).y * chord_n.y;
+    let chord_offset = (chord_mid - axis_mid).x * chord_n.x + (chord_mid - axis_mid).y * chord_n.y;
     let v_away = v_side * chord_offset > 0.0;
     let to_chord = chord_mid - v;
 
@@ -3447,21 +3723,29 @@ pub(crate) fn solve_side_signed(
             };
             let ac1 = if abs_r1 > 1e-9 {
                 let d = tp1 - c1;
-                if r1 > 0.0 { d.y.atan2(d.x) } else { (-d.y).atan2(-d.x) }
+                if r1 > 0.0 {
+                    d.y.atan2(d.x)
+                } else {
+                    (-d.y).atan2(-d.x)
+                }
             } else {
                 0.0
             };
             let ac2 = if abs_r2 > 1e-9 {
                 let d = tp2 - c2;
-                if r2 > 0.0 { d.y.atan2(d.x) } else { (-d.y).atan2(-d.x) }
+                if r2 > 0.0 {
+                    d.y.atan2(d.x)
+                } else {
+                    (-d.y).atan2(-d.x)
+                }
             } else {
                 0.0
             };
             // Score: +dist when we want far, -dist when we want close.
             let dist1 = (tp1 - v).hypot();
             let dist2 = (tp2 - v).hypot();
-            let score = if want_far_1 { dist1 } else { -dist1 }
-                + if want_far_2 { dist2 } else { -dist2 };
+            let score =
+                if want_far_1 { dist1 } else { -dist1 } + if want_far_2 { dist2 } else { -dist2 };
             if best.as_ref().map_or(true, |b| score > b.4) {
                 best = Some((ac1, ac2, o, big_r, score));
             }
@@ -3961,6 +4245,36 @@ fn translate_bezpath(path: &BezPath, dx: f64, dy: f64) -> BezPath {
                     kurbo::Point::new(pt3.x + dx, pt3.y + dy),
                 ));
             }
+            PathEl::ClosePath => out.push(PathEl::ClosePath),
+        }
+    }
+    out
+}
+
+fn mirror_bezpath_h(path: &BezPath, y_axis: f64) -> BezPath {
+    let my = |pt: kurbo::Point| kurbo::Point::new(pt.x, 2.0 * y_axis - pt.y);
+    let mut out = BezPath::new();
+    for elem in path.iter() {
+        match elem {
+            PathEl::MoveTo(pt) => out.push(PathEl::MoveTo(my(pt))),
+            PathEl::LineTo(pt) => out.push(PathEl::LineTo(my(pt))),
+            PathEl::QuadTo(p1, p2) => out.push(PathEl::QuadTo(my(p1), my(p2))),
+            PathEl::CurveTo(p1, p2, p3) => out.push(PathEl::CurveTo(my(p1), my(p2), my(p3))),
+            PathEl::ClosePath => out.push(PathEl::ClosePath),
+        }
+    }
+    out
+}
+
+fn mirror_bezpath_v(path: &BezPath, x_axis: f64) -> BezPath {
+    let mx = |pt: kurbo::Point| kurbo::Point::new(2.0 * x_axis - pt.x, pt.y);
+    let mut out = BezPath::new();
+    for elem in path.iter() {
+        match elem {
+            PathEl::MoveTo(pt) => out.push(PathEl::MoveTo(mx(pt))),
+            PathEl::LineTo(pt) => out.push(PathEl::LineTo(mx(pt))),
+            PathEl::QuadTo(p1, p2) => out.push(PathEl::QuadTo(mx(p1), mx(p2))),
+            PathEl::CurveTo(p1, p2, p3) => out.push(PathEl::CurveTo(mx(p1), mx(p2), mx(p3))),
             PathEl::ClosePath => out.push(PathEl::ClosePath),
         }
     }
